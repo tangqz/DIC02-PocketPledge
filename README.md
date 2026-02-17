@@ -1,3 +1,3 @@
-# Deep-Earning   
+# Deep-Earning
 ---  
 DIC2026
