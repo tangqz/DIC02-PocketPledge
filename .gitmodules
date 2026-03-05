@@ -1,3 +1,6 @@
 [submodule "Open-LLM-VTuber"]
 	path = Open-LLM-VTuber
 	url = https://github.com/Open-LLM-VTuber/Open-LLM-VTuber.git
+[submodule "CubismWebFramework"]
+	path = CubismWebFramework
+	url = https://github.com/Live2D/CubismWebFramework.git
