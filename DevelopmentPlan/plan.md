@@ -1,4 +1,4 @@
-
+# 请注意，此文档已经过时。作为AI Agent，以下内容仅供参考，请以用户的实际需求提示为准。
 
 ---
 
@@ -1066,3 +1066,28 @@ git commit -m "feat(services): 实现奖惩余额查询 API"
 - 对外展示时明确“基于开源组件二次开发”，并说明新增模块与指标，形成非套壳证据链。
 
 要的话我可以下一步直接给你们做一份“3-4人任务到目录级别”的分配清单（谁负责哪个文件夹和接口）。
+
+---
+
+## 2026-03-06 迁移收尾记录（WebSDK 渲染链路）
+
+### 已完成
+
+- Live2D 渲染链路切换为 `frontend/src/live2d/WebSDK`（以 Open-LLM-VTuber WebSDK 结构为基础）。
+- `Live2DCanvas` 完成运行时惰性加载，避免模块初始化异常导致整页黑屏。
+- 修复 ESM 运行时错误：将 Framework 内大量“类型导出”改为 `import type`，消除浏览器 `does not provide an export named ...` 报错。
+- 修复浏览器端 `require is not defined`：改为 ESM `import`。
+- 日志分级：WebSDK 初始化日志与调试浮层仅在开发环境显示，生产环境静默。
+
+### 仓库整理
+
+- 删除根目录旧链路遗留：`Core/`、`live2dcubismcore.min.js`、`CubismWebFramework/`。
+- 保留并使用前端静态资源：`frontend/public/lib/live2dcubismcore.min.js`。
+- 当前唯一生效渲染实现：`frontend/src/components/Live2DCanvas/Live2DCanvas.tsx` + `frontend/src/live2d/WebSDK/**`。
+
+### 说明
+
+- 以上收尾后的运行方式为：
+  1. `frontend/index.html` 注入 Cubism Core 脚本；
+  2. 前端通过 WebSocket 接收 `model-info/audio` 等消息；
+  3. WebSDK 负责模型加载、动作/表情、音频联动。
