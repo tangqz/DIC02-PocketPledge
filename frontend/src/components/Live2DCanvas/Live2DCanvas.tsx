@@ -78,13 +78,48 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
 
     if (audioRef.current) {
       audioRef.current.pause();
-      URL.revokeObjectURL(audioRef.current.src);
+      if (audioRef.current.src.startsWith("blob:")) {
+        URL.revokeObjectURL(audioRef.current.src);
+      }
       audioRef.current = null;
     }
 
     const audio = new Audio(url);
     audioRef.current = audio;
-    await audio.play();
+    return new Promise<void>((resolve, reject) => {
+      const onEnded = () => {
+        audio.removeEventListener("ended", onEnded);
+        audio.removeEventListener("error", onError);
+        URL.revokeObjectURL(url);
+        if (audioRef.current === audio) {
+          audioRef.current = null;
+        }
+        resolve();
+      };
+
+      const onError = () => {
+        audio.removeEventListener("ended", onEnded);
+        audio.removeEventListener("error", onError);
+        URL.revokeObjectURL(url);
+        if (audioRef.current === audio) {
+          audioRef.current = null;
+        }
+        reject(new Error("Audio playback error"));
+      };
+
+      audio.addEventListener("ended", onEnded);
+      audio.addEventListener("error", onError);
+
+      audio.play().catch((err) => {
+        audio.removeEventListener("ended", onEnded);
+        audio.removeEventListener("error", onError);
+        URL.revokeObjectURL(url);
+        if (audioRef.current === audio) {
+          audioRef.current = null;
+        }
+        reject(err);
+      });
+    });
   };
 
   // Runtime diagnostics overlay
@@ -137,6 +172,10 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
         if (audioRef.current) {
           audioRef.current.pause();
           audioRef.current.currentTime = 0;
+          if (audioRef.current.src.startsWith("blob:")) {
+            URL.revokeObjectURL(audioRef.current.src);
+          }
+          audioRef.current = null;
         }
       },
     }),
@@ -183,6 +222,10 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
       sdkRef.current?.LAppDelegate?.releaseInstance?.();
       if (audioRef.current) {
         audioRef.current.pause();
+        if (audioRef.current.src.startsWith("blob:")) {
+          URL.revokeObjectURL(audioRef.current.src);
+        }
+        audioRef.current = null;
       }
     };
   }, [config.url]);

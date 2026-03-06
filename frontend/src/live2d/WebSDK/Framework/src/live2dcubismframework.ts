@@ -19,8 +19,8 @@ export function strtod(s: string, endPtr: string[]): number {
   for (let i = 1; ; i++) {
     const testC: string = s.slice(i - 1, i);
 
-    // 指数・マイナスの可能性があるのでスキップする
-    if (testC == 'e' || testC == '-' || testC == 'E') {
+    // 指数・符号の可能性があるのでスキップする
+    if (testC == 'e' || testC == 'E' || testC == '-' || testC == '+') {
       continue;
     } // 文字列の範囲を広げていく
 

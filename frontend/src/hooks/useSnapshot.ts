@@ -31,6 +31,7 @@ export function useSnapshot({
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const videoCacheRef = useRef<Map<string, HTMLVideoElement>>(new Map());
   const onCaptureRef = useRef(onCapture);
   onCaptureRef.current = onCapture;
   const [cameraReady, setCameraReady] = useState(false);
@@ -102,13 +103,22 @@ export function useSnapshot({
       const ctx = canvas.getContext("2d");
       if (!ctx) return null;
 
-      // Create a temporary video element
-      const video = document.createElement("video");
-      video.srcObject = stream;
-      video.muted = true;
-      video.playsInline = true;
+      const streamKey = track.id;
+      let video = videoCacheRef.current.get(streamKey);
+      if (!video) {
+        video = document.createElement("video");
+        video.srcObject = stream;
+        video.muted = true;
+        video.playsInline = true;
+        video.autoplay = true;
+        video.play().catch(() => undefined);
+        videoCacheRef.current.set(streamKey, video);
+      }
 
-      // This is synchronous if video is already playing
+      if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+        return null;
+      }
+
       try {
         ctx.drawImage(video, 0, 0, w, h);
         return canvas.toDataURL("image/jpeg", 0.7).split(",")[1];
@@ -161,6 +171,11 @@ export function useSnapshot({
     return () => {
       cameraStreamRef.current?.getTracks().forEach((t) => t.stop());
       screenStreamRef.current?.getTracks().forEach((t) => t.stop());
+      videoCacheRef.current.forEach((video) => {
+        video.pause();
+        video.srcObject = null;
+      });
+      videoCacheRef.current.clear();
     };
   }, []);
 

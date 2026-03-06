@@ -103,13 +103,10 @@ export class CubismPose {
 
   /**
    * インスタンスを破棄する
-   * @param pose 対象のCubismPose
+   * @param _pose 対象のCubismPose
+   * @note JavaScript/TypeScript ではGCにより解放されるため、互換性維持のno-op。
    */
-  public static delete(pose: CubismPose): void {
-    if (pose != null) {
-      pose = null;
-    }
-  }
+  public static delete(_pose: CubismPose): void {}
 
   /**
    * モデルのパラメータの更新

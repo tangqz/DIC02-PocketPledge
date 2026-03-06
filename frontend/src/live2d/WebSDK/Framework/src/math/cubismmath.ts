@@ -252,7 +252,7 @@ export class CubismMath {
     c: number,
     d: number
   ): number {
-    if (this.sqrt(a) < CubismMath.Epsilon) {
+    if (this.abs(a) < CubismMath.Epsilon) {
       return this.range(this.quadraticEquation(b, c, d), 0.0, 1.0);
     }
 
@@ -267,7 +267,7 @@ export class CubismMath {
     const discriminant: number = q2 * q2 + p3 * p3 * p3;
 
     const center = 0.5;
-    const threshold: number = center + 0.01;
+    const threshold: number = 0.01;
 
     if (discriminant < 0.0) {
       const mp3: number = -p / 3.0;
@@ -295,7 +295,7 @@ export class CubismMath {
       return this.range(root3, 0.0, 1.0);
     }
 
-    if (discriminant == 0.0) {
+    if (this.abs(discriminant) < CubismMath.Epsilon) {
       let u1: number;
       if (q2 < 0.0) {
         u1 = this.cbrt(-q2);
@@ -334,7 +334,7 @@ export class CubismMath {
       isNaN(divisor)
     ) {
       console.warn(
-        `divided: ${dividend}, divisor: ${divisor} mod() returns 'NaN'.`
+        `dividend: ${dividend}, divisor: ${divisor} mod() returns 'NaN'.`
       );
       return NaN;
     }

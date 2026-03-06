@@ -52,12 +52,15 @@ export function useAudioQueue(callbacks: Callbacks) {
     setAgentSpeaking(true);
 
     // 3. Play audio with lip sync (blocks until done)
-    await callbacks.playAudio(task.audio);
-
-    processingRef.current = false;
-
-    // Process next in queue
-    processNext();
+    try {
+      await callbacks.playAudio(task.audio);
+    } catch (error) {
+      callbacks.stopAudio();
+      console.error("Audio playback failed in useAudioQueue:", error);
+    } finally {
+      processingRef.current = false;
+      processNext();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [callbacks]);
 

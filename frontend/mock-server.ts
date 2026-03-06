@@ -147,26 +147,6 @@ wss.on("connection", (ws) => {
           break;
         }
 
-        case "pause-request": {
-          ws.send(
-            JSON.stringify({
-              type: "supervision-state-change",
-              state: "paused",
-            }),
-          );
-          break;
-        }
-
-        case "resume-request": {
-          ws.send(
-            JSON.stringify({
-              type: "supervision-state-change",
-              state: "active",
-            }),
-          );
-          break;
-        }
-
         case "frontend-playback-complete": {
           console.log("[Mock Server] Playback complete acknowledged");
           break;
