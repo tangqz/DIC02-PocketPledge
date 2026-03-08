@@ -2,3 +2,11 @@
 __pycache__/
 *.pyc
 .DS_Store
+.claude/
+.vite/
+node_modules/
+dist/
+frontend/dist/
+frontend/node_modules/
+frontend/temp-openllm-web/
+*.log

@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+/* ── Custom Design Tokens ── */
+@theme {
+  --color-surface: oklch(0.15 0.01 260);
+  --color-surface-elevated: oklch(0.2 0.015 260);
+  --color-surface-glass: oklch(0.18 0.01 260 / 0.7);
+  --color-accent: oklch(0.7 0.15 200);
+  --color-accent-soft: oklch(0.7 0.15 200 / 0.15);
+  --color-danger: oklch(0.65 0.2 25);
+  --color-success: oklch(0.7 0.18 145);
+  --color-warning: oklch(0.75 0.15 70);
+  --font-family-display: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-family-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* ── Base layer ── */
+@layer base {
+  html {
+    font-family: var(--font-family-display);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::-webkit-scrollbar {
+    width: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: oklch(0.4 0 0 / 0.3);
+    border-radius: 2px;
+  }
+}
+
+/* ── Animations ── */
+@keyframes breathing {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes number-pop {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+  }
+}

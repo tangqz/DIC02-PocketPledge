@@ -1,0 +1,173 @@
+/* ────────────────────────────────────────────────
+ *  i18n  –  Lightweight bilingual (zh / en) translation system
+ *
+ *  Usage:
+ *    const { t } = useI18n();
+ *    t("setup.title")  → "环境校准" | "Environment Calibration"
+ * ──────────────────────────────────────────────── */
+
+import React, { createContext, useContext, useState, useCallback, useMemo } from "react";
+
+export type Locale = "zh" | "en";
+
+type TranslationDict = Record<string, string>;
+
+// ── Chinese translations ──
+const zh: TranslationDict = {
+  // App
+  "app.title": "Study Buddy",
+
+  // Setup
+  "setup.title": "环境校准",
+  "setup.cameraLabel": "摄像头预览",
+  "setup.cameraGranted": "摄像头已就绪",
+  "setup.cameraDenied": "摄像头未授权",
+  "setup.cameraPending": "请求权限中…",
+  "setup.screenShare": "屏幕共享",
+  "setup.screenReady": "屏幕共享已就绪",
+  "setup.screenNotReady": "未开启屏幕共享",
+  "setup.micLabel": "麦克风",
+  "setup.start": "开始专注",
+  "setup.duration": "专注时长",
+  "setup.minutes": "分钟",
+  "setup.chatHint": "和你的学习伙伴聊聊今天的计划吧",
+  "setup.agentStartHint": "与助手讨论好计划后，助手会帮你开始专注",
+
+  // Focus
+  "focus.pause": "暂停",
+  "focus.resume": "继续",
+  "focus.subtitle": "字幕区域",
+  "focus.sendPlaceholder": "输入消息…",
+  "focus.send": "发送",
+  "focus.openChat": "打开对话",
+
+  // Status
+  "status.balance": "余额",
+  "status.timer": "计时",
+  "status.state.active": "专注中",
+  "status.state.paused": "已暂停",
+  "status.state.setup": "准备中",
+  "status.state.completed": "已完成",
+  "status.connected": "已连接",
+  "status.disconnected": "未连接",
+
+  // Summary
+  "summary.title": "专注报告",
+  "summary.totalTime": "总时长",
+  "summary.finalBalance": "最终余额",
+  "summary.deductions": "总扣除",
+  "summary.rewards": "总奖励",
+  "summary.transactionLog": "明细记录",
+  "summary.restart": "重新开始",
+  "summary.noTransactions": "暂无明细",
+
+  // Voice
+  "voice.off": "语音已关闭",
+  "voice.idle": "待命",
+  "voice.listening": "正在聆听…",
+  "voice.muted": "已静音",
+
+  // Live2D
+  "live2d.loading": "加载模型中…",
+  "live2d.error": "模型加载失败",
+
+  // Chat
+  "chat.agent": "助手",
+  "chat.user": "我",
+};
+
+// ── English translations ──
+const en: TranslationDict = {
+  "app.title": "Study Buddy",
+
+  "setup.title": "Environment Calibration",
+  "setup.cameraLabel": "Camera Preview",
+  "setup.cameraGranted": "Camera Ready",
+  "setup.cameraDenied": "Camera Not Authorized",
+  "setup.cameraPending": "Requesting Permission…",
+  "setup.screenShare": "Screen Share",
+  "setup.screenReady": "Screen Share Ready",
+  "setup.screenNotReady": "Screen Share Not Enabled",
+  "setup.micLabel": "Microphone",
+  "setup.start": "Start Focus",
+  "setup.duration": "Focus Duration",
+  "setup.minutes": "min",
+  "setup.chatHint": "Chat with your study buddy about today's plan",
+  "setup.agentStartHint": "Your agent will start the session once you agree on a plan",
+
+  "focus.pause": "Pause",
+  "focus.resume": "Resume",
+  "focus.subtitle": "Subtitles",
+  "focus.sendPlaceholder": "Type a message…",
+  "focus.send": "Send",
+  "focus.openChat": "Open Chat",
+
+  "status.balance": "Balance",
+  "status.timer": "Timer",
+  "status.state.active": "Focusing",
+  "status.state.paused": "Paused",
+  "status.state.setup": "Setting Up",
+  "status.state.completed": "Completed",
+  "status.connected": "Connected",
+  "status.disconnected": "Disconnected",
+
+  "summary.title": "Focus Report",
+  "summary.totalTime": "Total Time",
+  "summary.finalBalance": "Final Balance",
+  "summary.deductions": "Total Deductions",
+  "summary.rewards": "Total Rewards",
+  "summary.transactionLog": "Transaction Log",
+  "summary.restart": "Start Again",
+  "summary.noTransactions": "No transactions yet",
+
+  "voice.off": "Voice Off",
+  "voice.idle": "Standby",
+  "voice.listening": "Listening…",
+  "voice.muted": "Muted",
+
+  "live2d.loading": "Loading model…",
+  "live2d.error": "Failed to load model",
+
+  "chat.agent": "Agent",
+  "chat.user": "Me",
+};
+
+const dictionaries: Record<Locale, TranslationDict> = { zh, en };
+
+// ── Context ──
+interface I18nContextValue {
+  locale: Locale;
+  setLocale: (l: Locale) => void;
+  t: (key: string) => string;
+}
+
+const I18nContext = createContext<I18nContextValue | null>(null);
+
+/** Detect browser language; fallback to 'zh' */
+function detectLocale(): Locale {
+  const lang = navigator.language.toLowerCase();
+  if (lang.startsWith("zh")) return "zh";
+  return "en";
+}
+
+export function I18nProvider({ children }: { children: React.ReactNode }) {
+  const [locale, setLocale] = useState<Locale>(detectLocale);
+
+  const t = useCallback(
+    (key: string): string => {
+      return dictionaries[locale][key] ?? key;
+    },
+    [locale],
+  );
+
+  const value = useMemo(() => ({ locale, setLocale, t }), [locale, t]);
+
+  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+}
+
+/** Hook to access translations */
+export function useI18n(): I18nContextValue {
+  const ctx = useContext(I18nContext);
+  if (!ctx) throw new Error("useI18n must be used inside <I18nProvider>");
+  return ctx;
+}
