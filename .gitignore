@@ -10,3 +10,8 @@ frontend/dist/
 frontend/node_modules/
 frontend/temp-openllm-web/
 *.log
+backend/.env
+backend/.venv/
+backend/.tmp/
+.env
+dify_orchestration/exported_dsl/
