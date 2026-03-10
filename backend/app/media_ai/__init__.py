@@ -71,7 +71,7 @@ async def process_text_chat(
 				}
 	except Exception:
 		logger.exception("process_text_chat failed, falling back to local response")
-		fallback_text = "我还在，先继续当前任务。"
+		fallback_text = "当前对话服务暂时不可用，我先陪你继续当前任务。"
 		yield {
 			"text": fallback_text,
 			"expression": "neutral",

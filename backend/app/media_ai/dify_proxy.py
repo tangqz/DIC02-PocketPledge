@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 
 conversation_ids: dict[str, str] = {}
 
+RETRYABLE_STATUS_CODES = {502, 503, 504}
+
 
 def _pick_outputs_payload(payload: Any) -> dict[str, Any]:
 	if isinstance(payload, dict):
@@ -261,6 +263,20 @@ class DifyClient:
 		self.vision_api_key = os.getenv("DIFY_VISION_API_KEY", self.chat_api_key)
 		self.system_agent_api_key = os.getenv("DIFY_SYSTEM_AGENT_API_KEY", self.chat_api_key)
 		self.timeout = float(os.getenv("MEDIA_AI_HTTP_TIMEOUT", "20"))
+		self.retry_attempts = max(1, int(os.getenv("DIFY_HTTP_RETRY_ATTEMPTS", "2")))
+		self.retry_backoff_seconds = float(os.getenv("DIFY_HTTP_RETRY_BACKOFF_SECONDS", "0.8"))
+
+	def _should_retry(self, exc: Exception) -> bool:
+		if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in RETRYABLE_STATUS_CODES:
+			return True
+		if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError)):
+			return True
+		return False
+
+	async def _sleep_before_retry(self, attempt: int, endpoint: str, exc: Exception) -> None:
+		delay = self.retry_backoff_seconds * attempt
+		logger.warning("Dify request failed, retrying endpoint=%s attempt=%s delay=%.2fs error=%s", endpoint, attempt, delay, exc)
+		await asyncio.sleep(delay)
 
 	async def stream_chat(
 		self,
@@ -294,30 +310,42 @@ class DifyClient:
 				uploaded_files = await self._upload_chat_images(client, session_id, images)
 				if uploaded_files:
 					payload["files"] = uploaded_files
-			async with client.stream(
-				"POST",
-				f"{self.base_url}{self.chat_endpoint}",
-				json=payload,
-				headers=headers,
-			) as response:
-				response.raise_for_status()
-				async for line in response.aiter_lines():
-					if not line or not line.startswith("data:"):
-						continue
-					data = line[5:].strip()
-					if data == "[DONE]":
-						break
-					try:
-						event = json.loads(data)
-					except json.JSONDecodeError:
-						logger.debug("skip non-json SSE payload: %s", data)
-						continue
-					conversation_id = event.get("conversation_id")
-					if isinstance(conversation_id, str) and conversation_id:
-						conversation_ids[session_id] = conversation_id
-					text = _pick_text_payload(event)
-					if text:
-						yield text
+			last_error: Exception | None = None
+			for attempt in range(1, self.retry_attempts + 1):
+				try:
+					async with client.stream(
+						"POST",
+						f"{self.base_url}{self.chat_endpoint}",
+						json=payload,
+						headers=headers,
+					) as response:
+						response.raise_for_status()
+						async for line in response.aiter_lines():
+							if not line or not line.startswith("data:"):
+								continue
+							data = line[5:].strip()
+							if data == "[DONE]":
+								break
+							try:
+								event = json.loads(data)
+							except json.JSONDecodeError:
+								logger.debug("skip non-json SSE payload: %s", data)
+								continue
+							conversation_id = event.get("conversation_id")
+							if isinstance(conversation_id, str) and conversation_id:
+								conversation_ids[session_id] = conversation_id
+							text = _pick_text_payload(event)
+							if text:
+								yield text
+					return
+				except Exception as exc:
+					last_error = exc
+					if attempt >= self.retry_attempts or not self._should_retry(exc):
+						raise
+					await self._sleep_before_retry(attempt, self.chat_endpoint, exc)
+
+			if last_error is not None:
+				raise last_error
 
 	async def _upload_chat_images(
 		self,
@@ -457,13 +485,24 @@ class DifyClient:
 		}
 
 		async with httpx.AsyncClient(timeout=self.timeout) as client:
-			response = await client.post(
-				f"{self.base_url}{self.system_agent_endpoint}",
-				json=payload,
-				headers=headers,
-			)
-			response.raise_for_status()
-			return _pick_outputs_payload(response.json())
+			last_error: Exception | None = None
+			for attempt in range(1, self.retry_attempts + 1):
+				try:
+					response = await client.post(
+						f"{self.base_url}{self.system_agent_endpoint}",
+						json=payload,
+						headers=headers,
+					)
+					response.raise_for_status()
+					return _pick_outputs_payload(response.json())
+				except Exception as exc:
+					last_error = exc
+					if attempt >= self.retry_attempts or not self._should_retry(exc):
+						raise
+					await self._sleep_before_retry(attempt, self.system_agent_endpoint, exc)
+
+			if last_error is not None:
+				raise last_error
 
 
 def get_dify_client() -> MockDifyClient | DifyClient:

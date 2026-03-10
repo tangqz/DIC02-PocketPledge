@@ -189,7 +189,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 12393 --reload
 联调前请确认：
 
 - `MEDIA_AI_USE_REAL_DIFY=1`
-- `DIFY_API_BASE` 指向你的 Dify 服务根地址
+- `DIFY_API_BASE` 指向你的 Dify 服务根地址；如果 Dify 不在默认端口，请显式带上端口，例如 `http://your-host:8088/v1`
 - 三个 API Key 分别对应聊天 Agent、系统 Agent、视觉判定工作流
 
 如果只想本地跑界面和网关逻辑，不想连外部 Dify，把 `MEDIA_AI_USE_REAL_DIFY` 改回 `0` 即可。
