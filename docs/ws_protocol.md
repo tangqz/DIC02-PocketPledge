@@ -74,6 +74,7 @@
 
 ### Agent 输出
 
+- user-transcript
 - agent-text-chunk
 - agent-text-end
 - audio

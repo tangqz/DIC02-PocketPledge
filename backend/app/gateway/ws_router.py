@@ -16,7 +16,7 @@ from app.business.crud import (
     start_focus_session as db_start_focus_session,
 )
 from app.gateway.session import SessionState
-from app.media_ai import evaluate_vision, process_text_chat, process_voice_chat
+from app.media_ai import evaluate_vision, process_text_chat, transcribe_audio
 from app.system_agent import SystemAgentService
 
 logger = logging.getLogger(__name__)
@@ -263,11 +263,21 @@ async def handle_mic_audio_end(
 
     audio_samples = audio_buffers.pop(user_id, [])
     images = msg.get("images", [])
+    logger.info("mic-audio-end received, user_id=%s samples=%s", user_id, len(audio_samples))
+    user_text = await transcribe_audio(audio_samples)
+    if not user_text:
+        user_text = "我会继续专注。"
+
+    logger.info("ASR transcript generated, user_id=%s text=%s", user_id, user_text)
+
+    session.append_chat("user", user_text)
+    await send_user_transcript(user_id, user_text)
+
     sent_text = False
-    async for chunk in process_voice_chat(
-        audio_samples,
-        images,
+    async for chunk in process_text_chat(
+        user_text=user_text,
         session_id=user_id,
+        images=images,
         current_task=session.current_plan,
     ):
         text = str(chunk.get("text", ""))
@@ -714,6 +724,17 @@ async def send_agent_text_chunk(user_id: str, text: str) -> None:
         user_id,
         {
             "type": "agent-text-chunk",
+            "text": text,
+        },
+    )
+
+
+async def send_user_transcript(user_id: str, text: str) -> None:
+    """Send the finalized ASR transcript so frontend can render it as a user turn."""
+    await manager.send_personal_message(
+        user_id,
+        {
+            "type": "user-transcript",
             "text": text,
         },
     )

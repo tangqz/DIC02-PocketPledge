@@ -129,6 +129,7 @@ function AuthenticatedApp() {
   const handleSpeechEnd = useCallback(
     (audio: Float32Array) => {
       if (micMuted) return;
+      console.log("[Voice] Sending speech segment, samples=", audio.length);
       const samples = Array.from(audio);
       const CHUNK_SIZE = 4096;
       for (let i = 0; i < samples.length; i += CHUNK_SIZE) {
@@ -141,6 +142,7 @@ function AuthenticatedApp() {
         type: "mic-audio-end",
         images: [],
       });
+      console.log("[Voice] Sent mic-audio-end");
     },
     [send, micMuted],
   );

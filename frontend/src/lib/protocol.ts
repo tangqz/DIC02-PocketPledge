@@ -115,6 +115,12 @@ export interface AgentTextChunk {
   text: string;
 }
 
+/** Final ASR transcript for one user voice turn */
+export interface UserTranscript {
+  type: "user-transcript";
+  text: string;
+}
+
 /** Marks the end of one Agent turn's text stream */
 export interface AgentTextEnd {
   type: "agent-text-end";
@@ -232,6 +238,7 @@ export interface ControlMessage {
 export type RxMessage =
   | AudioMessage
   | AgentTextChunk
+  | UserTranscript
   | AgentTextEnd
   | SupervisionStateChange
   | BalanceUpdate

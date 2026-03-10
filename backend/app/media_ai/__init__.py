@@ -83,25 +83,31 @@ async def process_text_chat(
 		}
 
 
+async def transcribe_audio(audio_samples: list[float]) -> str:
+	"""Convert raw float PCM samples into one user utterance string."""
+	asr_service = get_asr_service()
+	user_text = await asr_service.audio_samples_to_text(audio_samples)
+	return user_text.strip()
+
+
 async def process_voice_chat(
 	audio_samples: list[float],
 	images: list[dict[str, Any]] | None = None,
 	session_id: str = "anonymous",
 	current_task: str | None = None,
 ) -> AsyncIterator[dict[str, str]]:
-    """Transcribe audio first, then reuse the same text chat pipeline."""
-    asr_service = get_asr_service()
-    user_text = await asr_service.audio_samples_to_text(audio_samples)
-    if not user_text:
-        user_text = "我会继续专注。"
+	"""Transcribe audio first, then reuse the same text chat pipeline."""
+	user_text = await transcribe_audio(audio_samples)
+	if not user_text:
+		user_text = "我会继续专注。"
 
-    async for chunk in process_text_chat(
-        user_text=user_text,
-        session_id=session_id,
-        images=images,
-        current_task=current_task,
-    ):
-        yield chunk
+	async for chunk in process_text_chat(
+		user_text=user_text,
+		session_id=session_id,
+		images=images,
+		current_task=current_task,
+	):
+		yield chunk
 
 
 async def evaluate_vision(
@@ -126,4 +132,5 @@ __all__ = [
 	"evaluate_vision",
 	"process_text_chat",
 	"process_voice_chat",
+	"transcribe_audio",
 ]

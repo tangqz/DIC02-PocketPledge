@@ -45,12 +45,27 @@ export function useWebSocket({
   autoConnect = true,
 }: UseWebSocketOptions = {}) {
   const wsRef = useRef<WebSocket | null>(null);
+  const pendingMessagesRef = useRef<TxMessage[]>([]);
   const reconnectCountRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const manualCloseRef = useRef(false);
   const onMessageRef = useRef(onMessage);
   onMessageRef.current = onMessage;
 
   const { setIsConnected } = useSessionStore.getState();
+
+  const flushPendingMessages = useCallback(() => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || pendingMessagesRef.current.length === 0) {
+      return;
+    }
+
+    const queued = pendingMessagesRef.current.splice(0, pendingMessagesRef.current.length);
+    for (const msg of queued) {
+      ws.send(JSON.stringify(msg));
+    }
+    console.log("[WS] Flushed queued messages:", queued.map((msg) => msg.type));
+  }, []);
 
   const connect = useCallback(() => {
     // Don't double-connect
@@ -69,22 +84,25 @@ export function useWebSocket({
       return;
     }
     const wsUrl = `${url}?token=${encodeURIComponent(token)}`;
+    manualCloseRef.current = false;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
+    console.log("[WS] Connecting to", wsUrl);
 
     ws.onopen = () => {
       console.log("[WS] Connected to", url);
       setIsConnected(true);
       reconnectCountRef.current = 0;
+      flushPendingMessages();
     };
 
-    ws.onclose = () => {
-      console.log("[WS] Disconnected");
+    ws.onclose = (event) => {
+      console.log("[WS] Disconnected", { code: event.code, reason: event.reason });
       setIsConnected(false);
       wsRef.current = null;
 
       // Auto-reconnect
-      if (reconnectCountRef.current < MAX_RECONNECT_ATTEMPTS) {
+      if (!manualCloseRef.current && reconnectCountRef.current < MAX_RECONNECT_ATTEMPTS) {
         reconnectCountRef.current++;
         reconnectTimerRef.current = setTimeout(connect, RECONNECT_DELAY);
       }
@@ -104,7 +122,7 @@ export function useWebSocket({
         console.warn("[WS] Invalid message:", err);
       }
     };
-  }, [url]);
+  }, [flushPendingMessages, url]);
 
   /** Dispatch incoming messages to the appropriate stores */
   const dispatch = useCallback((msg: RxMessage) => {
@@ -115,6 +133,11 @@ export function useWebSocket({
       // ── Agent verbal output ──
       case "agent-text-chunk":
         chat.appendStreamingText(msg.text);
+        break;
+
+      case "user-transcript":
+        console.log("[WS] Received user transcript:", msg.text);
+        chat.addMessage("user", msg.text);
         break;
 
       case "agent-text-end":
@@ -164,15 +187,20 @@ export function useWebSocket({
   const send = useCallback((msg: TxMessage) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      console.warn("[WS] Not connected, cannot send:", msg.type);
+      pendingMessagesRef.current.push(msg);
+      console.warn("[WS] Not connected, queueing:", msg.type, "queueSize=", pendingMessagesRef.current.length);
+      if (!ws || ws.readyState === WebSocket.CLOSED) {
+        connect();
+      }
       return;
     }
     ws.send(JSON.stringify(msg));
-  }, []);
+  }, [connect]);
 
   /** Close the connection */
   const disconnect = useCallback(() => {
     clearTimeout(reconnectTimerRef.current);
+    manualCloseRef.current = true;
     reconnectCountRef.current = MAX_RECONNECT_ATTEMPTS; // prevent reconnect
     wsRef.current?.close();
     wsRef.current = null;

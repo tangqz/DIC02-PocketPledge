@@ -103,15 +103,32 @@ export function useVAD({ onSpeechEnd, enabled = true }: UseVADOptions) {
           baseAssetPath: VAD_ASSET_BASE_PATH,
           onnxWASMBasePath: ORT_WASM_PATHS as unknown as string,
           model: "legacy",
-          positiveSpeechThreshold: 0.8,
-          negativeSpeechThreshold: 0.3,
-          preSpeechPadMs: 300,
-          redemptionMs: 300,
+          positiveSpeechThreshold: 0.35,
+          negativeSpeechThreshold: 0.2,
+          preSpeechPadMs: 500,
+          redemptionMs: 900,
+          minSpeechMs: 250,
+          submitUserSpeechOnPause: true,
+          onSpeechRealStart: () => {
+            if (!cancelled) {
+              console.log("[useVAD] Real speech detected");
+            }
+          },
+          onVADMisfire: () => {
+            if (!cancelled) {
+              setIsListening(false);
+              console.log("[useVAD] VAD misfire: speech too short or too weak");
+            }
+          },
           onSpeechStart: () => {
-            if (!cancelled) setIsListening(true);
+            if (!cancelled) {
+              console.log("[useVAD] Speech started");
+              setIsListening(true);
+            }
           },
           onSpeechEnd: (audio: Float32Array) => {
             if (!cancelled) {
+              console.log("[useVAD] Speech ended, samples=", audio.length);
               setIsListening(false);
               onSpeechEndRef.current(audio);
             }
