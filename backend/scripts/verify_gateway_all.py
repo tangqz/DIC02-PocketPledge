@@ -4,6 +4,7 @@ import asyncio
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -16,6 +17,7 @@ from app.business.models import SessionLocal, User, Wallet, init_db
 from app.gateway.session import SessionState
 from app.gateway.ws_router import (
     DISTRACTION_THRESHOLD,
+    _stream_and_detect_sys,
     audio_buffers,
     dispatch_message,
     handle_mic_audio_data,
@@ -306,6 +308,34 @@ async def check_visual_capture_tool_flow() -> None:
     assert_true(types.count("agent-text-end") >= 2, "Capture result should lead to a second agent reply.")
 
 
+async def check_split_sys_marker_detection() -> None:
+    reset_runtime_state()
+    ensure_user_balance(1110, 3000)
+    user_id = "1110"
+    ws = FakeWebSocket(token=make_token(1110))
+    await manager.connect(user_id, ws)
+
+    async def fake_process_text_chat(**_: object):
+        yield {"text": "行，我帮你申请一下。<<S", "expression": "neutral", "audio": "audio-1"}
+        yield {"text": "YS>>", "expression": "neutral", "audio": "audio-2"}
+
+    with patch("app.gateway.ws_router.process_text_chat", fake_process_text_chat):
+        phase1_text, sys_detected = await _stream_and_detect_sys(
+            user_id=user_id,
+            user_text="我去上个厕所",
+            images=[],
+            current_task="测试任务",
+            include_audio=True,
+        )
+
+    assert_true(sys_detected, "Split SYS marker should still trigger system agent path.")
+    assert_true(phase1_text == "行，我帮你申请一下。", "Marker text must be stripped from collected phase-1 text.")
+    assert_true(
+        not any("<<SYS>>" in str(message.get("text", "")) for message in ws.sent if message.get("type") == "agent-text-chunk"),
+        "SYS marker must never leak into streamed chat chunks.",
+    )
+
+
 async def main() -> None:
     checks = [
         ("endpoint_handshake_messages", check_endpoint_handshake_messages),
@@ -318,6 +348,7 @@ async def main() -> None:
         ("reconnection_ttl_behavior", check_reconnection_ttl_behavior),
         ("protocol_rx_shapes", check_protocol_rx_shapes),
         ("visual_capture_tool_flow", check_visual_capture_tool_flow),
+        ("split_sys_marker_detection", check_split_sys_marker_detection),
     ]
 
     init_db()

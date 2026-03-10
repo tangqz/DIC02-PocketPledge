@@ -107,6 +107,32 @@ audio_buffers: dict[str, list[float]] = {}
 system_agent = SystemAgentService()
 
 
+def _split_sys_marker_buffer(buffer: str) -> tuple[str, str, bool]:
+    """Split streamed text into emit/pending parts while guarding the SYS marker.
+
+    Returns (emit_text, pending_text, sys_detected). The pending suffix is retained
+    when it could still become the beginning of a future <<SYS>> marker.
+    """
+    if not buffer:
+        return "", "", False
+
+    marker_index = buffer.find(SYS_MARKER)
+    if marker_index >= 0:
+        return buffer[:marker_index], "", True
+
+    max_prefix = min(len(buffer), len(SYS_MARKER) - 1)
+    for prefix_len in range(max_prefix, 0, -1):
+        if buffer.endswith(SYS_MARKER[:prefix_len]):
+            return buffer[:-prefix_len], buffer[-prefix_len:], False
+
+    return buffer, "", False
+
+
+def _sanitize_agent_text(text: str) -> str:
+    """Remove internal trigger markers from any user-visible agent text."""
+    return text.replace(SYS_MARKER, "").strip()
+
+
 async def get_user_balance(user_id: str) -> dict[str, int | bool]:
     """Query real balance from the database via business CRUD."""
     try:
@@ -625,6 +651,7 @@ async def _stream_and_detect_sys(
     Returns (collected_clean_text, sys_detected).
     """
     parts: list[str] = []
+    pending_text = ""
     sys_detected = False
     sent_text = False
 
@@ -637,27 +664,32 @@ async def _stream_and_detect_sys(
         chunk_text = str(chunk.get("text", ""))
         expression = str(chunk.get("expression", "neutral"))
         audio = str(chunk.get("audio", ""))
-
-        if SYS_MARKER in chunk_text:
-            sys_detected = True
-            clean = chunk_text.replace(SYS_MARKER, "").strip()
-            if clean:
-                parts.append(clean)
-                sent_text = True
-                await send_agent_text_chunk(user_id, clean)
-            continue
+        emit_text = ""
 
         if chunk_text:
-            parts.append(chunk_text)
-            sent_text = True
-            await send_agent_text_chunk(user_id, chunk_text)
-        if include_audio and audio:
+            emit_text, pending_text, sys_detected = _split_sys_marker_buffer(pending_text + chunk_text)
+            if emit_text:
+                parts.append(emit_text)
+                sent_text = True
+                await send_agent_text_chunk(user_id, emit_text)
+
+        if sys_detected:
+            logger.info("SYS trigger detected for user_id=%s", user_id)
+            pending_text = ""
+            continue
+
+        if include_audio and audio and emit_text and not pending_text and emit_text == chunk_text:
             await send_audio(
                 user_id,
                 audio=audio,
                 expression=expression,
-                text=chunk_text or "...",
+                text=emit_text,
             )
+
+    if pending_text and not sys_detected:
+        parts.append(pending_text)
+        sent_text = True
+        await send_agent_text_chunk(user_id, pending_text)
 
     if sent_text:
         await send_agent_text_end(user_id)
@@ -720,11 +752,14 @@ async def send_timer_sync(user_id: str, session: SessionState) -> None:
 
 async def send_agent_text_chunk(user_id: str, text: str) -> None:
     """Send one agent text streaming chunk."""
+    clean_text = _sanitize_agent_text(text)
+    if not clean_text:
+        return
     await manager.send_personal_message(
         user_id,
         {
             "type": "agent-text-chunk",
-            "text": text,
+            "text": clean_text,
         },
     )
 
@@ -747,13 +782,14 @@ async def send_agent_text_end(user_id: str) -> None:
 
 async def send_audio(user_id: str, audio: str, expression: str, text: str) -> None:
     """Send audio packet in frontend contract shape."""
+    clean_text = _sanitize_agent_text(text) or "..."
     await manager.send_personal_message(
         user_id,
         {
             "type": "audio",
             "audio": audio,
             "actions": {"expressions": [expression]},
-            "display_text": {"text": text, "name": BOT_NAME},
+            "display_text": {"text": clean_text, "name": BOT_NAME},
         },
     )
 
