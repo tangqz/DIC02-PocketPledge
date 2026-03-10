@@ -2,14 +2,18 @@
 
 import asyncio
 import io
+import logging
 import math
 import os
 import struct
+import tempfile
 import wave
 from typing import Protocol
 
 
 DEFAULT_SAMPLE_RATE = 16000
+logger = logging.getLogger(__name__)
+_WHISPER_MODELS: dict[tuple[str, str, str], object] = {}
 
 
 class ASRService(Protocol):
@@ -74,6 +78,75 @@ class MockASRService:
 		return "我会继续专注当前任务。"
 
 
+class FasterWhisperASRService:
+	"""Offline ASR backed by faster-whisper running locally."""
+
+	def __init__(self) -> None:
+		self.model_name = os.getenv("MEDIA_AI_ASR_MODEL", "small")
+		self.device = os.getenv("MEDIA_AI_ASR_DEVICE", "cpu")
+		self.compute_type = os.getenv("MEDIA_AI_ASR_COMPUTE_TYPE", "int8")
+		self.language = os.getenv("MEDIA_AI_ASR_LANGUAGE", "zh")
+		self.beam_size = max(1, int(os.getenv("MEDIA_AI_ASR_BEAM_SIZE", "3")))
+
+	def _get_model(self):
+		cache_key = (self.model_name, self.device, self.compute_type)
+		model = _WHISPER_MODELS.get(cache_key)
+		if model is not None:
+			return model
+
+		from faster_whisper import WhisperModel
+
+		logger.info(
+			"Loading faster-whisper model name=%s device=%s compute_type=%s",
+			self.model_name,
+			self.device,
+			self.compute_type,
+		)
+		model = WhisperModel(
+			self.model_name,
+			device=self.device,
+			compute_type=self.compute_type,
+		)
+		_WHISPER_MODELS[cache_key] = model
+		return model
+
+	def _transcribe_sync(self, wav_bytes: bytes) -> str:
+		with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+			temp_file.write(wav_bytes)
+			temp_path = temp_file.name
+
+		try:
+			model = self._get_model()
+			segments, _info = model.transcribe(
+				temp_path,
+				language=self.language,
+				beam_size=self.beam_size,
+				vad_filter=False,
+				condition_on_previous_text=False,
+			)
+			text = "".join(segment.text for segment in segments).strip()
+			return text
+		finally:
+			try:
+				os.unlink(temp_path)
+			except OSError:
+				logger.debug("Failed to remove temp ASR file: %s", temp_path)
+
+	async def audio_samples_to_text(self, audio_samples: list[float]) -> str:
+		if not audio_samples:
+			return ""
+
+		wav_bytes = pcm16_wav_bytes(audio_samples)
+		try:
+			text = await asyncio.to_thread(self._transcribe_sync, wav_bytes)
+			if text:
+				return text
+			logger.warning("faster-whisper returned empty transcript")
+		except Exception:
+			logger.exception("faster-whisper transcription failed")
+		return ""
+
+
 class MockTTSService:
 	"""Return a synthetic WAV payload so frontend playback can be exercised locally."""
 
@@ -105,6 +178,9 @@ class EdgeTTSService:
 
 
 def get_asr_service() -> ASRService:
+	provider = os.getenv("MEDIA_AI_ASR_PROVIDER", "faster-whisper").lower()
+	if provider in {"faster-whisper", "whisper", "local"}:
+		return FasterWhisperASRService()
 	return MockASRService()
 
 

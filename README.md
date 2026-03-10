@@ -171,6 +171,11 @@ uvicorn app.main:app --host 0.0.0.0 --port 12393 --reload
 | `AUTH_TOKEN_EXPIRE_MINUTES` | JWT 过期时间 | `1440` |
 | `AUTH_INITIAL_BALANCE` | 新用户初始余额 | `3000` |
 | `MEDIA_AI_USE_REAL_DIFY` | 是否启用真实 Dify | `0` |
+| `MEDIA_AI_ASR_PROVIDER` | 本地语音转写提供方 | `faster-whisper` |
+| `MEDIA_AI_ASR_MODEL` | 本地语音转写模型名 | `small` |
+| `MEDIA_AI_ASR_DEVICE` | 本地语音转写设备 | `cpu` |
+| `MEDIA_AI_ASR_COMPUTE_TYPE` | 本地语音转写计算精度 | `int8` |
+| `MEDIA_AI_ASR_LANGUAGE` | 本地语音转写语言 | `zh` |
 | `DIFY_API_BASE` | Dify API 基址 | 空 |
 | `DIFY_CHAT_ENDPOINT` | 聊天接口路径 | `/v1/chat-messages` |
 | `DIFY_FILE_UPLOAD_ENDPOINT` | Dify 文件上传路径 | `/v1/files/upload` |
