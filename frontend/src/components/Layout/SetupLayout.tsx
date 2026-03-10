@@ -36,6 +36,8 @@ export default function SetupLayout() {
     requestCamera,
     micGranted,
     micSupported,
+    vadActive,
+    micMuted,
     requestMicrophone,
   } = useMediaStore();
   const { t, locale, setLocale } = useI18n();
@@ -111,6 +113,7 @@ export default function SetupLayout() {
             <PermissionRow
               label={t("setup.micLabel")}
               granted={micGranted}
+              active={micGranted && vadActive && !micMuted && !degradedMode}
               required
               supported={micSupported}
               locale={locale}

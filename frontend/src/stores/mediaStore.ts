@@ -135,7 +135,7 @@ export const useMediaStore = create<MediaState>((set, get) => ({
         video: false,
       });
       stream.getTracks().forEach((track) => track.stop());
-      set({ micGranted: true });
+      set({ micGranted: true, micMuted: false });
       return true;
     } catch (err) {
       console.warn("[MediaStore] Microphone permission denied:", err);

@@ -10,6 +10,14 @@ import { useEffect, useRef, useCallback } from "react";
 import { MicVAD } from "@ricky0123/vad-web";
 import { useMediaStore } from "@/stores/mediaStore";
 import { useChatStore } from "@/stores/chatStore";
+import ortWasmThreadedMjsUrl from "@/assets/ort/ort-wasm-simd-threaded.mjs?url";
+import ortWasmThreadedWasmUrl from "@/assets/ort/ort-wasm-simd-threaded.wasm?url";
+
+const VAD_ASSET_BASE_PATH = "/vad/";
+const ORT_WASM_PATHS = {
+  mjs: ortWasmThreadedMjsUrl,
+  wasm: ortWasmThreadedWasmUrl,
+};
 
 export interface UseVADOptions {
   /** Called with PCM audio (Float32Array, 16kHz mono) when speech segment ends */
@@ -92,6 +100,9 @@ export function useVAD({ onSpeechEnd, enabled = true }: UseVADOptions) {
     async function init() {
       try {
         const vad = await MicVAD.new({
+          baseAssetPath: VAD_ASSET_BASE_PATH,
+          onnxWASMBasePath: ORT_WASM_PATHS as unknown as string,
+          model: "legacy",
           positiveSpeechThreshold: 0.8,
           negativeSpeechThreshold: 0.3,
           preSpeechPadMs: 300,
@@ -130,7 +141,7 @@ export function useVAD({ onSpeechEnd, enabled = true }: UseVADOptions) {
     return () => {
       cancelled = true;
       if (vadRef.current) {
-        vadRef.current.destroy();
+        void vadRef.current.destroy();
         vadRef.current = null;
       }
       setVadActive(false);
@@ -152,7 +163,7 @@ export function useVAD({ onSpeechEnd, enabled = true }: UseVADOptions) {
 
   const destroy = useCallback(() => {
     if (vadRef.current) {
-      vadRef.current.destroy();
+      void vadRef.current.destroy();
       vadRef.current = null;
       setVadActive(false);
     }
