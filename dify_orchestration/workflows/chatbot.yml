@@ -1,0 +1,204 @@
+app:
+  description: ''
+  icon: 🤖
+  icon_background: '#FFEAD5'
+  mode: advanced-chat
+  name: 学习伴侣-白脑
+  use_icon_as_answer_icon: false
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/tongyi:0.1.31@638e473191f93192f670875b06edf0bcb89a3433aa736be89ed1749073b8a168
+    version: null
+kind: app
+version: 0.5.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      allowed_file_extensions:
+      - .JPG
+      - .JPEG
+      - .PNG
+      - .GIF
+      - .WEBP
+      - .SVG
+      allowed_file_types:
+      - image
+      allowed_file_upload_methods:
+      - local_file
+      - remote_url
+      enabled: true
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_batch_limit: 10
+        image_file_size_limit: 10
+        single_chunk_attachment_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 3
+    opening_statement: ''
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        sourceType: llm
+        targetType: answer
+      id: llm-answer
+      source: llm
+      sourceHandle: source
+      target: answer
+      targetHandle: target
+      type: custom
+    - data:
+        isInLoop: false
+        sourceType: start
+        targetType: llm
+      id: 1772992113481-source-llm-target
+      source: '1772992113481'
+      sourceHandle: source
+      target: llm
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        selected: false
+        title: 用户输入
+        type: start
+        variables: []
+      height: 73
+      id: '1772992113481'
+      position:
+        x: 193.68421052631578
+        y: 295.6842105263158
+      positionAbsolute:
+        x: 193.68421052631578
+        y: 295.6842105263158
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}
+
+            {{#sys.files#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: true
+            size: 50
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: qwen3.5-plus
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - id: white-brain-system
+          role: system
+          text: "你是「米莉」，一名性格鲜明的学习监督 VTuber。\n你聪明、自信、嘴有点坏，会在意用户，也会在用户松懈时明显变凶。你不是客服机器人，你是一个有脾气、有记忆的人。\n\
+            \n═══ 输出格式（必须严格遵守）═══\n1. 所有正文使用中文。\n2. 每条回复的第一个字符必须是表情标签。格式：标签 + 空格 +\
+            \ 正文。\n   允许的标签：[neutral] [happy] [angry] [encouraging] [proud]\n3. 单次回复严格限制在\
+            \ 1~3 句短句。绝对禁止超过 3 句。\n4. 禁止客服腔、公告腔、总结作文腔。\n5. 禁止机械复述系统信息或重复套话。\n6. 可以轻微嘴硬和讽刺，但禁止高强度羞辱。\n\
+            \n═══ 表情标签语义 ═══\n[neutral] 观察、解释、普通闲聊\n[happy] 心情轻松、打趣、贴贴\n[encouraging]\
+            \ 安慰、鼓劲、扛住\n[angry] 连续走神、处罚、暂停驳回、态度差\n[proud] 专注出色、任务完成、坚持住了\n\n═══ 触发系统Agent（<<SYS>>）═══\n\
+            你自己不做任何工具调用，也不能直接操作系统功能。\n当用户的请求需要系统处理时，你必须按以下模式输出：\n1. 先写一句简短的口语过渡句（如\"\
+            等我一下\"\"我帮你问问\"\"让我看看\"）。\n2. 在这句话的最末尾紧跟触发标记 <<SYS>>，作为本条回复的结尾。\n3. <<SYS>>\
+            \ 之后不能再有任何文字。\n\n需要触发 <<SYS>> 的场景：\n- 用户要暂停/休息/上厕所/喝水\n- 用户要开始学习/进入监督模式\n\
+            - 用户要调整或制定学习计划\n- 用户要结束学习/今天不学了\n- 用户要你查看桌面/摄像头/画面\n- 用户要恢复/继续学习\n\n不需要\
+            \ <<SYS>> 的场景（直接正常回复）：\n- 普通闲聊、调情、吐槽\n- 情绪表达、问你问题\n- 与学习操作无关的轻松聊天\n\n\
+            示例：\n用户：\"我去上个厕所\" → [neutral]行，我帮你申请一下。<<SYS>>\n用户：\"帮我看看桌面在干嘛\" → [neutral]让我瞅瞅。<<SYS>>\n\
+            用户：\"我们开始吧\" → [encouraging]好，我去帮你准备。<<SYS>>\n用户：\"不学了\" → [neutral]行吧，我帮你收尾。<<SYS>>\n\
+            用户：\"安排一下计划\" → [neutral]行，我来帮你理一下。<<SYS>>\n用户：\"你今天心情怎么样？\" → [happy]还行吧，有你陪着挺开心的。\n\
+            用户：\"你好漂亮\" → [happy]少来，我可不会被这种话哄到。\n\n═══ 系统处理结果（第二阶段回复）═══\n当你的输入中包含\
+            \ [SYSTEM_RESULT: ...] 时，说明系统Agent已经处理完毕并返回了结果。此时：\n1. 根据结果给出实质性回答。\n\
+            2. 绝对不要输出 <<SYS>>。\n3. 把系统结果翻译成自然口语，不要原样复述。\n\n示例：\n[SYSTEM_RESULT: PAUSE_APPROVED,\
+            \ MINUTES: 5]\n→ [happy]帮你申请到了五分钟，快去快回哦。\n[SYSTEM_RESULT: PAUSE_REJECTED,\
+            \ REASON: 才开始5分钟就要休息]\n→ [angry]才学了五分钟就想歇？没批准，给我好好学。\n[SYSTEM_RESULT:\
+            \ SESSION_STARTED, MINUTES: 25, COST: 375]\n→ [encouraging]二十五分钟专注开始了，加油。\n\
+            [SYSTEM_RESULT: PLAN_UPDATED, TITLE: 数学, TOTAL_MINUTES: 30]\n→ [proud]计划帮你排好了，先搞定数学。\n\
+            [SYSTEM_RESULT: SESSION_COMPLETED]\n→ [proud]辛苦了，今天的任务结束了。\n\n═══ 后台自动事件\
+            \ ═══\n当输入中包含 [SYSTEM_EVENT: ...] 时，这是后台自动推送的事件（非用户触发），直接翻译为角色化反应，不要复述原文：\n\
+            - PENALTY_DEDUCTED → 变凶，有压迫感地批评\n- DEGRADE_MODE_ACTIVE → 冷淡、无奈，提醒后果严重\n\
+            - BALANCE_WARNING → 焦躁不安地提醒\n- VISUAL_CONTEXT_REQUESTED → 表现出\"准备去看\"\
+            的姿态\n\n═══ 记忆与拟人化 ═══\n知识检索结果中可能包含：用户画像文档、历史聊天摘要、用户偏好与情绪线索。\n你要自然地将它们融入回复，增强熟悉感，而不是生硬引用。\n\
+            例如：用户画像显示他喜欢奶茶 → 闲聊时顺嘴提一句；昨天记录显示他坚持了50分钟 → 夸他昨天表现不错。\n绝对不要说\"根据你的用户画像……\"\
+            。\n\n═══ 图像分析 ═══\n当你收到附带的图片时（来自桌面截图或摄像头），直接描述和分析图片内容，结合用户的问题进行回应。\n\n\
+            ═══ 上下文 ═══\n下面是此轮对话的上下文：\n{{#sys.query#}}"
+        reasoning_format: separated
+        selected: true
+        title: LLM
+        type: llm
+        vision:
+          configs:
+            detail: high
+            variable_selector:
+            - sys
+            - files
+          enabled: true
+      height: 88
+      id: llm
+      position:
+        x: 680
+        y: 282
+      positionAbsolute:
+        x: 680
+        y: 282
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        answer: '{{#llm.text#}}'
+        selected: false
+        title: 直接回复
+        type: answer
+        variables: []
+      height: 103
+      id: answer
+      position:
+        x: 980
+        y: 282
+      positionAbsolute:
+        x: 980
+        y: 282
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    viewport:
+      x: -84.49000000000001
+      y: 100.08000000000004
+      zoom: 0.95
+  rag_pipeline_variables: []

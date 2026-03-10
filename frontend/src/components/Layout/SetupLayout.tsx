@@ -27,12 +27,13 @@ import { useI18n } from "@/lib/i18n";
 import type { PlanData } from "@/lib/protocol";
 
 export default function SetupLayout() {
-  const { plan, balance, activeToolCall } = useSessionStore();
+  const { plan, balance, activeToolCall, degradedMode } = useSessionStore();
   const {
     cameraGranted,
     screenGranted,
     screenShareSupported,
     requestScreenShare,
+    requestCamera,
     micGranted,
     micSupported,
     requestMicrophone,
@@ -88,13 +89,15 @@ export default function SetupLayout() {
       <div className="relative flex-1">
         {/* Live2D canvas (fills the entire right area) */}
         <div id="live2d-container" className="absolute inset-0">
-          <Live2DCanvas ref={live2dRef} />
+          {degradedMode ? <DowngradePanel /> : <Live2DCanvas ref={live2dRef} />}
         </div>
 
         {/* Voice input indicator — centered near bottom */}
-        <div className="absolute bottom-8 left-1/2 z-20 -translate-x-1/2">
-          <VoiceInput />
-        </div>
+        {!degradedMode && (
+          <div className="absolute bottom-8 left-1/2 z-20 -translate-x-1/2">
+            <VoiceInput />
+          </div>
+        )}
 
         {/* ── Overlaid status cards (bottom-left of the Live2D area) ── */}
         <div className="absolute bottom-6 left-6 z-10 flex max-w-xs flex-col gap-3">
@@ -122,6 +125,7 @@ export default function SetupLayout() {
               granted={cameraGranted}
               required
               locale={locale}
+              onRequest={!cameraGranted ? requestCamera : undefined}
             />
             <PermissionRow
               label={t("setup.screenShare")}
@@ -147,6 +151,18 @@ export default function SetupLayout() {
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function DowngradePanel() {
+  return (
+    <div className="flex h-full items-center justify-center bg-black/35 backdrop-blur-sm">
+      <div className="rounded-2xl border border-white/10 bg-surface-elevated/80 px-6 py-5 text-center shadow-lg">
+        <p className="text-sm uppercase tracking-[0.3em] text-white/30">Fallback Mode</p>
+        <p className="mt-3 text-lg font-semibold text-white/80">余额不足，陪伴模式已停用</p>
+        <p className="mt-2 text-sm text-white/45">当前仅保留基础文本与状态同步能力。</p>
       </div>
     </div>
   );

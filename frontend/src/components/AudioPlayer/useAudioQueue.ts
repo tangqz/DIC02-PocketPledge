@@ -26,7 +26,7 @@ interface Callbacks {
 export function useAudioQueue(callbacks: Callbacks) {
   const queueRef = useRef<AudioTask[]>([]);
   const processingRef = useRef(false);
-  const { addMessage, setAgentSpeaking } = useChatStore.getState();
+  const { setAgentSpeaking } = useChatStore.getState();
 
   const processNext = useCallback(async () => {
     if (processingRef.current) return;
@@ -42,11 +42,6 @@ export function useAudioQueue(callbacks: Callbacks) {
     // 1. Set expression
     if (task.expressions.length > 0) {
       callbacks.setExpression(task.expressions[0]);
-    }
-
-    // 2. Add to chat
-    if (task.displayText) {
-      addMessage("agent", task.displayText);
     }
 
     setAgentSpeaking(true);

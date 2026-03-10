@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 
@@ -24,6 +24,25 @@ class SessionState:
     is_bankrupt: bool = False
     current_plan: str | None = None
     pause_remaining_seconds: int | None = None
+    suggested_focus_seconds: int | None = None
+    pause_requests_count: int = 0
+    chat_history: list[dict[str, str]] = field(default_factory=list)
+
+    MAX_HISTORY_TURNS: int = 30
+
+    def append_chat(self, role: str, content: str) -> None:
+        """Append a message to the chat history ring buffer."""
+        self.chat_history.append({"role": role, "content": content})
+        if len(self.chat_history) > self.MAX_HISTORY_TURNS:
+            self.chat_history = self.chat_history[-self.MAX_HISTORY_TURNS:]
+
+    def format_chat_history(self) -> str:
+        """Format recent chat history as a readable string for the system agent."""
+        lines = []
+        for msg in self.chat_history:
+            prefix = "用户" if msg["role"] == "user" else "米莉"
+            lines.append(f"{prefix}: {msg['content']}")
+        return "\n".join(lines)
 
     @property
     def remaining_seconds(self) -> int | None:
@@ -63,6 +82,7 @@ class SessionState:
         """Start supervision from setup and initialize timer."""
         self.total_focus_seconds = duration_seconds
         self.focus_time_remaining = duration_seconds
+        self.pause_requests_count = 0
         self.transition("active")
 
     def pause(self, duration_seconds: int | None = None) -> None:
@@ -79,6 +99,7 @@ class SessionState:
         """Mark supervision as completed."""
         self.transition("completed")
         self.pause_remaining_seconds = None
+        self.pause_requests_count = 0
 
     def tick(self) -> bool:
         """Advance one timer tick and return True when countdown reaches zero."""

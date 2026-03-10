@@ -34,6 +34,7 @@ interface SessionState {
   // ── Core state ──
   supervisionState: SupervisionState;
   balance: number;
+  degradedMode: boolean;
   timerSeconds: number; // remaining seconds
   totalDuration: number; // total session duration in seconds
   currentTask: string;
@@ -83,6 +84,9 @@ interface SessionState {
   /** Tool call indicator */
   setActiveToolCall: (tc: { tool: string; status: string } | null) => void;
 
+  setBalance: (balance: number) => void;
+  setDegradedMode: (degraded: boolean) => void;
+
   /** Local timer tick (1s interval) */
   tickTimer: () => void;
   /** Tick the pause countdown (1s interval) */
@@ -100,6 +104,7 @@ interface SessionState {
 export const useSessionStore = create<SessionState>((set, get) => ({
   supervisionState: "setup",
   balance: 100,
+  degradedMode: false,
   timerSeconds: 0,
   totalDuration: 0,
   currentTask: "",
@@ -167,6 +172,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   setActiveToolCall: (tc) => set({ activeToolCall: tc }),
 
+  setBalance: (balance) => set({ balance }),
+  setDegradedMode: (degradedMode) => set({ degradedMode }),
+
   tickTimer: () => {
     set((s) => ({
       timerSeconds: Math.max(0, s.timerSeconds - 1),
@@ -198,6 +206,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set({
       supervisionState: "setup",
       balance: 100,
+      degradedMode: false,
       timerSeconds: 0,
       totalDuration: 0,
       currentTask: "",

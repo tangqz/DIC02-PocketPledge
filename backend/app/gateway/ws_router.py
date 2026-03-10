@@ -1,14 +1,23 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, AsyncIterator
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
+from app.auth.security import decode_access_token
+from app.business.models import SessionLocal
+from app.business.crud import (
+    execute_penalty as db_execute_penalty,
+    get_user_status as db_get_user_status,
+    start_focus_session as db_start_focus_session,
+)
 from app.gateway.session import SessionState
 from app.media_ai import evaluate_vision, process_text_chat, process_voice_chat
+from app.system_agent import SystemAgentService
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +53,7 @@ class ConnectionManager:
     def disconnect(self, user_id: str) -> None:
         """Mark one user as disconnected while preserving session for TTL."""
         self.active_connections.pop(user_id, None)
-        self.disconnected_at[user_id] = datetime.utcnow()
+        self.disconnected_at[user_id] = datetime.now(UTC)
         self.cleanup_expired_states()
 
     async def send_personal_message(self, user_id: str, payload: dict) -> None:
@@ -61,7 +70,7 @@ class ConnectionManager:
 
     def cleanup_expired_states(self) -> None:
         """Delete disconnected user states that exceeded reconnect TTL."""
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         expired_users = [
             user_id
             for user_id, disconnected_time in self.disconnected_at.items()
@@ -91,25 +100,45 @@ DISTRACTION_THRESHOLD = 3
 PENALTY_AMOUNT = 5
 BOT_NAME = "Study Buddy"
 DEFAULT_BALANCE = 100
+SYS_MARKER = "<<SYS>>"
 
 watchdog_tasks: dict[str, asyncio.Task] = {}
 audio_buffers: dict[str, list[float]] = {}
-balances: dict[str, int] = {}
+system_agent = SystemAgentService()
 
 
 async def get_user_balance(user_id: str) -> dict[str, int | bool]:
-    """Gateway-local mock C API: return user balance and bankrupt status."""
-    await asyncio.sleep(0)
-    balance = balances.setdefault(user_id, DEFAULT_BALANCE)
-    return {"balance": balance, "is_bankrupt": balance <= 0}
+    """Query real balance from the database via business CRUD."""
+    try:
+        uid = int(user_id)
+    except ValueError:
+        return {"balance": 0, "is_bankrupt": True}
+    db = SessionLocal()
+    try:
+        result = db_get_user_status(db, uid)
+        return {"balance": result["balance"], "is_bankrupt": result["is_bankrupt"]}
+    except Exception:
+        return {"balance": 0, "is_bankrupt": True}
+    finally:
+        db.close()
 
 
 async def deduct_penalty(user_id: str, amount: int) -> dict[str, int | bool]:
-    """Gateway-local mock C API: deduct user balance."""
-    await asyncio.sleep(0)
-    balance = balances.setdefault(user_id, DEFAULT_BALANCE) - amount
-    balances[user_id] = balance
-    return {"balance": balance, "is_bankrupt": balance <= 0}
+    """Execute penalty via real database transaction."""
+    try:
+        uid = int(user_id)
+    except ValueError:
+        return {"balance": 0, "is_bankrupt": True}
+    db = SessionLocal()
+    try:
+        result = db_execute_penalty(
+            db, uid, reason="检测到连续走神", distraction_count=1, penalty_amount=amount,
+        )
+        return {"balance": result["balance_after"], "is_bankrupt": result["is_bankrupt"]}
+    except Exception:
+        return {"balance": 0, "is_bankrupt": True}
+    finally:
+        db.close()
 
 
 async def process_pause_negotiation(event_text: str) -> str:
@@ -118,14 +147,29 @@ async def process_pause_negotiation(event_text: str) -> str:
     return "approved" if "暂停" in event_text else "rejected"
 
 
+def _authenticate_ws_token(token: str | None) -> int | None:
+    """Validate a JWT token and return user_id, or None if invalid."""
+    if not token:
+        return None
+    payload = decode_access_token(token)
+    if payload is None:
+        return None
+    try:
+        return int(payload["sub"])
+    except (KeyError, ValueError):
+        return None
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
-    """WebSocket hub endpoint with reconnection-aware per-user session state."""
-    user_id = (
-        ws.query_params.get("user_id")
-        or ws.headers.get("x-user-id")
-        or f"guest:{id(ws)}"
-    )
+    """WebSocket hub endpoint with JWT auth and reconnection-aware per-user session state."""
+    token = ws.query_params.get("token")
+    user_id_int = _authenticate_ws_token(token)
+    if user_id_int is None:
+        await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="Authentication required")
+        return
+    user_id = str(user_id_int)
+
     session = await manager.connect(user_id, ws)
     session.total_focus_seconds = session.total_focus_seconds or DEFAULT_TOTAL_SECONDS
     session.focus_time_remaining = (
@@ -187,6 +231,10 @@ async def dispatch_message(user_id: str, session: SessionState, msg: dict[str, A
     if msg_type == "frontend-playback-complete":
         return
 
+    if msg_type == "capture-context-result":
+        await handle_capture_context_result(user_id, session, msg)
+        return
+
     if msg_type == "ping":
         await send_control(user_id, "pong")
         return
@@ -209,6 +257,8 @@ async def handle_mic_audio_end(
     """Call E voice pipeline and stream agent text/audio packets to frontend."""
     if session.is_bankrupt:
         await send_control(user_id, "downgrade")
+        await send_agent_text_chunk(user_id, "余额不足，当前仅保留基础文本提示。")
+        await send_agent_text_end(user_id)
         return
 
     audio_samples = audio_buffers.pop(user_id, [])
@@ -235,76 +285,133 @@ async def handle_mic_audio_end(
 
 
 async def handle_text(user_id: str, session: SessionState, msg: dict[str, Any]) -> None:
-    """Handle text-input and drive supervision state by intent keywords."""
+    """Handle text-input: white-brain-first with <<SYS>> trigger for system agent.
+
+    Phase 1: stream white brain reply while detecting <<SYS>> marker.
+    If no <<SYS>>: done (simple chat).
+    If <<SYS>> detected:
+      - Call system agent for structured directive
+      - Execute directive (start/pause/resume/complete/plan/visual-capture)
+      - Phase 2: call white brain again with [SYSTEM_RESULT: ...] context
+    """
     text = str(msg.get("text", ""))
+    images = msg.get("images", [])
+    is_tool_result = bool(msg.get("tool_result"))
     logger.info("text-input received, user_id=%s text=%s", user_id, text)
 
-    if session.is_bankrupt:
-        await send_control(user_id, "downgrade")
-        await send_agent_text_chunk(user_id, "余额不足，当前仅保留基础提示能力。")
-        await send_agent_text_end(user_id)
+    session.append_chat("user", text)
+
+    # Phase 1: stream white brain, detect <<SYS>> trigger
+    phase1_text, sys_detected = await _stream_and_detect_sys(
+        user_id=user_id,
+        user_text=text,
+        images=images,
+        current_task=session.current_plan,
+        include_audio=not session.is_bankrupt,
+    )
+
+    if not sys_detected:
+        session.append_chat("assistant", phase1_text)
         return
 
-    if "开始" in text and session.supervision_state == "setup":
-        await handle_start(user_id, session, duration_seconds=DEFAULT_TOTAL_SECONDS)
-    elif "暂停" in text and session.supervision_state == "active":
-        decision = await process_pause_negotiation(
-            "系统事件：用户请求暂停10分钟去洗手间"
-        )
-        if decision == "approved":
-            await handle_pause(user_id, session, pause_seconds=600)
-        else:
-            await send_agent_text_chunk(user_id, "当前不建议暂停，请继续专注。")
-            await send_agent_text_end(user_id)
-    elif ("继续" in text or "恢复" in text) and session.supervision_state == "paused":
-        await handle_resume(user_id, session)
+    # <<SYS>> detected — invoke system agent for structured directive
+    directive = await system_agent.build_directive(user_id, text, session)
+    system_events = list(directive.system_events)
 
-    if "计划" in text:
-        await send_tool_call_status(user_id, "plan.update", "calling", "updating plan")
-        session.current_plan = "完成当前学习任务"
-        await send_plan_update(
+    # Handle visual capture request
+    if directive.requires_capture and not images and not is_tool_result:
+        await send_tool_call_status(user_id, "visual.capture", "calling", "capturing visual context")
+        await send_control(
             user_id,
+            "request-visual-context",
             {
-                "tasks": [
-                    {
-                        "id": "t1",
-                        "title": "完成当前学习任务",
-                        "completed": False,
-                        "estimatedMinutes": 25,
-                    }
-                ],
-                "totalMinutes": 25,
-                "suggestedDuration": 1500,
+                "requestId": uuid.uuid4().hex,
+                "prompt": text,
+                "sources": directive.capture_sources,
             },
         )
+        return
+
+    # Execute directive actions
+    if directive.action == "complete" and session.supervision_state in {"active", "paused"}:
+        await handle_complete(user_id, session)
+
+    elif directive.action == "plan" and directive.plan is not None:
+        await send_tool_call_status(user_id, "plan.update", "calling", "updating plan")
+        tasks = directive.plan.get("tasks") or []
+        if tasks:
+            session.current_plan = str(tasks[0].get("title", session.current_plan or "完成当前学习任务"))
+        session.suggested_focus_seconds = int(directive.plan.get("suggestedDuration") or DEFAULT_TOTAL_SECONDS)
+        await send_plan_update(user_id, directive.plan)
         await send_tool_call_status(user_id, "plan.update", "success", "plan updated")
 
-    sent_text = False
-    async for chunk in process_text_chat(
-        user_text=text,
-        session_id=user_id,
-        images=msg.get("images", []),
-        current_task=session.current_plan,
-    ):
-        chunk_text = str(chunk.get("text", ""))
-        expression = str(chunk.get("expression", "neutral"))
-        audio = str(chunk.get("audio", ""))
-        if chunk_text:
-            sent_text = True
-            await send_agent_text_chunk(user_id, chunk_text)
-        if audio:
-            await send_audio(
-                user_id,
-                audio=audio,
-                expression=expression,
-                text=chunk_text or "...",
-            )
+    elif directive.action == "start" and session.supervision_state == "setup":
+        duration_seconds = directive.duration_seconds or session.suggested_focus_seconds or DEFAULT_TOTAL_SECONDS
+        await handle_start(user_id, session, duration_seconds=duration_seconds)
 
-    if sent_text:
-        await send_agent_text_end(user_id)
+    elif directive.action == "pause" and session.supervision_state == "active":
+        session.pause_requests_count += 1
+        if directive.approved:
+            await handle_pause(user_id, session, pause_seconds=directive.pause_seconds or 300)
+        else:
+            await send_tool_call_status(user_id, "supervision.pause", "error", "pause rejected")
+
+    elif directive.action == "resume" and session.supervision_state == "paused":
+        await handle_resume(user_id, session)
+
+    if session.is_bankrupt and directive.action != "complete":
+        await send_control(user_id, "downgrade")
+        system_events.append("[SYSTEM_EVENT: DEGRADE_MODE_ACTIVE]")
+
+    # Phase 2: call white brain again with system results
+    result_event = f"[SYSTEM_RESULT: action={directive.action}, approved={directive.approved}]"
+    if system_events:
+        result_context = "\n".join([result_event, *system_events])
     else:
-        await send_agent_text_chunk(user_id, f"收到：{text}")
-        await send_agent_text_end(user_id)
+        result_context = result_event
+    enriched_text = f"{text}\n{result_context}"
+
+    phase2_text = await stream_agent_reply(
+        user_id=user_id,
+        user_text=enriched_text,
+        images=images,
+        current_task=session.current_plan,
+        include_audio=not session.is_bankrupt,
+    )
+    session.append_chat("assistant", phase2_text)
+
+
+async def handle_capture_context_result(
+    user_id: str,
+    session: SessionState,
+    msg: dict[str, Any],
+) -> None:
+    """Resume one chat turn after frontend capture tool returns images."""
+    images = msg.get("images", [])
+    error = str(msg.get("error", "")).strip()
+    prompt = str(msg.get("prompt", "")).strip()
+    if error or not images:
+        await send_tool_call_status(user_id, "visual.capture", "error", error or "no images captured")
+        await stream_agent_reply(
+            user_id=user_id,
+            user_text="[SYSTEM_EVENT: VISUAL_CONTEXT_CAPTURE_FAILED]\n我这边还没看到画面，你先确认桌面共享和摄像头权限。",
+            images=[],
+            current_task=session.current_plan,
+            include_audio=not session.is_bankrupt,
+        )
+        return
+
+    await send_tool_call_status(user_id, "visual.capture", "success", "visual context captured")
+    await handle_text(
+        user_id,
+        session,
+        {
+            "type": "text-input",
+            "text": prompt,
+            "images": images,
+            "tool_result": True,
+        },
+    )
 
 
 async def handle_screenshot(user_id: str, session: SessionState, msg: dict[str, Any]) -> None:
@@ -393,9 +500,26 @@ async def handle_start(user_id: str, session: SessionState, duration_seconds: in
     """Start supervision and publish state/timer changes."""
     await send_tool_call_status(user_id, "supervision.start", "calling", "starting supervision")
     try:
+        db = SessionLocal()
+        try:
+            result = db_start_focus_session(
+                db=db,
+                user_id=int(user_id),
+                planned_focus_minutes=max(duration_seconds // 60, 1),
+            )
+        finally:
+            db.close()
+
         session.start(duration_seconds=duration_seconds)
+        session.suggested_focus_seconds = duration_seconds
         await send_supervision_state(user_id, session, reason="approved start")
         await send_timer_sync(user_id, session)
+        await send_balance_update(
+            user_id,
+            balance=int(result["balance_after"]),
+            change=-int(result["upfront_cost"]),
+            reason="开始专注，已预扣服务费",
+        )
         await send_tool_call_status(user_id, "supervision.start", "success", "supervision started")
     except ValueError as exc:
         await send_tool_call_status(user_id, "supervision.start", "error", str(exc))
@@ -433,6 +557,107 @@ async def handle_complete(user_id: str, session: SessionState) -> None:
         await send_tool_call_status(user_id, "supervision.complete", "success", "session completed")
     except ValueError as exc:
         await send_tool_call_status(user_id, "supervision.complete", "error", str(exc))
+
+
+async def stream_agent_reply(
+    user_id: str,
+    user_text: str,
+    images: list[dict[str, Any]] | None,
+    current_task: str | None,
+    include_audio: bool,
+) -> str:
+    """Stream one white-brain reply; optionally suppress audio in degraded mode.
+
+    Returns the collected reply text.
+    """
+    parts: list[str] = []
+    sent_text = False
+    async for chunk in process_text_chat(
+        user_text=user_text,
+        session_id=user_id,
+        images=images,
+        current_task=current_task,
+    ):
+        chunk_text = str(chunk.get("text", ""))
+        expression = str(chunk.get("expression", "neutral"))
+        audio = str(chunk.get("audio", ""))
+        if chunk_text:
+            parts.append(chunk_text)
+            sent_text = True
+            await send_agent_text_chunk(user_id, chunk_text)
+        if include_audio and audio:
+            await send_audio(
+                user_id,
+                audio=audio,
+                expression=expression,
+                text=chunk_text or "...",
+            )
+
+    if sent_text:
+        await send_agent_text_end(user_id)
+        return "".join(parts)
+
+    fallback = f"收到：{user_text}"
+    await send_agent_text_chunk(user_id, fallback)
+    await send_agent_text_end(user_id)
+    return fallback
+
+
+async def _stream_and_detect_sys(
+    user_id: str,
+    user_text: str,
+    images: list[dict[str, Any]] | None,
+    current_task: str | None,
+    include_audio: bool,
+) -> tuple[str, bool]:
+    """Stream white-brain reply while detecting the <<SYS>> trigger marker.
+
+    Returns (collected_clean_text, sys_detected).
+    """
+    parts: list[str] = []
+    sys_detected = False
+    sent_text = False
+
+    async for chunk in process_text_chat(
+        user_text=user_text,
+        session_id=user_id,
+        images=images,
+        current_task=current_task,
+    ):
+        chunk_text = str(chunk.get("text", ""))
+        expression = str(chunk.get("expression", "neutral"))
+        audio = str(chunk.get("audio", ""))
+
+        if SYS_MARKER in chunk_text:
+            sys_detected = True
+            clean = chunk_text.replace(SYS_MARKER, "").strip()
+            if clean:
+                parts.append(clean)
+                sent_text = True
+                await send_agent_text_chunk(user_id, clean)
+            continue
+
+        if chunk_text:
+            parts.append(chunk_text)
+            sent_text = True
+            await send_agent_text_chunk(user_id, chunk_text)
+        if include_audio and audio:
+            await send_audio(
+                user_id,
+                audio=audio,
+                expression=expression,
+                text=chunk_text or "...",
+            )
+
+    if sent_text:
+        await send_agent_text_end(user_id)
+    elif not sys_detected:
+        fallback = f"收到：{user_text}"
+        parts.append(fallback)
+        await send_agent_text_chunk(user_id, fallback)
+        await send_agent_text_end(user_id)
+
+    return "".join(parts), sys_detected
 
 
 async def send_model_info(user_id: str) -> None:
@@ -568,12 +793,13 @@ async def send_balance_update(
     )
 
 
-async def send_control(user_id: str, command: str) -> None:
+async def send_control(user_id: str, command: str, payload: dict[str, Any] | None = None) -> None:
     """Emit control command message to frontend."""
     await manager.send_personal_message(
         user_id,
         {
             "type": "control",
             "command": command,
+            "payload": payload or {},
         },
     )

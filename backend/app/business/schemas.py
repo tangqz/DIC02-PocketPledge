@@ -3,7 +3,6 @@ from pydantic import BaseModel, Field
 
 
 class SessionStartRequest(BaseModel):
-    user_id: int = Field(..., ge=2, description="普通用户ID，0和1保留给系统账户")
     planned_focus_minutes: int = Field(..., ge=1, le=600)
 
 
@@ -19,7 +18,6 @@ class SessionStartResponse(BaseModel):
 
 
 class PenaltyExecuteRequest(BaseModel):
-    user_id: int = Field(..., ge=2)
     reason: str = Field(..., min_length=1, max_length=255)
     distraction_count: int = Field(default=1, ge=1)
 

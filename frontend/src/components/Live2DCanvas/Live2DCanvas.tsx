@@ -11,9 +11,14 @@ import {
   forwardRef,
   useEffect,
   useState,
+  useMemo,
+  useCallback,
 } from "react";
 import { DEFAULT_MODEL_CONFIG } from "@/lib/modelConfig";
 import { useI18n } from "@/lib/i18n";
+import { useAudioQueue } from "@/components/AudioPlayer/useAudioQueue";
+import { useAvatarStore } from "@/stores/avatarStore";
+import { useSessionStore } from "@/stores/sessionStore";
 
 const IS_DEV = import.meta.env.DEV;
 
@@ -43,12 +48,58 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
       releaseInstance: () => void;
     };
   } | null>(null);
-  const config = DEFAULT_MODEL_CONFIG;
+  const modelInfo = useAvatarStore((s) => s.modelInfo);
+  const pendingAudioMessages = useAvatarStore((s) => s.pendingAudioMessages);
+  const shiftAudioMessage = useAvatarStore((s) => s.shiftAudioMessage);
+  const degradedMode = useSessionStore((s) => s.degradedMode);
+  const config = useMemo(
+    () =>
+      modelInfo
+        ? {
+            ...DEFAULT_MODEL_CONFIG,
+            ...modelInfo,
+            emotionMap: {
+              ...DEFAULT_MODEL_CONFIG.emotionMap,
+              ...modelInfo.emotionMap,
+            },
+          }
+        : DEFAULT_MODEL_CONFIG,
+    [modelInfo],
+  );
   const { t } = useI18n();
 
   const [debugText, setDebugText] = useState("init");
   const [isLoaded, setIsLoaded] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+
+  const setExpression = useCallback(
+    (emotionKeyword: string) => {
+      const adapter = sdkRef.current?.LAppAdapter?.getInstance();
+      if (!adapter) {
+        return;
+      }
+      const idx = config.emotionMap[emotionKeyword.toLowerCase()];
+      if (idx === undefined) {
+        return;
+      }
+      const expName = adapter.getExpressionName(idx);
+      if (expName) {
+        adapter.setExpression(expName);
+      }
+    },
+    [config.emotionMap],
+  );
+
+  const stopAudio = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      if (audioRef.current.src.startsWith("blob:")) {
+        URL.revokeObjectURL(audioRef.current.src);
+      }
+      audioRef.current = null;
+    }
+  }, []);
 
   const parseModelPath = (modelUrl: string) => {
     const trimmed = modelUrl.replace(/^\/+/, "");
@@ -122,6 +173,13 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
     });
   };
 
+  const { enqueue, interrupt } = useAudioQueue({
+    setExpression,
+    playAudio: playBase64Audio,
+    stopAudio,
+    onQueueEmpty: () => undefined,
+  });
+
   // Runtime diagnostics overlay
   useEffect(() => {
     if (!IS_DEV) {
@@ -153,34 +211,27 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
   useImperativeHandle(
     ref,
     () => ({
-      setExpression: (emotionKeyword: string) => {
-        const adapter = sdkRef.current?.LAppAdapter?.getInstance();
-        if (!adapter) {
-          return;
-        }
-        const idx = config.emotionMap[emotionKeyword.toLowerCase()];
-        if (idx === undefined) {
-          return;
-        }
-        const expName = adapter.getExpressionName(idx);
-        if (expName) {
-          adapter.setExpression(expName);
-        }
-      },
+      setExpression,
       playAudio: playBase64Audio,
-      stopAudio: () => {
-        if (audioRef.current) {
-          audioRef.current.pause();
-          audioRef.current.currentTime = 0;
-          if (audioRef.current.src.startsWith("blob:")) {
-            URL.revokeObjectURL(audioRef.current.src);
-          }
-          audioRef.current = null;
-        }
-      },
+      stopAudio,
     }),
-    [config.emotionMap],
+    [playBase64Audio, setExpression, stopAudio],
   );
+
+  useEffect(() => {
+    if (pendingAudioMessages.length === 0 || degradedMode) {
+      return;
+    }
+    enqueue(pendingAudioMessages[0]);
+    shiftAudioMessage();
+  }, [degradedMode, enqueue, pendingAudioMessages, shiftAudioMessage]);
+
+  useEffect(() => {
+    if (!degradedMode) {
+      return;
+    }
+    interrupt();
+  }, [degradedMode, interrupt]);
 
   useEffect(() => {
     let disposed = false;
@@ -220,15 +271,9 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
     return () => {
       disposed = true;
       sdkRef.current?.LAppDelegate?.releaseInstance?.();
-      if (audioRef.current) {
-        audioRef.current.pause();
-        if (audioRef.current.src.startsWith("blob:")) {
-          URL.revokeObjectURL(audioRef.current.src);
-        }
-        audioRef.current = null;
-      }
+      stopAudio();
     };
-  }, [config.url]);
+  }, [config.url, stopAudio]);
 
   return (
     <div id="live2d" className="relative h-full w-full">

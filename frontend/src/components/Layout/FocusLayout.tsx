@@ -29,6 +29,7 @@ export default function FocusLayout() {
     pauseRemaining,
     tickPause,
     lastAlert,
+    degradedMode,
   } = useSessionStore();
   const isPaused = supervisionState === "paused";
   const live2dRef = useRef<Live2DCanvasHandle>(null);
@@ -106,6 +107,13 @@ export default function FocusLayout() {
     }
   };
 
+  const handleEndSession = useCallback(() => {
+    send({
+      type: "text-input",
+      text: locale === "zh" ? "结束本次监督" : "End this session",
+    });
+  }, [locale, send]);
+
   return (
     <div className="relative flex h-full flex-col animate-fade-in">
       {/* Top bar */}
@@ -143,7 +151,16 @@ export default function FocusLayout() {
         <div className="relative flex-1">
           {/* Live2D canvas */}
           <div id="live2d-container" className="absolute inset-0">
-            <Live2DCanvas ref={live2dRef} />
+            {degradedMode ? (
+              <DowngradeTimerCard
+                timerSeconds={timerSeconds}
+                locale={locale}
+                isPaused={isPaused}
+                onEndSession={handleEndSession}
+              />
+            ) : (
+              <Live2DCanvas ref={live2dRef} />
+            )}
           </div>
 
           {/* Alert flash overlay */}
@@ -158,9 +175,11 @@ export default function FocusLayout() {
           )}
 
           {/* Voice input indicator */}
-          <div className="absolute bottom-24 left-1/2 -translate-x-1/2">
-            <VoiceInput />
-          </div>
+          {!degradedMode && (
+            <div className="absolute bottom-24 left-1/2 -translate-x-1/2">
+              <VoiceInput />
+            </div>
+          )}
 
           {/* Pause remaining indicator */}
           {isPaused && pauseRemaining !== undefined && (
@@ -233,6 +252,47 @@ export default function FocusLayout() {
       {isPaused && (
         <div className="pointer-events-none absolute inset-0 z-10 bg-black/30 backdrop-blur-sm" />
       )}
+    </div>
+  );
+}
+
+function DowngradeTimerCard({
+  timerSeconds,
+  locale,
+  isPaused,
+  onEndSession,
+}: {
+  timerSeconds: number;
+  locale: string;
+  isPaused: boolean;
+  onEndSession: () => void;
+}) {
+  const minutes = Math.floor(timerSeconds / 60);
+  const seconds = String(timerSeconds % 60).padStart(2, "0");
+
+  return (
+    <div className="flex h-full items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="min-w-72 rounded-3xl border border-white/10 bg-surface-elevated/85 px-10 py-8 text-center shadow-2xl">
+        <p className="text-xs uppercase tracking-[0.35em] text-white/30">Basic Timer</p>
+        <p className="mt-4 font-mono text-6xl font-semibold text-white/88">
+          {minutes}:{seconds}
+        </p>
+        <p className="mt-4 text-sm text-white/45">
+          {locale === "zh"
+            ? isPaused
+              ? "当前处于降级暂停模式"
+              : "当前处于降级专注模式"
+            : isPaused
+              ? "Paused in fallback mode"
+              : "Focus mode without avatar"}
+        </p>
+        <button
+          onClick={onEndSession}
+          className="mt-6 rounded-xl bg-danger/80 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-danger"
+        >
+          {locale === "zh" ? "结束本次监督" : "End Session"}
+        </button>
+      </div>
     </div>
   );
 }

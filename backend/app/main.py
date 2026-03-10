@@ -1,20 +1,14 @@
 """FastAPI application entrypoint for the backend service."""
 
 from fastapi import FastAPI
-
-from app.gateway.ws_router import router as gateway_router
-
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.auth import router as auth_router
 from app.business.api import router as business_router
 from app.business.models import init_db
+from app.gateway.ws_router import router as gateway_router
 
-# Create app instance and register websocket gateway routes.
-app = FastAPI()
-app.include_router(gateway_router)
-
-
-app = FastAPI(title="Study Buddy Backend - Developer C")
+app = FastAPI(title="Study Buddy Backend")
 
 app.add_middleware(
     CORSMiddleware,
@@ -32,7 +26,9 @@ def on_startup():
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "developer_c_business"}
+    return {"ok": True, "service": "study_buddy"}
 
 
+app.include_router(auth_router)
 app.include_router(business_router)
+app.include_router(gateway_router)

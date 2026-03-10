@@ -12,6 +12,7 @@ interface MediaState {
   micSupported: boolean;
 
   // Media streams (kept alive for snapshot capture)
+  cameraStream: MediaStream | null;
   screenStream: MediaStream | null;
 
   // VAD state
@@ -36,6 +37,7 @@ interface MediaState {
   setMicAudioLevel: (level: number) => void;
   setSnapshotInterval: (seconds: number) => void;
   setSnapshotActive: (active: boolean) => void;
+  requestCamera: () => Promise<boolean>;
 
   /** Request screen share via getDisplayMedia. Returns true if granted. */
   requestScreenShare: () => Promise<boolean>;
@@ -43,6 +45,8 @@ interface MediaState {
   requestMicrophone: () => Promise<boolean>;
   /** Stop screen share and release the stream. */
   stopScreenShare: () => void;
+  /** Stop camera and release the stream. */
+  stopCamera: () => void;
 }
 
 export const useMediaStore = create<MediaState>((set, get) => ({
@@ -53,6 +57,7 @@ export const useMediaStore = create<MediaState>((set, get) => ({
   micGranted: false,
   micSupported: typeof navigator !== "undefined" &&
     !!navigator.mediaDevices?.getUserMedia,
+  cameraStream: null,
   screenStream: null,
   isListening: false,
   vadActive: false,
@@ -73,6 +78,30 @@ export const useMediaStore = create<MediaState>((set, get) => ({
   setMicAudioLevel: (level) => set({ micAudioLevel: level }),
   setSnapshotInterval: (seconds) => set({ snapshotInterval: seconds }),
   setSnapshotActive: (active) => set({ snapshotActive: active }),
+
+  requestCamera: async () => {
+    const existingStream = get().cameraStream;
+    if (existingStream) {
+      set({ cameraGranted: true });
+      return true;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: 640, height: 480 },
+        audio: false,
+      });
+      stream.getVideoTracks()[0]?.addEventListener("ended", () => {
+        set({ cameraGranted: false, cameraStream: null });
+      });
+      set({ cameraGranted: true, cameraStream: stream });
+      return true;
+    } catch (err) {
+      console.warn("[MediaStore] Camera permission denied:", err);
+      set({ cameraGranted: false, cameraStream: null });
+      return false;
+    }
+  },
 
   requestScreenShare: async () => {
     try {
@@ -121,5 +150,13 @@ export const useMediaStore = create<MediaState>((set, get) => ({
       stream.getTracks().forEach((t) => t.stop());
     }
     set({ screenGranted: false, screenStream: null });
+  },
+
+  stopCamera: () => {
+    const stream = get().cameraStream;
+    if (stream) {
+      stream.getTracks().forEach((t) => t.stop());
+    }
+    set({ cameraGranted: false, cameraStream: null });
   },
 }));

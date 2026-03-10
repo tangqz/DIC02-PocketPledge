@@ -56,6 +56,7 @@ export interface TextInput {
   type: "text-input";
   text: string;
   images?: SnapshotImage[];
+  tool_result?: boolean;
 }
 
 export interface InterruptSignal {
@@ -72,13 +73,22 @@ export interface FrontendPlaybackComplete {
   type: "frontend-playback-complete";
 }
 
+export interface CaptureContextResult {
+  type: "capture-context-result";
+  requestId: string;
+  prompt: string;
+  images: SnapshotImage[];
+  error?: string;
+}
+
 export type TxMessage =
   | MicAudioData
   | MicAudioEnd
   | TextInput
   | InterruptSignal
   | PeriodicScreenshot
-  | FrontendPlaybackComplete;
+  | FrontendPlaybackComplete
+  | CaptureContextResult;
 
 // ── Downstream (Backend → Frontend)  Rx ──
 //
@@ -211,6 +221,12 @@ export interface ModelInfo {
 export interface ControlMessage {
   type: "control";
   command: string;
+  payload?: {
+    requestId?: string;
+    prompt?: string;
+    sources?: Array<"camera" | "screen">;
+    reason?: string;
+  };
 }
 
 export type RxMessage =

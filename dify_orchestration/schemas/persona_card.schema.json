@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StudyBuddyPersonaCard",
+  "type": "object",
+  "required": ["character_config"],
+  "properties": {
+    "character_config": {
+      "type": "object",
+      "required": ["conf_name", "conf_uid", "character_name", "persona_prompt"],
+      "properties": {
+        "conf_name": { "type": "string" },
+        "conf_uid": { "type": "string" },
+        "character_name": { "type": "string" },
+        "persona_prompt": { "type": "string" },
+        "model_preferences": {
+          "type": "object",
+          "properties": {
+            "default_provider": { "type": "string" },
+            "default_model": { "type": "string" }
+          },
+          "additionalProperties": true
+        },
+        "style_notes": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

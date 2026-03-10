@@ -8,6 +8,82 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import type { SnapshotImage } from "@/lib/protocol";
 
+function captureFrameFromStream(
+  stream: MediaStream,
+  canvas: HTMLCanvasElement,
+  videoCache: Map<string, HTMLVideoElement>,
+): string | null {
+  const track = stream.getVideoTracks()[0];
+  if (!track || track.readyState !== "live") return null;
+
+  const settings = track.getSettings();
+  const width = settings.width || 640;
+  const height = settings.height || 480;
+  canvas.width = width;
+  canvas.height = height;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+
+  const streamKey = track.id;
+  let video = videoCache.get(streamKey);
+  if (!video) {
+    video = document.createElement("video");
+    video.srcObject = stream;
+    video.muted = true;
+    video.playsInline = true;
+    video.autoplay = true;
+    video.play().catch(() => undefined);
+    videoCache.set(streamKey, video);
+  }
+
+  if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+    return null;
+  }
+
+  try {
+    ctx.drawImage(video, 0, 0, width, height);
+    return canvas.toDataURL("image/jpeg", 0.7).split(",")[1];
+  } catch {
+    return null;
+  }
+}
+
+export async function captureImagesFromStreams(options: {
+  cameraEnabled?: boolean;
+  screenEnabled?: boolean;
+  cameraStream?: MediaStream | null;
+  screenStream?: MediaStream | null;
+}): Promise<SnapshotImage[]> {
+  const canvas = document.createElement("canvas");
+  const videoCache = new Map<string, HTMLVideoElement>();
+  const images: SnapshotImage[] = [];
+
+  try {
+    if (options.cameraEnabled && options.cameraStream) {
+      const data = captureFrameFromStream(options.cameraStream, canvas, videoCache);
+      if (data) {
+        images.push({ source: "camera", data, mime_type: "image/jpeg" });
+      }
+    }
+
+    if (options.screenEnabled && options.screenStream) {
+      const data = captureFrameFromStream(options.screenStream, canvas, videoCache);
+      if (data) {
+        images.push({ source: "screen", data, mime_type: "image/jpeg" });
+      }
+    }
+  } finally {
+    videoCache.forEach((video) => {
+      video.pause();
+      video.srcObject = null;
+    });
+    videoCache.clear();
+  }
+
+  return images;
+}
+
 export interface UseSnapshotOptions {
   /** Interval in milliseconds between captures */
   intervalMs?: number;
@@ -19,6 +95,10 @@ export interface UseSnapshotOptions {
   onCapture: (images: SnapshotImage[]) => void;
   /** Whether snapshot loop is active */
   active?: boolean;
+  /** Optional shared camera stream from store */
+  cameraStream?: MediaStream | null;
+  /** Optional shared screen stream from store */
+  screenStream?: MediaStream | null;
 }
 
 export function useSnapshot({
@@ -27,6 +107,8 @@ export function useSnapshot({
   screenEnabled = false,
   onCapture,
   active = false,
+  cameraStream,
+  screenStream,
 }: UseSnapshotOptions) {
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
@@ -36,6 +118,16 @@ export function useSnapshot({
   onCaptureRef.current = onCapture;
   const [cameraReady, setCameraReady] = useState(false);
   const [screenReady, setScreenReady] = useState(false);
+
+  useEffect(() => {
+    cameraStreamRef.current = cameraStream ?? null;
+    setCameraReady(Boolean(cameraStream));
+  }, [cameraStream]);
+
+  useEffect(() => {
+    screenStreamRef.current = screenStream ?? null;
+    setScreenReady(Boolean(screenStream));
+  }, [screenStream]);
 
   // Create an offscreen canvas for capturing
   useEffect(() => {
@@ -89,42 +181,7 @@ export function useSnapshot({
     (stream: MediaStream): string | null => {
       const canvas = canvasRef.current;
       if (!canvas) return null;
-
-      const track = stream.getVideoTracks()[0];
-      if (!track || track.readyState !== "live") return null;
-
-      const settings = track.getSettings();
-      const w = settings.width || 640;
-      const h = settings.height || 480;
-      canvas.width = w;
-      canvas.height = h;
-
-      // Use ImageCapture API if available, otherwise fallback to video element
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return null;
-
-      const streamKey = track.id;
-      let video = videoCacheRef.current.get(streamKey);
-      if (!video) {
-        video = document.createElement("video");
-        video.srcObject = stream;
-        video.muted = true;
-        video.playsInline = true;
-        video.autoplay = true;
-        video.play().catch(() => undefined);
-        videoCacheRef.current.set(streamKey, video);
-      }
-
-      if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
-        return null;
-      }
-
-      try {
-        ctx.drawImage(video, 0, 0, w, h);
-        return canvas.toDataURL("image/jpeg", 0.7).split(",")[1];
-      } catch {
-        return null;
-      }
+      return captureFrameFromStream(stream, canvas, videoCacheRef.current);
     },
     [],
   );
@@ -169,8 +226,6 @@ export function useSnapshot({
   // Cleanup streams on unmount
   useEffect(() => {
     return () => {
-      cameraStreamRef.current?.getTracks().forEach((t) => t.stop());
-      screenStreamRef.current?.getTracks().forEach((t) => t.stop());
       videoCacheRef.current.forEach((video) => {
         video.pause();
         video.srcObject = null;

@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 from typing import Generator
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, create_engine
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, create_engine, Boolean
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker, Session
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./reward.db")
@@ -28,7 +28,10 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    username = Column(String(100), nullable=False)
+    username = Column(String(100), nullable=False, unique=True)
+    email = Column(String(255), nullable=True, unique=True)
+    password_hash = Column(String(255), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
     role = Column(String(50), nullable=False, default="user")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

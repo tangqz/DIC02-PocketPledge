@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -11,6 +12,19 @@ import httpx
 
 
 logger = logging.getLogger(__name__)
+
+conversation_ids: dict[str, str] = {}
+
+
+def _pick_outputs_payload(payload: Any) -> dict[str, Any]:
+	if isinstance(payload, dict):
+		outputs = payload.get("outputs")
+		if isinstance(outputs, dict):
+			return outputs
+		data = payload.get("data")
+		if data is not None:
+			return _pick_outputs_payload(data)
+	return {}
 
 
 def _pick_text_payload(payload: Any) -> str:
@@ -54,21 +68,38 @@ class MockDifyClient:
 	) -> AsyncIterator[str]:
 		_ = session_id
 		lower_text = user_text.lower()
-		if "开始" in user_text:
-			reply = "[encouraging]好的，我们开始今天的专注任务吧。"
-		elif "计划" in user_text:
-			reply = "[proud]我已经记住你的计划了，先完成最重要的一步。"
-		elif "暂停" in user_text:
-			reply = "[neutral]如果确实有必要，请尽快回来继续。"
-		elif "完成" in user_text or "done" in lower_text:
-			reply = "[proud]做得不错，我们继续保持这个节奏。"
+		has_system_result = "[SYSTEM_RESULT:" in user_text
+
+		if has_system_result:
+			# Phase 2: substantive reply after system agent processing
+			if "action=start" in lower_text:
+				reply = "[encouraging]好的，计时器已经启动了，我们集中注意力！"
+			elif "action=pause" in lower_text:
+				if "approved=true" in lower_text:
+					reply = "[neutral]好吧，去吧，记得快点回来。"
+				else:
+					reply = "[strict]这才刚开始多久，再坚持一下！"
+			elif "action=resume" in lower_text:
+				reply = "[encouraging]欢迎回来，继续加油！"
+			elif "action=complete" in lower_text:
+				reply = "[proud]辛苦了，今天的学习结束了。"
+			elif "action=plan" in lower_text:
+				reply = "[encouraging]计划已经更新好了，按这个来吧！"
+			else:
+				reply = "[neutral]好的，我已经处理完了。"
+		elif any(keyword in user_text for keyword in ("开始", "暂停", "休息", "继续", "恢复", "结束", "停止", "计划", "安排", "看看", "帮我看")):
+			# Phase 1: action detected → short transition + <<SYS>>
+			reply = "[encouraging]好的稍等！\n<<SYS>>"
 		else:
+			# Simple chat — no system agent needed
 			reply = "[encouraging]我在，继续专注当前任务。"
 
-		if current_task:
-			reply += f"[neutral]当前目标是{current_task}。"
-		if images:
-			reply += "[neutral]我会结合你刚刚提供的画面继续陪你。"
+		if current_task and not has_system_result:
+			if "<<SYS>>" not in reply:
+				reply += f"[neutral]当前目标是{current_task}。"
+		if images and not has_system_result:
+			if "<<SYS>>" not in reply:
+				reply += "[neutral]我会结合你刚刚提供的画面继续陪你。"
 
 		for token in reply:
 			await asyncio.sleep(0)
@@ -93,6 +124,129 @@ class MockDifyClient:
 				return True
 		return False
 
+	async def run_system_agent(
+		self,
+		session_id: str,
+		inputs: dict[str, Any],
+	) -> dict[str, Any]:
+		user_text = str(inputs.get("user_text", ""))
+		state = str(inputs.get("supervision_state", "setup"))
+		current_task = str(inputs.get("current_task", "") or "完成当前学习任务")
+		pause_requests_count = int(inputs.get("pause_requests_count", 0) or 0)
+		focus_time_remaining = int(inputs.get("focus_time_remaining", 0) or 0)
+		total_focus_seconds = int(inputs.get("total_focus_seconds", 0) or 0)
+		lowered = user_text.lower()
+
+		def minutes_from_text(default: int) -> int:
+			import re
+			match = re.search(r"(\d{1,3})\s*(分钟|分|min|mins|minute|minutes)", user_text, re.IGNORECASE)
+			if match:
+				return max(1, min(int(match.group(1)), 180))
+			return default
+
+		if any(keyword in user_text or keyword in lowered for keyword in ("看看", "看下", "帮我看", "分析一下")):
+			sources: list[str] = []
+			if any(keyword in user_text for keyword in ("桌面", "屏幕", "页面", "窗口", "代码", "文档", "应用")):
+				sources.append("screen")
+			if any(keyword in user_text for keyword in ("摄像头", "镜头", "我这边", "我本人", "环境", "样子", "状态")):
+				sources.append("camera")
+			if not sources:
+				sources = ["screen", "camera"]
+			return {
+				"action": "none",
+				"approved": True,
+				"duration_seconds": 0,
+				"pause_seconds": 0,
+				"requires_capture": True,
+				"capture_sources": sources,
+				"system_events": [f"[SYSTEM_EVENT: VISUAL_CONTEXT_REQUESTED, SOURCES: {','.join(sources)}]"],
+				"plan": None,
+			}
+
+		if any(keyword in user_text or keyword in lowered for keyword in ("结束", "停止", "不学了", "end", "stop", "finish")):
+			return {
+				"action": "complete",
+				"approved": True,
+				"duration_seconds": 0,
+				"pause_seconds": 0,
+				"requires_capture": False,
+				"capture_sources": [],
+				"system_events": ["[SYSTEM_EVENT: SESSION_COMPLETED, SOURCE: system_agent]"],
+				"plan": None,
+			}
+
+		if any(keyword in user_text or keyword in lowered for keyword in ("继续", "恢复", "回来", "resume", "continue")):
+			return {
+				"action": "resume",
+				"approved": True,
+				"duration_seconds": 0,
+				"pause_seconds": 0,
+				"requires_capture": False,
+				"capture_sources": [],
+				"system_events": ["[SYSTEM_EVENT: PAUSE_RESUME_REQUESTED]"],
+				"plan": None,
+			}
+
+		if any(keyword in user_text or keyword in lowered for keyword in ("暂停", "休息", "上厕所", "洗手间", "喝水", "太累", "pause", "break")):
+			minutes = max(1, min(minutes_from_text(5), 10))
+			elapsed_seconds = max(total_focus_seconds - focus_time_remaining, 0)
+			urgent_reason = any(keyword in user_text for keyword in ("厕所", "洗手间", "头晕", "不舒服", "喝水", "restroom", "bathroom", "toilet"))
+			approved = urgent_reason or elapsed_seconds >= 300 or pause_requests_count == 0
+			return {
+				"action": "pause",
+				"approved": approved,
+				"duration_seconds": 0,
+				"pause_seconds": minutes * 60,
+				"requires_capture": False,
+				"capture_sources": [],
+				"system_events": [
+					f"[SYSTEM_EVENT: {'PAUSE_APPROVED' if approved else 'PAUSE_REJECTED'}, MINUTES: {minutes}]"
+				],
+				"plan": None,
+			}
+
+		if any(keyword in user_text or keyword in lowered for keyword in ("计划", "安排", "打算", "目标")):
+			minutes = minutes_from_text(25)
+			plan = {
+				"tasks": [{"id": "t1", "title": current_task if current_task != "完成当前学习任务" else user_text.strip() or current_task, "completed": False, "estimatedMinutes": minutes}],
+				"totalMinutes": minutes,
+				"suggestedDuration": minutes * 60,
+			}
+			return {
+				"action": "plan",
+				"approved": True,
+				"duration_seconds": 0,
+				"pause_seconds": 0,
+				"requires_capture": False,
+				"capture_sources": [],
+				"system_events": [f"[SYSTEM_EVENT: PLAN_UPDATED, TITLE: {plan['tasks'][0]['title']}, TOTAL_MINUTES: {minutes}]"],
+				"plan": plan,
+			}
+
+		if any(keyword in user_text or keyword in lowered for keyword in ("开始", "开工", "进入监督", "start")):
+			minutes = minutes_from_text(max(int(inputs.get("suggested_focus_seconds", 1500) or 1500) // 60, 1))
+			return {
+				"action": "start",
+				"approved": True,
+				"duration_seconds": minutes * 60,
+				"pause_seconds": 0,
+				"requires_capture": False,
+				"capture_sources": [],
+				"system_events": [f"[SYSTEM_EVENT: SESSION_START_REQUESTED, MINUTES: {minutes}]"],
+				"plan": None,
+			}
+
+		return {
+			"action": "none",
+			"approved": True,
+			"duration_seconds": 0,
+			"pause_seconds": 0,
+			"requires_capture": False,
+			"capture_sources": [],
+			"system_events": [],
+			"plan": None,
+		}
+
 
 class DifyClient:
 	"""Real Dify proxy with SSE chat support and blocking workflow support."""
@@ -100,9 +254,12 @@ class DifyClient:
 	def __init__(self) -> None:
 		self.base_url = os.getenv("DIFY_API_BASE", "").rstrip("/")
 		self.chat_endpoint = os.getenv("DIFY_CHAT_ENDPOINT", "/v1/chat-messages")
+		self.file_upload_endpoint = os.getenv("DIFY_FILE_UPLOAD_ENDPOINT", "/v1/files/upload")
 		self.vision_endpoint = os.getenv("DIFY_VISION_ENDPOINT", "/v1/workflows/run")
+		self.system_agent_endpoint = os.getenv("DIFY_SYSTEM_AGENT_ENDPOINT", "/v1/workflows/run")
 		self.chat_api_key = os.getenv("DIFY_CHAT_API_KEY", "")
 		self.vision_api_key = os.getenv("DIFY_VISION_API_KEY", self.chat_api_key)
+		self.system_agent_api_key = os.getenv("DIFY_SYSTEM_AGENT_API_KEY", self.chat_api_key)
 		self.timeout = float(os.getenv("MEDIA_AI_HTTP_TIMEOUT", "20"))
 
 	async def stream_chat(
@@ -115,16 +272,17 @@ class DifyClient:
 		if not self.base_url or not self.chat_api_key:
 			raise RuntimeError("Missing Dify chat configuration")
 
-		payload = {
+		payload: dict[str, Any] = {
 			"inputs": {
 				"current_task": current_task or "",
-				"images": images or [],
 			},
 			"query": user_text,
 			"response_mode": "streaming",
-			"conversation_id": session_id,
 			"user": session_id,
 		}
+		conversation_id = conversation_ids.get(session_id)
+		if conversation_id:
+			payload["conversation_id"] = conversation_id
 		headers = {
 			"Authorization": f"Bearer {self.chat_api_key}",
 			"Content-Type": "application/json",
@@ -132,6 +290,10 @@ class DifyClient:
 		}
 
 		async with httpx.AsyncClient(timeout=self.timeout) as client:
+			if images:
+				uploaded_files = await self._upload_chat_images(client, session_id, images)
+				if uploaded_files:
+					payload["files"] = uploaded_files
 			async with client.stream(
 				"POST",
 				f"{self.base_url}{self.chat_endpoint}",
@@ -150,9 +312,56 @@ class DifyClient:
 					except json.JSONDecodeError:
 						logger.debug("skip non-json SSE payload: %s", data)
 						continue
+					conversation_id = event.get("conversation_id")
+					if isinstance(conversation_id, str) and conversation_id:
+						conversation_ids[session_id] = conversation_id
 					text = _pick_text_payload(event)
 					if text:
 						yield text
+
+	async def _upload_chat_images(
+		self,
+		client: httpx.AsyncClient,
+		session_id: str,
+		images: list[dict[str, Any]],
+	) -> list[dict[str, str]]:
+		uploaded_files: list[dict[str, str]] = []
+		for index, image in enumerate(images):
+			base64_data = str(image.get("data", ""))
+			mime_type = str(image.get("mime_type", "image/jpeg"))
+			source = str(image.get("source", "image"))
+			if not base64_data:
+				continue
+			try:
+				file_bytes = base64.b64decode(base64_data)
+			except Exception:
+				logger.warning("Failed to decode chat image payload for session %s", session_id)
+				continue
+
+			response = await client.post(
+				f"{self.base_url}{self.file_upload_endpoint}",
+				headers={"Authorization": f"Bearer {self.chat_api_key}"},
+				data={"user": session_id},
+				files={
+					"file": (
+						f"{source}-{index}.jpg",
+						file_bytes,
+						mime_type,
+					)
+				},
+			)
+			response.raise_for_status()
+			result = response.json()
+			upload_file_id = result.get("id")
+			if isinstance(upload_file_id, str) and upload_file_id:
+				uploaded_files.append(
+					{
+						"type": "image",
+						"transfer_method": "local_file",
+						"upload_file_id": upload_file_id,
+					}
+				)
+		return uploaded_files
 
 	async def evaluate_vision(
 		self,
@@ -163,22 +372,26 @@ class DifyClient:
 		if not self.base_url or not self.vision_api_key:
 			raise RuntimeError("Missing Dify vision configuration")
 
-		image_payload = images[0] if images else {}
-		payload = {
-			"inputs": {
-				"image_base64": image_payload.get("data", ""),
-				"image_source": image_payload.get("source", ""),
-				"current_task": current_task or "",
-			},
-			"response_mode": "blocking",
-			"user": session_id or "vision-anonymous",
-		}
-		headers = {
-			"Authorization": f"Bearer {self.vision_api_key}",
-			"Content-Type": "application/json",
-		}
+		user = session_id or "vision-anonymous"
 
 		async with httpx.AsyncClient(timeout=self.timeout) as client:
+			uploaded = await self._upload_vision_images(client, user, images)
+			if not uploaded:
+				logger.warning("No images uploaded for vision evaluation")
+				return False
+
+			payload: dict[str, Any] = {
+				"inputs": {
+					"current_task": current_task or "",
+					"images": uploaded,
+				},
+				"response_mode": "blocking",
+				"user": user,
+			}
+			headers = {
+				"Authorization": f"Bearer {self.vision_api_key}",
+				"Content-Type": "application/json",
+			}
 			response = await client.post(
 				f"{self.base_url}{self.vision_endpoint}",
 				json=payload,
@@ -188,6 +401,69 @@ class DifyClient:
 			data = response.json()
 			verdict = _pick_bool_payload(data)
 			return bool(verdict)
+
+	async def _upload_vision_images(
+		self,
+		client: httpx.AsyncClient,
+		user: str,
+		images: list[dict[str, Any]],
+	) -> list[dict[str, str]]:
+		"""Upload images for vision workflow and return Dify file references."""
+		uploaded: list[dict[str, str]] = []
+		for index, image in enumerate(images):
+			base64_data = str(image.get("data", ""))
+			mime_type = str(image.get("mime_type", "image/jpeg"))
+			source = str(image.get("source", "image"))
+			if not base64_data:
+				continue
+			try:
+				file_bytes = base64.b64decode(base64_data)
+			except Exception:
+				logger.warning("Failed to decode vision image %d", index)
+				continue
+			response = await client.post(
+				f"{self.base_url}{self.file_upload_endpoint}",
+				headers={"Authorization": f"Bearer {self.vision_api_key}"},
+				data={"user": user},
+				files={"file": (f"{source}-{index}.jpg", file_bytes, mime_type)},
+			)
+			response.raise_for_status()
+			result = response.json()
+			upload_id = result.get("id")
+			if isinstance(upload_id, str) and upload_id:
+				uploaded.append({
+					"type": "image",
+					"transfer_method": "local_file",
+					"upload_file_id": upload_id,
+				})
+		return uploaded
+
+	async def run_system_agent(
+		self,
+		session_id: str,
+		inputs: dict[str, Any],
+	) -> dict[str, Any]:
+		if not self.base_url or not self.system_agent_api_key:
+			raise RuntimeError("Missing Dify system agent configuration")
+
+		payload = {
+			"inputs": inputs,
+			"response_mode": "blocking",
+			"user": session_id,
+		}
+		headers = {
+			"Authorization": f"Bearer {self.system_agent_api_key}",
+			"Content-Type": "application/json",
+		}
+
+		async with httpx.AsyncClient(timeout=self.timeout) as client:
+			response = await client.post(
+				f"{self.base_url}{self.system_agent_endpoint}",
+				json=payload,
+				headers=headers,
+			)
+			response.raise_for_status()
+			return _pick_outputs_payload(response.json())
 
 
 def get_dify_client() -> MockDifyClient | DifyClient:
