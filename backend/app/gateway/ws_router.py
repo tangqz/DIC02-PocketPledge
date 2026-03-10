@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import logging
 from datetime import datetime, timedelta
 from typing import Any, AsyncIterator
@@ -9,6 +8,7 @@ from typing import Any, AsyncIterator
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.gateway.session import SessionState
+from app.media_ai import evaluate_vision, process_text_chat, process_voice_chat
 
 logger = logging.getLogger(__name__)
 
@@ -110,27 +110,6 @@ async def deduct_penalty(user_id: str, amount: int) -> dict[str, int | bool]:
     balance = balances.setdefault(user_id, DEFAULT_BALANCE) - amount
     balances[user_id] = balance
     return {"balance": balance, "is_bankrupt": balance <= 0}
-
-
-async def process_voice_chat(
-    audio_samples: list[float], images: list[dict[str, Any]] | None = None
-) -> AsyncIterator[dict[str, str]]:
-    """Gateway-local mock E API: process voice and stream one response chunk."""
-    _ = (audio_samples, images)
-    await asyncio.sleep(0)
-    fake_wav_bytes = b"RIFF\x24\x00\x00\x00WAVEfmt "
-    fake_wav_base64 = base64.b64encode(fake_wav_bytes).decode("ascii")
-    yield {
-        "text": "我在，继续专注当前任务。",
-        "expression": "neutral",
-        "audio": fake_wav_base64,
-    }
-
-
-async def evaluate_vision(images: list[dict[str, Any]]) -> bool:
-    """Gateway-local mock E API: vision distraction verdict."""
-    await asyncio.sleep(0)
-    return bool(images)
 
 
 async def process_pause_negotiation(event_text: str) -> str:
@@ -235,7 +214,12 @@ async def handle_mic_audio_end(
     audio_samples = audio_buffers.pop(user_id, [])
     images = msg.get("images", [])
     sent_text = False
-    async for chunk in process_voice_chat(audio_samples, images):
+    async for chunk in process_voice_chat(
+        audio_samples,
+        images,
+        session_id=user_id,
+        current_task=session.current_plan,
+    ):
         text = str(chunk.get("text", ""))
         expression = str(chunk.get("expression", "neutral"))
         audio = str(chunk.get("audio", ""))
@@ -277,6 +261,7 @@ async def handle_text(user_id: str, session: SessionState, msg: dict[str, Any]) 
 
     if "计划" in text:
         await send_tool_call_status(user_id, "plan.update", "calling", "updating plan")
+        session.current_plan = "完成当前学习任务"
         await send_plan_update(
             user_id,
             {
@@ -294,8 +279,32 @@ async def handle_text(user_id: str, session: SessionState, msg: dict[str, Any]) 
         )
         await send_tool_call_status(user_id, "plan.update", "success", "plan updated")
 
-    await send_agent_text_chunk(user_id, f"收到：{text}")
-    await send_agent_text_end(user_id)
+    sent_text = False
+    async for chunk in process_text_chat(
+        user_text=text,
+        session_id=user_id,
+        images=msg.get("images", []),
+        current_task=session.current_plan,
+    ):
+        chunk_text = str(chunk.get("text", ""))
+        expression = str(chunk.get("expression", "neutral"))
+        audio = str(chunk.get("audio", ""))
+        if chunk_text:
+            sent_text = True
+            await send_agent_text_chunk(user_id, chunk_text)
+        if audio:
+            await send_audio(
+                user_id,
+                audio=audio,
+                expression=expression,
+                text=chunk_text or "...",
+            )
+
+    if sent_text:
+        await send_agent_text_end(user_id)
+    else:
+        await send_agent_text_chunk(user_id, f"收到：{text}")
+        await send_agent_text_end(user_id)
 
 
 async def handle_screenshot(user_id: str, session: SessionState, msg: dict[str, Any]) -> None:
@@ -304,7 +313,11 @@ async def handle_screenshot(user_id: str, session: SessionState, msg: dict[str, 
         return
 
     images = msg.get("images", [])
-    is_distracted = await evaluate_vision(images)
+    is_distracted = await evaluate_vision(
+        images,
+        current_task=session.current_plan,
+        session_id=user_id,
+    )
 
     if not is_distracted:
         session.distraction_streak = 0
