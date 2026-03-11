@@ -2,11 +2,21 @@
  *  SummaryLayout  –  Session end summary
  * ──────────────────────────────────────────────── */
 import { useSessionStore } from "@/stores/sessionStore";
+import { useChatStore } from "@/stores/chatStore";
+import { useAvatarStore } from "@/stores/avatarStore";
+import { useMediaStore } from "@/stores/mediaStore";
 import { useI18n } from "@/lib/i18n";
 import { formatRmbFromCents, formatSignedRmbFromCents } from "@/lib/currency";
 
 export default function SummaryLayout() {
   const { totalDuration, balance, balanceHistory, reset } = useSessionStore();
+  const clearMessages = useChatStore((s) => s.clearMessages);
+  const clearStreaming = useChatStore((s) => s.clearStreaming);
+  const setAgentSpeaking = useChatStore((s) => s.setAgentSpeaking);
+  const clearAudioMessages = useAvatarStore((s) => s.clearAudioMessages);
+  const requestPlaybackInterrupt = useAvatarStore((s) => s.requestPlaybackInterrupt);
+  const stopCamera = useMediaStore((s) => s.stopCamera);
+  const stopScreenShare = useMediaStore((s) => s.stopScreenShare);
   const { t, locale } = useI18n();
 
   const totalDeductions = balanceHistory
@@ -19,6 +29,19 @@ export default function SummaryLayout() {
   const minutes = Math.floor(totalDuration / 60);
 
   const coinSuffix = locale === "zh" ? "元" : "RMB";
+
+  const handleRestart = () => {
+    // Cleanup all transient runtime states before a hard reload.
+    requestPlaybackInterrupt();
+    clearAudioMessages();
+    clearStreaming();
+    setAgentSpeaking(false);
+    clearMessages();
+    stopCamera();
+    stopScreenShare();
+    reset();
+    window.location.reload();
+  };
 
   return (
     <div className="flex h-full items-center justify-center p-8 animate-fade-in">
@@ -79,7 +102,7 @@ export default function SummaryLayout() {
 
         {/* Action */}
         <button
-          onClick={reset}
+          onClick={handleRestart}
           className="w-full rounded-2xl bg-surface-elevated py-3 text-sm font-medium text-white/70 transition-all hover:bg-surface-elevated/80 hover:text-white"
         >
           {t("summary.restart")}
