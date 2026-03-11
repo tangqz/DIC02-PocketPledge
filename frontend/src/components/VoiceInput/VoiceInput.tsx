@@ -68,7 +68,7 @@ export default function VoiceInput() {
       {/* Main button */}
       <button
         onClick={handleClick}
-        className="group relative flex items-center justify-center"
+        className="group relative flex items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
         title={label}
         aria-label={label}
       >
