@@ -1,13 +1,35 @@
 import json
 import uuid
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy.orm import Session
 
-from .models import Transaction, User, Wallet
+from .models import (
+    ChatMessage,
+    PauseRequest,
+    SessionSummary,
+    StudyPlan,
+    Transaction,
+    User,
+    UserProfileDocument,
+    Wallet,
+)
 
-SERVICE_FEE_PER_MINUTE = 15  # 单位：分，15分=0.15元/分钟
-PENALTY_PER_DISTRACTION = 50  # 单位：分，每走神一次扣50分=0.5元
+FEN_PER_RMB = Decimal("100")
+SERVICE_FEE_PER_HOUR_RMB = Decimal("8.00")
+PENALTY_PER_DISTRACTION = 300  # 单位：分，每走神一次扣3元
+PROFILE_DOC_MAX_CHARS = 4000
+CHAT_MESSAGE_MAX_CHARS = 2000
+
+
+def _focus_fee_cents(planned_focus_minutes: int) -> int:
+    """Calculate focus fee in cents from RMB 8/hour, rounded to 2 decimals RMB."""
+    fee_rmb = (Decimal(planned_focus_minutes) * SERVICE_FEE_PER_HOUR_RMB / Decimal("60")).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+    return int((fee_rmb * FEN_PER_RMB).to_integral_value(rounding=ROUND_HALF_UP))
 
 
 def _now_iso() -> str:
@@ -52,14 +74,14 @@ def start_focus_session(db: Session, user_id: int, planned_focus_minutes: int) -
     _, user_wallet = _get_or_create_user_with_wallet(db, user_id)
     pool_wallet = _require_wallet(db, 1)
 
-    upfront_cost = planned_focus_minutes * SERVICE_FEE_PER_MINUTE
+    upfront_cost = _focus_fee_cents(planned_focus_minutes)
     if user_wallet.balance < upfront_cost:
         raise ValueError(f"insufficient balance: need {upfront_cost}, have {user_wallet.balance}")
 
     session_ref = _new_session_ref()
     tx_id = _new_tx_id()
 
-    with db.begin():
+    try:
         user_wallet.balance -= upfront_cost
         pool_wallet.balance += upfront_cost
 
@@ -74,13 +96,17 @@ def start_focus_session(db: Session, user_id: int, planned_focus_minutes: int) -
             meta_json=json.dumps(
                 {
                     "planned_focus_minutes": planned_focus_minutes,
-                    "service_fee_per_minute": SERVICE_FEE_PER_MINUTE,
+                    "service_fee_per_hour_rmb": str(SERVICE_FEE_PER_HOUR_RMB),
                     "created_at": _now_iso(),
                 },
                 ensure_ascii=False,
             ),
         )
         db.add(tx)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     db.refresh(user_wallet)
     db.refresh(pool_wallet)
@@ -123,7 +149,7 @@ def execute_penalty(
     charity_tx_id = _new_tx_id()
     pool_tx_id = _new_tx_id()
 
-    with db.begin():
+    try:
         user_wallet.balance -= actual_penalty
         charity_wallet.balance += charity_amount
         pool_wallet.balance += pool_amount
@@ -171,6 +197,10 @@ def execute_penalty(
                     ),
                 )
             )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     db.refresh(user_wallet)
 
@@ -214,4 +244,396 @@ def get_user_status(db: Session, user_id: int) -> dict:
         "user_id": user_id,
         "balance": wallet.balance,
         "is_bankrupt": wallet.balance <= 0,
+    }
+
+
+def _normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    def _parse_int(value: object) -> int | None:
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+            try:
+                return int(stripped)
+            except ValueError:
+                return None
+        return None
+
+    raw_tasks = plan.get("tasks") or []
+    tasks: list[dict[str, Any]] = []
+    for index, raw_task in enumerate(raw_tasks, start=1):
+        if not isinstance(raw_task, dict):
+            continue
+        title = str(raw_task.get("title") or "").strip()
+        if not title:
+            continue
+        estimated_minutes = raw_task.get("estimatedMinutes")
+        try:
+            normalized_minutes = int(estimated_minutes) if estimated_minutes is not None else None
+        except (TypeError, ValueError):
+            normalized_minutes = None
+        tasks.append(
+            {
+                "id": str(raw_task.get("id") or f"task_{index}"),
+                "title": title,
+                "completed": bool(raw_task.get("completed", False)),
+                "estimatedMinutes": normalized_minutes,
+            }
+        )
+
+    total_minutes = plan.get("totalMinutes")
+    normalized_total_minutes = _parse_int(total_minutes)
+    if normalized_total_minutes is None:
+        normalized_total_minutes = sum(task.get("estimatedMinutes") or 0 for task in tasks)
+
+    suggested_duration = plan.get("suggestedDuration")
+    derived_duration = 0
+    first_task = tasks[0] if tasks else None
+    first_task_minutes = first_task.get("estimatedMinutes") if isinstance(first_task, dict) else None
+    if isinstance(first_task_minutes, int) and first_task_minutes > 0:
+        derived_duration = first_task_minutes * 60
+    elif normalized_total_minutes > 0 and len(tasks) <= 1:
+        derived_duration = normalized_total_minutes * 60
+
+    normalized_duration = _parse_int(suggested_duration)
+    if normalized_duration is None:
+        normalized_duration = derived_duration or max(normalized_total_minutes, 0) * 60
+
+    if derived_duration > 0 and normalized_duration > 0 and abs(normalized_duration - derived_duration) >= 60:
+        normalized_duration = derived_duration
+
+    return {
+        "tasks": tasks,
+        "totalMinutes": max(normalized_total_minutes, 0),
+        "suggestedDuration": max(normalized_duration, 0),
+    }
+
+
+def _serialize_plan_row(row: StudyPlan) -> dict[str, Any]:
+    plan = json.loads(row.plan_json or "{}")
+    return {
+        "ok": True,
+        "plan_id": row.id,
+        "title": row.title,
+        "status": row.status,
+        "source": row.source,
+        "plan": plan,
+        "updated_at": row.updated_at.isoformat(),
+    }
+
+
+def get_active_plan(db: Session, user_id: int) -> dict[str, Any] | None:
+    row = (
+        db.query(StudyPlan)
+        .filter(StudyPlan.user_id == user_id, StudyPlan.status == "active")
+        .order_by(StudyPlan.updated_at.desc())
+        .first()
+    )
+    if row is None:
+        return None
+    return _serialize_plan_row(row)
+
+
+def upsert_study_plan(
+    db: Session,
+    user_id: int,
+    plan: dict[str, Any],
+    source: str = "system_agent",
+) -> dict[str, Any]:
+    normalized_plan = _normalize_plan(plan)
+    tasks = normalized_plan.get("tasks") or []
+    title = str(tasks[0].get("title") if tasks else "学习计划")
+    now = datetime.utcnow()
+
+    row = (
+        db.query(StudyPlan)
+        .filter(StudyPlan.user_id == user_id, StudyPlan.status == "active")
+        .order_by(StudyPlan.updated_at.desc())
+        .first()
+    )
+    if row is None:
+        row = StudyPlan(
+            id=f"plan_{uuid.uuid4().hex[:24]}",
+            user_id=user_id,
+            title=title,
+            status="active",
+            plan_json=json.dumps(normalized_plan, ensure_ascii=False),
+            source=source,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(row)
+    else:
+        row.title = title
+        row.plan_json = json.dumps(normalized_plan, ensure_ascii=False)
+        row.source = source
+        row.updated_at = now
+
+    db.commit()
+    db.refresh(row)
+    return _serialize_plan_row(row)
+
+
+def get_user_profile_document(db: Session, user_id: int) -> dict[str, Any]:
+    row = db.get(UserProfileDocument, user_id)
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "content": row.content if row else "",
+        "updated_at": row.updated_at.isoformat() if row else None,
+        "max_chars": PROFILE_DOC_MAX_CHARS,
+    }
+
+
+def upsert_user_profile_document(db: Session, user_id: int, content: str) -> dict[str, Any]:
+    normalized_content = content.strip()
+    if len(normalized_content) > PROFILE_DOC_MAX_CHARS:
+        normalized_content = normalized_content[:PROFILE_DOC_MAX_CHARS]
+
+    row = db.get(UserProfileDocument, user_id)
+    now = datetime.utcnow()
+    if row is None:
+        row = UserProfileDocument(
+            user_id=user_id,
+            content=normalized_content,
+            updated_at=now,
+        )
+        db.add(row)
+    else:
+        row.content = normalized_content
+        row.updated_at = now
+
+    db.commit()
+    db.refresh(row)
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "content": row.content,
+        "updated_at": row.updated_at.isoformat(),
+        "max_chars": PROFILE_DOC_MAX_CHARS,
+    }
+
+
+def append_user_profile_memory(db: Session, user_id: int, memory_line: str) -> dict[str, Any]:
+    """Append one profile memory line while keeping the profile document bounded."""
+    normalized_line = memory_line.strip()
+    if not normalized_line:
+        return get_user_profile_document(db, user_id)
+
+    current = get_user_profile_document(db, user_id).get("content", "")
+    merged = f"{current}\n{normalized_line}".strip() if current else normalized_line
+
+    # Keep recent lines to respect max size.
+    lines = [line.strip() for line in merged.splitlines() if line.strip()]
+    while lines and len("\n".join(lines)) > PROFILE_DOC_MAX_CHARS:
+        lines.pop(0)
+
+    return upsert_user_profile_document(db, user_id, "\n".join(lines))
+
+
+def create_chat_message(
+    db: Session,
+    user_id: int,
+    role: str,
+    content: str,
+    session_ref: str | None = None,
+) -> dict[str, Any]:
+    normalized_role = role.strip().lower()
+    if normalized_role not in {"user", "assistant", "system"}:
+        normalized_role = "system"
+
+    normalized_content = content.strip()
+    if not normalized_content:
+        return {"ok": False, "error": "empty content"}
+    if len(normalized_content) > CHAT_MESSAGE_MAX_CHARS:
+        normalized_content = normalized_content[:CHAT_MESSAGE_MAX_CHARS]
+
+    row = ChatMessage(
+        id=f"chat_{uuid.uuid4().hex[:24]}",
+        user_id=user_id,
+        session_ref=session_ref,
+        role=normalized_role,
+        content=normalized_content,
+        created_at=datetime.utcnow(),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {
+        "ok": True,
+        "id": row.id,
+        "user_id": row.user_id,
+        "session_ref": row.session_ref,
+        "role": row.role,
+        "content": row.content,
+        "created_at": row.created_at.isoformat(),
+    }
+
+
+def list_recent_chat_messages(db: Session, user_id: int, limit: int = 40) -> dict[str, Any]:
+    rows = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.user_id == user_id)
+        .order_by(ChatMessage.created_at.desc())
+        .limit(max(1, min(limit, 200)))
+        .all()
+    )
+    ordered_rows = list(reversed(rows))
+    items = [
+        {
+            "id": row.id,
+            "role": row.role,
+            "content": row.content,
+            "session_ref": row.session_ref,
+            "created_at": row.created_at.isoformat(),
+        }
+        for row in ordered_rows
+    ]
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "items": items,
+    }
+
+
+def _serialize_pause_request(row: PauseRequest) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "session_ref": row.session_ref,
+        "requested_text": row.requested_text,
+        "approved": row.approved,
+        "pause_seconds": row.pause_seconds,
+        "decision_reason": row.decision_reason,
+        "created_at": row.created_at.isoformat(),
+    }
+
+
+def record_pause_request(
+    db: Session,
+    user_id: int,
+    requested_text: str,
+    approved: bool,
+    pause_seconds: int | None = None,
+    decision_reason: str = "",
+    session_ref: str | None = None,
+    meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    row = PauseRequest(
+        id=f"pause_{uuid.uuid4().hex[:24]}",
+        user_id=user_id,
+        session_ref=session_ref,
+        requested_text=requested_text.strip(),
+        approved=approved,
+        pause_seconds=pause_seconds,
+        decision_reason=decision_reason.strip(),
+        meta_json=json.dumps(meta or {}, ensure_ascii=False),
+        created_at=datetime.utcnow(),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    payload = _serialize_pause_request(row)
+    payload["ok"] = True
+    return payload
+
+
+def list_pause_requests(db: Session, user_id: int, limit: int = 20) -> dict[str, Any]:
+    rows = (
+        db.query(PauseRequest)
+        .filter(PauseRequest.user_id == user_id)
+        .order_by(PauseRequest.created_at.desc())
+        .limit(max(1, min(limit, 100)))
+        .all()
+    )
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "items": [_serialize_pause_request(row) for row in rows],
+    }
+
+
+def _serialize_session_summary(row: SessionSummary) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "session_ref": row.session_ref,
+        "summary_text": row.summary_text,
+        "created_at": row.created_at.isoformat(),
+    }
+
+
+def create_session_summary(
+    db: Session,
+    user_id: int,
+    summary_text: str,
+    session_ref: str | None = None,
+    meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    row = SessionSummary(
+        id=f"summary_{uuid.uuid4().hex[:24]}",
+        user_id=user_id,
+        session_ref=session_ref,
+        summary_text=summary_text.strip(),
+        meta_json=json.dumps(meta or {}, ensure_ascii=False),
+        created_at=datetime.utcnow(),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    payload = _serialize_session_summary(row)
+    payload["ok"] = True
+    return payload
+
+
+def list_session_summaries(db: Session, user_id: int, limit: int = 20) -> dict[str, Any]:
+    rows = (
+        db.query(SessionSummary)
+        .filter(SessionSummary.user_id == user_id)
+        .order_by(SessionSummary.created_at.desc())
+        .limit(max(1, min(limit, 100)))
+        .all()
+    )
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "items": [_serialize_session_summary(row) for row in rows],
+    }
+
+
+def list_user_transactions(db: Session, user_id: int, limit: int = 50) -> dict[str, Any]:
+    rows = (
+        db.query(Transaction)
+        .filter((Transaction.from_user_id == user_id) | (Transaction.to_user_id == user_id))
+        .order_by(Transaction.created_at.desc())
+        .limit(max(1, min(limit, 200)))
+        .all()
+    )
+    items = []
+    for row in rows:
+        try:
+            meta = json.loads(row.meta_json or "{}")
+        except json.JSONDecodeError:
+            meta = {}
+        items.append(
+            {
+                "id": row.id,
+                "tx_type": row.tx_type,
+                "from_user_id": row.from_user_id,
+                "to_user_id": row.to_user_id,
+                "amount": row.amount,
+                "reason": row.reason,
+                "session_ref": row.session_ref,
+                "created_at": row.created_at.isoformat(),
+                "meta": meta,
+            }
+        )
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "items": items,
     }

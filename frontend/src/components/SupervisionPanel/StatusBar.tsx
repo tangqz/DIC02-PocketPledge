@@ -5,6 +5,7 @@
 import { useEffect, useRef } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useI18n } from "@/lib/i18n";
+import { formatRmbFromCents, formatSignedRmbFromCents } from "@/lib/currency";
 
 /** Format seconds to MM:SS */
 function fmt(s: number): string {
@@ -93,7 +94,7 @@ export default function StatusBar() {
             isDeducting ? "text-danger" : "text-success"
           }`}
         >
-          {balance}
+          {formatRmbFromCents(balance)}
         </span>
         {lastBalanceChange && (
           <span
@@ -103,8 +104,7 @@ export default function StatusBar() {
                 : "text-success/70"
             }`}
           >
-            {lastBalanceChange.change > 0 ? "+" : ""}
-            {lastBalanceChange.change}
+            {formatSignedRmbFromCents(lastBalanceChange.change)}
           </span>
         )}
       </div>

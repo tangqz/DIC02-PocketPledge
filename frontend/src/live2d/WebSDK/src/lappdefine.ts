@@ -39,10 +39,19 @@ export let ModelFileNames: string[] = []; // New array to store model file names
 
 // Function to update model configuration with both directory and file name
 export function updateModelConfig(resourcePath: string, modelDirectory: string, modelFileName: string, kScale?: number) {
-  console.log('Updating model config:', { resourcePath, modelDirectory, modelFileName, kScale });
-  ResourcesPath = resourcePath;
-  ModelDir = [modelDirectory];
-  ModelFileNames = [modelFileName]; // Store the actual model file name
+  const normalizedResourcePath = resourcePath.endsWith('/') ? resourcePath : `${resourcePath}/`;
+  const normalizedModelDirectory = modelDirectory.replace(/^\/+|\/+$/g, '');
+  const normalizedModelFileName = modelFileName.replace(/\.model3\.json$/i, '');
+
+  console.log('Updating model config:', {
+    resourcePath: normalizedResourcePath,
+    modelDirectory: normalizedModelDirectory,
+    modelFileName: normalizedModelFileName,
+    kScale,
+  });
+  ResourcesPath = normalizedResourcePath;
+  ModelDir = [normalizedModelDirectory];
+  ModelFileNames = [normalizedModelFileName];
   if (kScale !== undefined) {
     CurrentKScale = kScale;
   }
@@ -94,7 +103,7 @@ export const DebugTouchLogEnable = false;
 
 // Frameworkから出力するログのレベル設定
 // 设置Framework输出的日志级别
-export const CubismLoggingLevel: LogLevel = LogLevel.LogLevel_Verbose;
+export const CubismLoggingLevel = LogLevel.LogLevel_Verbose;
 
 // デフォルトのレンダーターゲットサイズ
 // 默认的渲染目标大小
@@ -103,3 +112,8 @@ export const RenderTargetHeight = 1000;
 
 export const ENABLE_LIMITED_FRAME_RATE = true;
 export const LIMITED_FRAME_RATE = 60;
+export const ModelInteractionDragThreshold = 14;
+export const ModelInteractionDragSensitivity = 0.3;
+export const ModelInteractionWheelScaleStep = 0.05;
+export const ModelInteractionMinScale = 0.15;
+export const ModelInteractionMaxScale = 8.0;

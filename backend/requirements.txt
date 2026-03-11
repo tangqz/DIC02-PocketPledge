@@ -2,3 +2,13 @@ fastapi>=0.116.0
 uvicorn>=0.35.0
 sqlalchemy==2.0.30
 pydantic==2.7.4
+httpx>=0.28.1
+openai>=1.30.0
+dashscope>=1.24.2
+edge-tts>=6.1.12
+numpy>=1.26.4
+onnxruntime>=1.20.1
+sherpa-onnx>=1.10.39
+faster-whisper>=1.1.0
+pillow>=10.2.0
+opencv-python>=4.9.0

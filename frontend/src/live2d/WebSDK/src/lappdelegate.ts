@@ -8,6 +8,7 @@
 import { CubismFramework, Option } from '@framework/live2dcubismframework';
 
 import * as LAppDefine from './lappdefine';
+import { LAppAdapter } from './lappadapter';
 import { LAppLive2DManager } from './lapplive2dmanager';
 import { LAppPal } from './lapppal';
 import { LAppTextureManager } from './lapptexturemanager';
@@ -102,6 +103,7 @@ export class LAppDelegate {
       canvas!.addEventListener('mousedown', onClickBegan, { passive: true });
       canvas!.addEventListener('mousemove', onMouseMoved, { passive: true });
       canvas!.addEventListener('mouseup', onClickEnded, { passive: true });
+      canvas!.addEventListener('wheel', onMouseWheel, { passive: false });
     }
 
     // AppViewの初期化
@@ -148,11 +150,15 @@ export class LAppDelegate {
    * 解放する。
    */
   public release(): void {
-    this._textureManager!.release();
-    this._textureManager = null;
+    if (this._textureManager) {
+      this._textureManager.release();
+      this._textureManager = null;
+    }
 
-    this._view!.release();
-    this._view = null;
+    if (this._view) {
+      this._view.release();
+      this._view = null;
+    }
 
     // リソースを解放
     LAppLive2DManager.releaseInstance();
@@ -211,7 +217,10 @@ export class LAppDelegate {
       gl!.blendFunc(gl!.SRC_ALPHA, gl!.ONE_MINUS_SRC_ALPHA);
 
       // 描画更新
-      this._view!.render();
+      if (!this._view) {
+        return;
+      }
+      this._view.render();
 
       // ループのために再帰呼び出し
       // 递归调用以进行循环
@@ -295,6 +304,10 @@ export class LAppDelegate {
 
   public getTextureManager(): LAppTextureManager | null {
     return this._textureManager;
+  }
+
+  public getAdapter(): LAppAdapter | null {
+    return LAppAdapter.getInstance();
   }
 
   /**
@@ -408,6 +421,15 @@ function onClickEnded(e: MouseEvent): void {
   const posY: number = e.clientY - rect.top;
 
   LAppDelegate.getInstance()._view!.onTouchesEnded(posX, posY);
+}
+
+function onMouseWheel(e: WheelEvent): void {
+  if (!LAppDelegate.getInstance()._view) {
+    return;
+  }
+
+  e.preventDefault();
+  LAppDelegate.getInstance()._view!.onMouseWheel(e.deltaY);
 }
 
 /**

@@ -843,7 +843,7 @@ export class LAppModel extends CubismUserModel {
    */
   public hitTest(hitArenaName: string, x: number, y: number): boolean {
     // 透明時は当たり判定無し。
-    if (this._opacity < 1) {
+    if (this._opacity < 1 || !this._modelSetting || !this.getModel()) {
       return false;
     }
 
@@ -867,7 +867,7 @@ export class LAppModel extends CubismUserModel {
    */
   public anyhitTest(x: number, y: number): string | null {
     // If opacity is less than 1, no hit detection
-    if (this._opacity < 1) {
+    if (this._opacity < 1 || !this._modelSetting || !this.getModel()) {
       return null;
     }
 

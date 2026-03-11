@@ -34,6 +34,7 @@ interface SessionState {
   // ── Core state ──
   supervisionState: SupervisionState;
   balance: number;
+  degradedMode: boolean;
   timerSeconds: number; // remaining seconds
   totalDuration: number; // total session duration in seconds
   currentTask: string;
@@ -83,6 +84,9 @@ interface SessionState {
   /** Tool call indicator */
   setActiveToolCall: (tc: { tool: string; status: string } | null) => void;
 
+  setBalance: (balance: number) => void;
+  setDegradedMode: (degraded: boolean) => void;
+
   /** Local timer tick (1s interval) */
   tickTimer: () => void;
   /** Tick the pause countdown (1s interval) */
@@ -99,7 +103,8 @@ interface SessionState {
 
 export const useSessionStore = create<SessionState>((set, get) => ({
   supervisionState: "setup",
-  balance: 100,
+  balance: 3000,
+  degradedMode: false,
   timerSeconds: 0,
   totalDuration: 0,
   currentTask: "",
@@ -123,6 +128,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     if (next === "active" && opts.duration !== undefined) {
       patch.timerSeconds = opts.duration;
       patch.totalDuration = opts.duration;
+      patch.degradedMode = false;
+    }
+    if (next === "setup") {
+      patch.degradedMode = false;
     }
     if (next === "active") {
       patch.pauseRemaining = undefined;
@@ -142,6 +151,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const event: BalanceEvent = { change, reason, timestamp: Date.now() };
     set({
       balance,
+      degradedMode: balance <= 0 ? get().degradedMode : false,
       balanceHistory: [...get().balanceHistory, event],
       lastBalanceChange: event,
     });
@@ -166,6 +176,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   setActiveToolCall: (tc) => set({ activeToolCall: tc }),
+
+  setBalance: (balance) => set({ balance }),
+  setDegradedMode: (degradedMode) => set({ degradedMode }),
 
   tickTimer: () => {
     set((s) => ({
@@ -197,7 +210,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   reset: () =>
     set({
       supervisionState: "setup",
-      balance: 100,
+      balance: 3000,
+      degradedMode: false,
       timerSeconds: 0,
       totalDuration: 0,
       currentTask: "",

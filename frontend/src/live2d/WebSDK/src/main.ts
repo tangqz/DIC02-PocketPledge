@@ -9,7 +9,7 @@
 
 import { LAppDelegate } from "./lappdelegate";
 import * as LAppDefine from "./lappdefine";
-import { LAppGlManager } from "./lappglmanager";
+import { canvas, LAppGlManager } from "./lappglmanager";
 import { LAppLive2DManager } from "./lapplive2dmanager";
 import { LAppAdapter } from "./lappadapter";
 
@@ -30,16 +30,26 @@ export function initializeLive2D(): void {
   );
   devLog("Model directories:", LAppDefine.ModelDir);
 
+  const currentCanvas = document.getElementById("canvas") as HTMLCanvasElement | null;
+  if (!currentCanvas) {
+    console.error("Failed to initialize Live2D: current canvas element not found");
+    return;
+  }
+
+  if (canvas && canvas !== currentCanvas) {
+    devLog("Rebinding Live2D to newly mounted canvas element");
+    LAppGlManager.releaseInstance();
+  }
+
   // Clean up any existing instances first
   if (LAppDelegate.getInstance()) {
     // Release existing model resources
     LAppLive2DManager.releaseInstance();
   }
 
-  if (
-    !LAppGlManager.getInstance() ||
-    !LAppDelegate.getInstance().initialize()
-  ) {
+  const glManager = LAppGlManager.getInstance();
+
+  if (!glManager || canvas !== currentCanvas || !LAppDelegate.getInstance().initialize()) {
     console.error("Failed to initialize Live2D");
     return;
   }

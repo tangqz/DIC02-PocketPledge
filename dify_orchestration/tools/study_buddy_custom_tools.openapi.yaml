@@ -1,0 +1,475 @@
+openapi: 3.0.3
+info:
+  title: Study Buddy Internal Tools
+  description: |
+    OpenAPI definition for importing Study Buddy backend endpoints into Dify custom tools.
+
+    These endpoints are designed for the system-agent workflow, which authenticates
+    with a fixed bearer token and passes the target user_id explicitly.
+  version: 1.1.1
+servers:
+  - url: http://dify.qizhi7z.com
+    description: Current frp-exposed backend endpoint reachable from the remote Dify server
+security:
+  - BearerAuth: []
+tags:
+  - name: Memory
+    description: User profile, summaries, and history for long-term memory.
+  - name: Supervision
+    description: Study status, active plan, and pause decisions.
+paths:
+  /api/business/users/{user_id}/status:
+    get:
+      tags: [Supervision]
+      summary: Get one user's status
+      description: Returns balance and bankruptcy state for the specified user.
+      operationId: getUserStatus
+      parameters:
+        - $ref: '#/components/parameters/UserIdPathParam'
+      responses:
+        '200':
+          description: Current user status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserStatusResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+  /api/business/internal/users/{user_id}/plan:
+    get:
+      tags: [Supervision]
+      summary: Get active study plan for a user
+      operationId: getUserPlan
+      parameters:
+        - $ref: '#/components/parameters/UserIdPathParam'
+      responses:
+        '200':
+          description: Active plan document
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanDocumentResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+    put:
+      tags: [Supervision]
+      summary: Update active study plan for a user
+      operationId: updateUserPlan
+      parameters:
+        - $ref: '#/components/parameters/UserIdPathParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanPayload'
+      responses:
+        '200':
+          description: Updated plan document
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanDocumentResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+  /api/business/internal/users/{user_id}/profile:
+    get:
+      tags: [Memory]
+      summary: Get profile document for a user
+      operationId: getUserProfile
+      parameters:
+        - $ref: '#/components/parameters/UserIdPathParam'
+      responses:
+        '200':
+          description: Current profile document
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileDocumentResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+    put:
+      tags: [Memory]
+      summary: Update profile document for a user
+      operationId: updateUserProfile
+      parameters:
+        - $ref: '#/components/parameters/UserIdPathParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileDocumentRequest'
+      responses:
+        '200':
+          description: Updated profile document
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileDocumentResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+  /api/business/internal/users/{user_id}/pause-requests:
+    get:
+      tags: [Memory]
+      summary: List pause requests for a user
+      operationId: listUserPauseRequests
+      parameters:
+        - $ref: '#/components/parameters/UserIdPathParam'
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Pause request history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PauseRequestListResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+    post:
+      tags: [Memory]
+      summary: Record pause request decision for a user
+      operationId: recordUserPauseRequest
+      parameters:
+        - $ref: '#/components/parameters/UserIdPathParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PauseRequestCreate'
+      responses:
+        '200':
+          description: Updated pause request history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PauseRequestListResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+  /api/business/internal/users/{user_id}/session-summaries:
+    get:
+      tags: [Memory]
+      summary: List session summaries for a user
+      operationId: listUserSessionSummaries
+      parameters:
+        - $ref: '#/components/parameters/UserIdPathParam'
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Session summary history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionSummaryListResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+    post:
+      tags: [Memory]
+      summary: Create session summary for a user
+      operationId: createUserSessionSummary
+      parameters:
+        - $ref: '#/components/parameters/UserIdPathParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionSummaryCreate'
+      responses:
+        '200':
+          description: Updated session summary history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionSummaryListResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+  /api/business/internal/users/{user_id}/transactions:
+    get:
+      tags: [Memory]
+      summary: List recent transactions for a user
+      operationId: listUserTransactions
+      parameters:
+        - $ref: '#/components/parameters/UserIdPathParam'
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Recent transactions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionListResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: Static token configured as DIFY_TOOL_BEARER_TOKEN
+  parameters:
+    UserIdPathParam:
+      name: user_id
+      in: path
+      required: true
+      description: Target user id whose data should be read or updated.
+      schema:
+        type: integer
+        minimum: 2
+    LimitParam:
+      name: limit
+      in: query
+      required: false
+      description: Max records to return.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+  responses:
+    ErrorResponse:
+      description: Error response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        detail:
+          type: string
+          nullable: true
+      additionalProperties: true
+    UserStatusResponse:
+      type: object
+      required: [ok, user_id, balance, is_bankrupt]
+      properties:
+        ok:
+          type: boolean
+        user_id:
+          type: integer
+        balance:
+          type: integer
+        is_bankrupt:
+          type: boolean
+    PlanTaskPayload:
+      type: object
+      required: [id, title, completed]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        completed:
+          type: boolean
+        estimatedMinutes:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 1440
+    PlanPayload:
+      type: object
+      required: [tasks, totalMinutes]
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlanTaskPayload'
+        totalMinutes:
+          type: integer
+          minimum: 0
+          maximum: 10080
+        suggestedDuration:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 604800
+    PlanDocumentResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        plan_id:
+          type: string
+          nullable: true
+        title:
+          type: string
+          nullable: true
+        status:
+          type: string
+          nullable: true
+        source:
+          type: string
+          nullable: true
+        plan:
+          allOf:
+            - $ref: '#/components/schemas/PlanPayload'
+          nullable: true
+        updated_at:
+          type: string
+          nullable: true
+    ProfileDocumentRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          maxLength: 4000
+    ProfileDocumentResponse:
+      type: object
+      required: [ok, user_id, content, max_chars]
+      properties:
+        ok:
+          type: boolean
+        user_id:
+          type: integer
+        content:
+          type: string
+        updated_at:
+          type: string
+          nullable: true
+        max_chars:
+          type: integer
+    PauseRequestCreate:
+      type: object
+      required: [requested_text, approved]
+      properties:
+        requested_text:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        approved:
+          type: boolean
+        pause_seconds:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 3600
+        decision_reason:
+          type: string
+          default: ''
+          maxLength: 255
+        session_ref:
+          type: string
+          nullable: true
+          maxLength: 100
+        meta:
+          type: object
+          nullable: true
+          additionalProperties: true
+    PauseRequestItem:
+      type: object
+      required: [id, requested_text, approved, decision_reason, created_at]
+      properties:
+        id:
+          type: string
+        session_ref:
+          type: string
+          nullable: true
+        requested_text:
+          type: string
+        approved:
+          type: boolean
+        pause_seconds:
+          type: integer
+          nullable: true
+        decision_reason:
+          type: string
+        created_at:
+          type: string
+    PauseRequestListResponse:
+      type: object
+      required: [ok, user_id, items]
+      properties:
+        ok:
+          type: boolean
+        user_id:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PauseRequestItem'
+    SessionSummaryCreate:
+      type: object
+      required: [summary_text]
+      properties:
+        summary_text:
+          type: string
+          minLength: 1
+          maxLength: 4000
+        session_ref:
+          type: string
+          nullable: true
+          maxLength: 100
+        meta:
+          type: object
+          nullable: true
+          additionalProperties: true
+    SessionSummaryItem:
+      type: object
+      required: [id, summary_text, created_at]
+      properties:
+        id:
+          type: string
+        session_ref:
+          type: string
+          nullable: true
+        summary_text:
+          type: string
+        created_at:
+          type: string
+    SessionSummaryListResponse:
+      type: object
+      required: [ok, user_id, items]
+      properties:
+        ok:
+          type: boolean
+        user_id:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SessionSummaryItem'
+    TransactionItem:
+      type: object
+      required: [id, tx_type, amount, reason, created_at, meta]
+      properties:
+        id:
+          type: string
+        tx_type:
+          type: string
+        from_user_id:
+          type: integer
+          nullable: true
+        to_user_id:
+          type: integer
+          nullable: true
+        amount:
+          type: integer
+        reason:
+          type: string
+        session_ref:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+        meta:
+          type: object
+          additionalProperties: true
+    TransactionListResponse:
+      type: object
+      required: [ok, user_id, items]
+      properties:
+        ok:
+          type: boolean
+        user_id:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransactionItem'

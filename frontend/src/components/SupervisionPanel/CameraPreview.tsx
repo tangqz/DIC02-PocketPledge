@@ -7,34 +7,31 @@ import { useMediaStore } from "@/stores/mediaStore";
 export default function CameraPreview() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [error, setError] = useState<string | null>(null);
-  const setCameraGranted = useMediaStore((s) => s.setCameraGranted);
+  const cameraStream = useMediaStore((s) => s.cameraStream);
+  const requestCamera = useMediaStore((s) => s.requestCamera);
 
   useEffect(() => {
-    let stream: MediaStream | null = null;
-
-    const init = async () => {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user", width: 640, height: 480 },
-          audio: false,
-        });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-        setCameraGranted(true);
-      } catch (err) {
-        setError("无法访问摄像头，请检查权限设置");
-        setCameraGranted(false);
-        console.warn("[CameraPreview]", err);
+    if (cameraStream) {
+      setError(null);
+      if (videoRef.current) {
+        videoRef.current.srcObject = cameraStream;
       }
-    };
+      return;
+    }
 
-    init();
+    requestCamera().then((granted) => {
+      if (!granted) {
+        setError("无法访问摄像头，请检查权限设置");
+      }
+    });
+  }, [cameraStream, requestCamera]);
 
-    return () => {
-      stream?.getTracks().forEach((t) => t.stop());
-    };
-  }, [setCameraGranted]);
+  useEffect(() => {
+    if (!videoRef.current) {
+      return;
+    }
+    videoRef.current.srcObject = cameraStream;
+  }, [cameraStream]);
 
   if (error) {
     return (

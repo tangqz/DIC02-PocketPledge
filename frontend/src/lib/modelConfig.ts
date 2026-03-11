@@ -21,6 +21,15 @@ export interface ModelConfig {
   tapMotions: Record<string, { motion: string; expression: string }>;
 }
 
+export interface CharacterProfile {
+  id: string;
+  displayName: string;
+  shortDescription: string;
+  personality: string;
+  supportedExpressions: string[];
+  model: ModelConfig;
+}
+
 /**
  * mao_pro model config.
  * LipSync param is "ParamA" (not the standard "ParamMouthOpenY").
@@ -56,6 +65,56 @@ export const MAO_PRO_CONFIG: ModelConfig = {
     HitAreaBody: { motion: "", expression: "surprise" },
   },
 };
+
+export const REN_PRO_CONFIG: ModelConfig = {
+  name: "natori_pro_zh",
+  url: "/live2d-models/natori_pro_zh/runtime/natori_pro_t06.model3.json",
+  kScale: 0.52,
+  emotionMap: {
+    neutral: 2,
+    fear: 3,
+    sadness: 3,
+    anger: 0,
+    disgust: 0,
+    joy: 4,
+    happy: 4,
+    smirk: 1,
+    surprise: 5,
+    encouraging: 4,
+    concerned: 3,
+    disappointed: 3,
+    proud: 4,
+    serious: 0,
+    playful: 1,
+  },
+  idleMotionGroup: "Idle",
+  talkMotionGroup: "Tap",
+  lipSyncParamId: "ParamMouthOpenY",
+  lipSyncGain: 2.0,
+  tapMotions: {
+    HitAreaHead: { motion: "Tap@Head", expression: "happy" },
+    HitAreaBody: { motion: "Flick@Body", expression: "encouraging" },
+  },
+};
+
+export const CHARACTER_MARKET: CharacterProfile[] = [
+  {
+    id: "milly",
+    displayName: "Milly",
+    shortDescription: "Warm but strict study buddy",
+    personality: "Emotional, playful, and sharp when you slack. She pushes you with pressure and care.",
+    supportedExpressions: ["neutral", "happy", "encouraging", "angry", "proud"],
+    model: MAO_PRO_CONFIG,
+  },
+  {
+    id: "ren",
+    displayName: "Natori",
+    shortDescription: "Calm mentor companion",
+    personality: "Steady and concise. Keeps boundaries and gives clear, rational guidance.",
+    supportedExpressions: ["neutral", "encouraging", "proud", "angry", "happy"],
+    model: REN_PRO_CONFIG,
+  },
+];
 
 /** Default model for the application */
 export const DEFAULT_MODEL_CONFIG = MAO_PRO_CONFIG;

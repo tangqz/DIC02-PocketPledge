@@ -113,26 +113,29 @@ export class LAppLive2DManager {
     }
 
     for (let i = 0; i < this._models.getSize(); i++) {
-      if (this._models.at(i).hitTest(LAppDefine.HitAreaNameHead, x, y)) {
+      const model = this._models.at(i);
+      if (!model || !model.getModel()) {
+        continue;
+      }
+
+      if (model.hitTest(LAppDefine.HitAreaNameHead, x, y)) {
         if (LAppDefine.DebugLogEnable) {
           LAppPal.printMessage(
             `[APP]hit area: [${LAppDefine.HitAreaNameHead}]`
           );
         }
-        this._models.at(i).setRandomExpression();
-      } else if (this._models.at(i).hitTest(LAppDefine.HitAreaNameBody, x, y)) {
+        model.setRandomExpression();
+      } else if (model.hitTest(LAppDefine.HitAreaNameBody, x, y)) {
         if (LAppDefine.DebugLogEnable) {
           LAppPal.printMessage(
             `[APP]hit area: [${LAppDefine.HitAreaNameBody}]`
           );
         }
-        this._models
-          .at(i)
-          .startRandomMotion(
-            LAppDefine.MotionGroupTapBody,
-            LAppDefine.PriorityNormal,
-            this._finishedMotion
-          );
+        model.startRandomMotion(
+          LAppDefine.MotionGroupTapBody,
+          LAppDefine.PriorityNormal,
+          this._finishedMotion
+        );
       }
     }
   }
@@ -142,6 +145,9 @@ export class LAppLive2DManager {
    * モデルの更新処理及び描画処理を行う
    */
   public onUpdate(): void {
+    if (!canvas) {
+      return;
+    }
     const { width, height } = canvas;
 
     const modelCount: number = this._models.getSize();
@@ -149,6 +155,10 @@ export class LAppLive2DManager {
     for (let i = 0; i < modelCount; ++i) {
       const projection: CubismMatrix44 = new CubismMatrix44();
       const model: LAppModel = this.getModel(i);
+
+      if (!model) {
+        continue;
+      }
 
       if (model.getModel()) {
         if (model.getModel().getCanvasWidth() > 1.0 && width < height) {
@@ -184,6 +194,9 @@ export class LAppLive2DManager {
    * サンプルアプリケーションではモデルセットの切り替えを行う。
    */
   public changeScene(index: number): void {
+    if (!LAppDefine.ModelDir.length || !LAppDefine.ModelDir[index]) {
+      return;
+    }
     this._sceneIndex = index;
     if (LAppDefine.DebugLogEnable) {
       LAppPal.printMessage(`[APP]model index: ${this._sceneIndex}`);
@@ -191,15 +204,20 @@ export class LAppLive2DManager {
 
     // Use the directory name and file name from our configuration
     const model: string = LAppDefine.ModelDir[index];
-    const modelPath: string = LAppDefine.ResourcesPath + model + '/';
+    const resourcePath = LAppDefine.ResourcesPath.endsWith('/')
+      ? LAppDefine.ResourcesPath
+      : `${LAppDefine.ResourcesPath}/`;
+    const modelPath: string = `${resourcePath}${model}/`;
     
     // Use ModelFileNames if available, otherwise fall back to ModelDir
     let modelJsonName: string = LAppDefine.ModelFileNames && 
                                 LAppDefine.ModelFileNames[index] ? 
                                 LAppDefine.ModelFileNames[index] : 
                                 LAppDefine.ModelDir[index];
-                                
-    modelJsonName += '.model3.json';
+
+    if (!modelJsonName.endsWith('.model3.json')) {
+      modelJsonName += '.model3.json';
+    }
 
     if (LAppDefine.DebugLogEnable) {
       LAppPal.printMessage(`[APP]model path: ${modelPath}${modelJsonName}`);
@@ -211,6 +229,9 @@ export class LAppLive2DManager {
   }
 
   public setViewMatrix(m: CubismMatrix44) {
+    if (!this._viewMatrix || !m) {
+      return;
+    }
     for (let i = 0; i < 16; i++) {
       this._viewMatrix.getArray()[i] = m.getArray()[i];
     }

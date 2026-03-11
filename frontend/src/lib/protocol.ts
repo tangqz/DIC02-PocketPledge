@@ -25,6 +25,12 @@ export interface SnapshotImage {
   source: "camera" | "screen";
   data: string; // base64 JPEG
   mime_type: string;
+  metadata?: {
+    width?: number;
+    height?: number;
+    displaySurface?: string;
+    facingMode?: string;
+  };
 }
 
 /**
@@ -56,6 +62,7 @@ export interface TextInput {
   type: "text-input";
   text: string;
   images?: SnapshotImage[];
+  tool_result?: boolean;
 }
 
 export interface InterruptSignal {
@@ -72,13 +79,39 @@ export interface FrontendPlaybackComplete {
   type: "frontend-playback-complete";
 }
 
+export interface CaptureContextResult {
+  type: "capture-context-result";
+  requestId: string;
+  prompt: string;
+  images: SnapshotImage[];
+  error?: string;
+}
+
+export interface ResumeNow {
+  type: "resume-now";
+}
+
+export interface SetLocale {
+  type: "set-locale";
+  locale: "zh" | "en";
+}
+
+export interface SetCharacter {
+  type: "set-character";
+  characterId: string;
+}
+
 export type TxMessage =
   | MicAudioData
   | MicAudioEnd
   | TextInput
   | InterruptSignal
   | PeriodicScreenshot
-  | FrontendPlaybackComplete;
+  | FrontendPlaybackComplete
+  | CaptureContextResult
+  | ResumeNow
+  | SetLocale
+  | SetCharacter;
 
 // ── Downstream (Backend → Frontend)  Rx ──
 //
@@ -102,6 +135,12 @@ export interface AudioMessage {
 /** Streaming text chunk from Agent's verbal output */
 export interface AgentTextChunk {
   type: "agent-text-chunk";
+  text: string;
+}
+
+/** Final ASR transcript for one user voice turn */
+export interface UserTranscript {
+  type: "user-transcript";
   text: string;
 }
 
@@ -198,6 +237,14 @@ export interface TimerSync {
 
 export interface ModelInfo {
   type: "model-info";
+  character_id?: string;
+  character?: {
+    name?: string;
+    displayName?: string;
+    description?: string;
+    languageHints?: string[];
+    personaStyle?: string;
+  };
   model_info: {
     name: string;
     url: string;
@@ -211,11 +258,18 @@ export interface ModelInfo {
 export interface ControlMessage {
   type: "control";
   command: string;
+  payload?: {
+    requestId?: string;
+    prompt?: string;
+    sources?: Array<"camera" | "screen">;
+    reason?: string;
+  };
 }
 
 export type RxMessage =
   | AudioMessage
   | AgentTextChunk
+  | UserTranscript
   | AgentTextEnd
   | SupervisionStateChange
   | BalanceUpdate
