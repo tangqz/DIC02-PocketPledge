@@ -66,5 +66,8 @@ export class LAppGlManager {
   /**
    * 解放する。
    */
-  public release(): void {}
+  public release(): void {
+    gl = null;
+    canvas = null;
+  }
 }

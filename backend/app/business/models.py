@@ -107,6 +107,17 @@ class SessionSummary(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id = Column(String(64), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    session_ref = Column(String(100), nullable=True)
+    role = Column(String(16), nullable=False)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:

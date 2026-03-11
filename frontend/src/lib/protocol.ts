@@ -25,6 +25,12 @@ export interface SnapshotImage {
   source: "camera" | "screen";
   data: string; // base64 JPEG
   mime_type: string;
+  metadata?: {
+    width?: number;
+    height?: number;
+    displaySurface?: string;
+    facingMode?: string;
+  };
 }
 
 /**
@@ -81,6 +87,20 @@ export interface CaptureContextResult {
   error?: string;
 }
 
+export interface ResumeNow {
+  type: "resume-now";
+}
+
+export interface SetLocale {
+  type: "set-locale";
+  locale: "zh" | "en";
+}
+
+export interface SetCharacter {
+  type: "set-character";
+  characterId: string;
+}
+
 export type TxMessage =
   | MicAudioData
   | MicAudioEnd
@@ -88,7 +108,10 @@ export type TxMessage =
   | InterruptSignal
   | PeriodicScreenshot
   | FrontendPlaybackComplete
-  | CaptureContextResult;
+  | CaptureContextResult
+  | ResumeNow
+  | SetLocale
+  | SetCharacter;
 
 // ── Downstream (Backend → Frontend)  Rx ──
 //
@@ -214,6 +237,14 @@ export interface TimerSync {
 
 export interface ModelInfo {
   type: "model-info";
+  character_id?: string;
+  character?: {
+    name?: string;
+    displayName?: string;
+    description?: string;
+    languageHints?: string[];
+    personaStyle?: string;
+  };
   model_info: {
     name: string;
     url: string;

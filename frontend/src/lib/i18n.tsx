@@ -42,7 +42,7 @@ const zh: TranslationDict = {
   "focus.openChat": "打开对话",
 
   // Status
-  "status.balance": "余额",
+  "status.balance": "余额(RMB)",
   "status.timer": "计时",
   "status.state.active": "专注中",
   "status.state.paused": "已暂停",
@@ -102,7 +102,7 @@ const en: TranslationDict = {
   "focus.send": "Send",
   "focus.openChat": "Open Chat",
 
-  "status.balance": "Balance",
+  "status.balance": "Balance (RMB)",
   "status.timer": "Timer",
   "status.state.active": "Focusing",
   "status.state.paused": "Paused",
@@ -133,6 +133,7 @@ const en: TranslationDict = {
 };
 
 const dictionaries: Record<Locale, TranslationDict> = { zh, en };
+const LOCALE_KEY = "sb_locale";
 
 // ── Context ──
 interface I18nContextValue {
@@ -145,6 +146,10 @@ const I18nContext = createContext<I18nContextValue | null>(null);
 
 /** Detect browser language; fallback to 'zh' */
 function detectLocale(): Locale {
+  const stored = localStorage.getItem(LOCALE_KEY);
+  if (stored === "zh" || stored === "en") {
+    return stored;
+  }
   const lang = navigator.language.toLowerCase();
   if (lang.startsWith("zh")) return "zh";
   return "en";
@@ -153,6 +158,11 @@ function detectLocale(): Locale {
 export function I18nProvider({ children }: { children: React.ReactNode }) {
   const [locale, setLocale] = useState<Locale>(detectLocale);
 
+  const setLocaleWithPersist = useCallback((nextLocale: Locale) => {
+    localStorage.setItem(LOCALE_KEY, nextLocale);
+    setLocale(nextLocale);
+  }, []);
+
   const t = useCallback(
     (key: string): string => {
       return dictionaries[locale][key] ?? key;
@@ -160,7 +170,7 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
     [locale],
   );
 
-  const value = useMemo(() => ({ locale, setLocale, t }), [locale, t]);
+  const value = useMemo(() => ({ locale, setLocale: setLocaleWithPersist, t }), [locale, setLocaleWithPersist, t]);
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }

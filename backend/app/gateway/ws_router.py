@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 import logging
+import re
 from datetime import UTC, datetime, timedelta
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable, Coroutine
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
@@ -12,16 +14,20 @@ from app.auth.security import decode_access_token
 from app.business.models import SessionLocal
 from app.business.crud import (
     PENALTY_PER_DISTRACTION,
+    append_user_profile_memory as db_append_user_profile_memory,
+    create_chat_message as db_create_chat_message,
     create_session_summary as db_create_session_summary,
     execute_penalty as db_execute_penalty,
     get_active_plan as db_get_active_plan,
+    get_user_profile_document as db_get_user_profile_document,
     get_user_status as db_get_user_status,
+    list_recent_chat_messages as db_list_recent_chat_messages,
     record_pause_request as db_record_pause_request,
     start_focus_session as db_start_focus_session,
     upsert_study_plan as db_upsert_study_plan,
 )
 from app.gateway.session import SessionState
-from app.media_ai import evaluate_vision, process_text_chat, transcribe_audio
+from app.media_ai import evaluate_start_readiness, evaluate_vision, process_text_chat, transcribe_audio
 from app.system_agent import SystemAgentService
 
 logger = logging.getLogger(__name__)
@@ -36,6 +42,7 @@ class ConnectionManager:
         self.active_connections: dict[str, WebSocket] = {}
         self.user_states: dict[str, SessionState] = {}
         self.disconnected_at: dict[str, datetime] = {}
+        self.pending_messages: dict[str, list[dict[str, Any]]] = {}
         self.reconnect_ttl = timedelta(seconds=reconnect_ttl_seconds)
 
     async def connect(self, user_id: str, websocket: WebSocket) -> SessionState:
@@ -53,20 +60,48 @@ class ConnectionManager:
         if session is None:
             session = SessionState()
             self.user_states[user_id] = session
+
+        queued_messages = self.pending_messages.pop(user_id, [])
+        if queued_messages:
+            logger.info("flushing queued ws messages user_id=%s count=%s", user_id, len(queued_messages))
+            for payload in queued_messages:
+                await self.send_personal_message(user_id, payload)
         return session
 
-    def disconnect(self, user_id: str) -> None:
-        """Mark one user as disconnected while preserving session for TTL."""
+    def disconnect(self, user_id: str, websocket: WebSocket | None = None) -> bool:
+        """Mark one user as disconnected while preserving session for TTL.
+
+        Returns True only when the disconnect applies to the currently active
+        websocket. Stale websocket handlers must not clear a newer connection.
+        """
+        current = self.active_connections.get(user_id)
+        if websocket is not None and current is not None and current is not websocket:
+            logger.info("ignoring stale ws disconnect user_id=%s", user_id)
+            return False
+
+        if current is None and websocket is not None:
+            return False
+
         self.active_connections.pop(user_id, None)
         self.disconnected_at[user_id] = datetime.now(UTC)
         self.cleanup_expired_states()
+        return True
 
     async def send_personal_message(self, user_id: str, payload: dict) -> None:
         """Send one message to a specific active user."""
         websocket = self.active_connections.get(user_id)
         if websocket is None:
+            logger.warning("ws tx queued user_id=%s reason=no-active-connection payload=%s", user_id, _summarize_payload(payload))
+            self.pending_messages.setdefault(user_id, []).append(payload)
             return
-        await websocket.send_json(payload)
+        logger.info("ws tx user_id=%s payload=%s", user_id, _summarize_payload(payload))
+        try:
+            await websocket.send_json(payload)
+        except Exception:
+            logger.exception("ws tx failed, queueing for retry user_id=%s", user_id)
+            if self.active_connections.get(user_id) is websocket:
+                self.active_connections.pop(user_id, None)
+            self.pending_messages.setdefault(user_id, []).append(payload)
 
     async def broadcast(self, payload: dict) -> None:
         """Broadcast one message to all active users."""
@@ -88,17 +123,51 @@ class ConnectionManager:
 
 manager = ConnectionManager(reconnect_ttl_seconds=300)
 
-MODEL_INFO = {
-    "name": "mao_pro",
-    "url": "/live2d-models/mao_pro/mao_pro.model3.json",
-    "kScale": 0.5,
-    "emotionMap": {
-        "happy": 3,
-        "neutral": 0,
+CHARACTER_CATALOG: dict[str, dict[str, Any]] = {
+    "milly": {
+        "name": "milly",
+        "displayName": "Milly",
+        "description": "Warm but strict study partner. Keeps pressure when needed.",
+        "languageHints": ["zh", "en"],
+        "personaStyle": "supportive-strict",
+        "modelInfo": {
+            "name": "mao_pro",
+            "url": "/live2d-models/mao_pro/mao_pro.model3.json",
+            "kScale": 0.5,
+            "emotionMap": {
+                "neutral": 0,
+                "happy": 3,
+                "encouraging": 4,
+                "angry": 2,
+                "proud": 7,
+            },
+            "idleMotionGroup": "Idle",
+            "talkMotionGroup": "",
+        },
     },
-    "idleMotionGroup": "Idle",
-    "talkMotionGroup": "",
+    "ren": {
+        "name": "natori",
+        "displayName": "Natori",
+        "description": "Calm mentor companion. Rational, concise and disciplined.",
+        "languageHints": ["zh", "en"],
+        "personaStyle": "calm-mentor",
+        "modelInfo": {
+            "name": "natori_pro_zh",
+            "url": "/live2d-models/natori_pro_zh/runtime/natori_pro_t06.model3.json",
+            "kScale": 0.52,
+            "emotionMap": {
+                "neutral": 2,
+                "happy": 4,
+                "encouraging": 4,
+                "angry": 0,
+                "proud": 4,
+            },
+            "idleMotionGroup": "Idle",
+            "talkMotionGroup": "Tap",
+        },
+    },
 }
+DEFAULT_CHARACTER_ID = "milly"
 
 DEFAULT_TOTAL_SECONDS = 1500
 DISTRACTION_THRESHOLD = 3
@@ -106,6 +175,9 @@ PENALTY_AMOUNT = PENALTY_PER_DISTRACTION
 BOT_NAME = "Study Buddy"
 DEFAULT_BALANCE = 100
 SYS_MARKER = "<<SYS>>"
+LOG_PREVIEW_LIMIT = 240
+START_CAPTURE_SOURCES = ["camera", "screen"]
+MAX_AGENT_STAGES = 6
 
 watchdog_tasks: dict[str, asyncio.Task] = {}
 audio_buffers: dict[str, list[float]] = {}
@@ -116,6 +188,36 @@ def _duration_to_minutes(duration_seconds: int | None) -> int | None:
     if duration_seconds is None:
         return None
     return max(1, duration_seconds // 60)
+
+
+def _format_rmb_from_cents(cents: int) -> str:
+    return f"{(int(cents) / 100):.2f}"
+
+
+def _build_start_error_system_event(error_message: str | None) -> str:
+    cleaned = str(error_message or "").strip()
+    match = re.search(r"insufficient balance: need\s+(\d+),\s+have\s+(\d+)", cleaned, re.IGNORECASE)
+    if match:
+        need = int(match.group(1))
+        have = int(match.group(2))
+        return (
+            "[SYSTEM_RESULT: START_REJECTED, CODE: insufficient_balance, "
+            f"NEED_RMB: {_format_rmb_from_cents(need)}, HAVE_RMB: {_format_rmb_from_cents(have)}]"
+        )
+    if cleaned:
+        detail = cleaned.replace("]", " ").replace("\n", " ").strip()
+        return f"[SYSTEM_RESULT: START_REJECTED, CODE: generic_error, DETAIL: {detail}]"
+    return "[SYSTEM_RESULT: START_REJECTED, CODE: generic_error]"
+
+
+def _build_start_outcome_system_events(start_result: dict[str, Any] | None, duration_seconds: int) -> list[str]:
+    if start_result and start_result.get("ok"):
+        upfront_cost_cents = int(start_result.get("upfront_cost", 0))
+        return [
+            f"[SYSTEM_RESULT: SESSION_STARTED, MINUTES: {max(duration_seconds // 60, 1)}, COST_RMB: {_format_rmb_from_cents(upfront_cost_cents)}]"
+        ]
+
+    return [_build_start_error_system_event((start_result or {}).get("error"))]
 
 
 def _build_fallback_system_events(
@@ -131,7 +233,7 @@ def _build_fallback_system_events(
         minutes = details.get("minutes") or _duration_to_minutes(directive.duration_seconds)
         cost = details.get("cost")
         if cost is not None:
-            return [f"[SYSTEM_RESULT: SESSION_STARTED, MINUTES: {minutes}, COST: {cost}]"]
+            return [f"[SYSTEM_RESULT: SESSION_STARTED, MINUTES: {minutes}, COST_RMB: {_format_rmb_from_cents(int(cost))}]"]
         return [f"[SYSTEM_RESULT: SESSION_STARTED, MINUTES: {minutes}]"]
     if directive.action == "pause":
         if directive.approved:
@@ -157,6 +259,48 @@ def _first_task_title(plan: dict[str, Any] | None) -> str | None:
     if not tasks:
         return None
     return str(tasks[0].get("title") or "").strip() or None
+
+
+def _has_system_result(system_events: list[str], keyword: str) -> bool:
+    return any(keyword in str(event) for event in system_events)
+
+
+def _plan_focus_seconds(plan: dict[str, Any] | None) -> int | None:
+    if not plan:
+        return None
+
+    suggested_duration = plan.get("suggestedDuration")
+    try:
+        normalized_suggested = int(str(suggested_duration).strip())
+    except (TypeError, ValueError):
+        normalized_suggested = 0
+
+    tasks = plan.get("tasks") or []
+    first_task = tasks[0] if tasks else None
+    first_task_minutes = first_task.get("estimatedMinutes") if isinstance(first_task, dict) else None
+    try:
+        normalized_first_minutes = int(str(first_task_minutes).strip())
+    except (TypeError, ValueError):
+        normalized_first_minutes = 0
+
+    if normalized_first_minutes > 0:
+        first_task_seconds = normalized_first_minutes * 60
+        if normalized_suggested <= 0 or abs(normalized_suggested - first_task_seconds) >= 60:
+            return first_task_seconds
+
+    if normalized_suggested > 0:
+        return normalized_suggested
+
+    total_minutes = plan.get("totalMinutes")
+    try:
+        normalized_total_minutes = int(str(total_minutes).strip())
+    except (TypeError, ValueError):
+        normalized_total_minutes = 0
+
+    if normalized_total_minutes > 0 and len(tasks) <= 1:
+        return normalized_total_minutes * 60
+
+    return None
 
 
 def _build_completion_summary(session: SessionState) -> tuple[str, dict[str, Any]]:
@@ -214,9 +358,9 @@ async def _hydrate_session_plan(user_id: str, session: SessionState) -> None:
     if stored_plan and stored_plan.get("plan"):
         session.current_plan_data = stored_plan["plan"]
         session.current_plan = _first_task_title(session.current_plan_data)
-        suggested_duration = session.current_plan_data.get("suggestedDuration")
-        if suggested_duration is not None:
-            session.suggested_focus_seconds = int(suggested_duration)
+        resolved_focus_seconds = _plan_focus_seconds(session.current_plan_data)
+        if resolved_focus_seconds is not None:
+            session.suggested_focus_seconds = resolved_focus_seconds
 
 
 async def _record_pause_request(
@@ -267,10 +411,70 @@ async def _persist_session_summary(user_id: str, session: SessionState) -> None:
             session_ref=session.session_ref,
             meta=meta,
         )
+        profile_line = (
+            f"- session_ref={session.session_ref or 'n/a'}; task={session.current_plan or 'untitled'}; "
+            f"focused_minutes={meta.get('focused_seconds', 0) // 60}; "
+            f"pause_requests={meta.get('pause_requests_count', 0)}; "
+            f"bankrupt={meta.get('is_bankrupt', False)}"
+        )
+        db_append_user_profile_memory(db=db, user_id=uid, memory_line=profile_line)
     except Exception:
         logger.exception("failed to persist session summary, user_id=%s", user_id)
     finally:
         db.close()
+
+
+async def _persist_chat_message(user_id: str, role: str, content: str, session_ref: str | None) -> None:
+    try:
+        uid = int(user_id)
+    except ValueError:
+        return
+
+    db = SessionLocal()
+    try:
+        db_create_chat_message(
+            db=db,
+            user_id=uid,
+            role=role,
+            content=content,
+            session_ref=session_ref,
+        )
+    except Exception:
+        logger.exception("failed to persist chat message, user_id=%s role=%s", user_id, role)
+    finally:
+        db.close()
+
+
+async def _append_chat(session: SessionState, user_id: str, role: str, content: str) -> None:
+    session.append_chat(role, content)
+    await _persist_chat_message(user_id=user_id, role=role, content=content, session_ref=session.session_ref)
+
+
+async def _hydrate_chat_history(user_id: str, session: SessionState) -> None:
+    if session.chat_history:
+        return
+    try:
+        uid = int(user_id)
+    except ValueError:
+        return
+
+    db = SessionLocal()
+    try:
+        result = db_list_recent_chat_messages(db=db, user_id=uid, limit=session.MAX_HISTORY_TURNS)
+    except Exception:
+        logger.exception("failed to load chat history, user_id=%s", user_id)
+        return
+    finally:
+        db.close()
+
+    for item in result.get("items", []):
+        role = str(item.get("role", "")).strip().lower()
+        if role not in {"user", "assistant", "system"}:
+            continue
+        content = str(item.get("content", "")).strip()
+        if not content:
+            continue
+        session.chat_history.append({"role": role, "content": content})
 
 
 def _split_sys_marker_buffer(buffer: str) -> tuple[str, str, bool]:
@@ -297,6 +501,96 @@ def _split_sys_marker_buffer(buffer: str) -> tuple[str, str, bool]:
 def _sanitize_agent_text(text: str) -> str:
     """Remove internal trigger markers from any user-visible agent text."""
     return text.replace(SYS_MARKER, "").strip()
+
+
+def _can_start_session(session: SessionState) -> bool:
+    return bool((session.current_plan or "").strip())
+
+
+def _profile_has_minimum_basics(profile_content: str) -> bool:
+    normalized = (profile_content or "").strip().lower()
+    if not normalized:
+        return False
+
+    has_calling_hint = bool(
+        re.search(r"(称呼|叫我|你可以叫我|nickname|call me|preferred name|name[:：])", normalized)
+    )
+    has_education_hint = bool(
+        re.search(r"(教育|学历|学校|年级|专业|本科|研究生|高中|初中|大学|education|school|major|grade|background)", normalized)
+    )
+    return has_calling_hint and has_education_hint
+
+
+async def _is_profile_ready_for_start(user_id: str) -> bool:
+    try:
+        uid = int(user_id)
+    except ValueError:
+        return False
+
+    db = SessionLocal()
+    try:
+        profile_doc = db_get_user_profile_document(db=db, user_id=uid)
+    except Exception:
+        logger.exception("failed to load user profile for start check, user_id=%s", user_id)
+        return False
+    finally:
+        db.close()
+
+    return _profile_has_minimum_basics(str(profile_doc.get("content", "")))
+
+
+def _truncate_log_text(value: Any, limit: int = LOG_PREVIEW_LIMIT) -> str:
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}..."
+
+
+def _summarize_payload(payload: dict[str, Any]) -> str:
+    summary: dict[str, Any] = {}
+    for key, value in payload.items():
+        if key == "audio" and isinstance(value, list):
+            summary[key] = f"<{len(value)} samples>"
+            continue
+        if key == "audio" and isinstance(value, str):
+            summary[key] = f"<{len(value)} base64 chars>"
+            continue
+        if key == "images" and isinstance(value, list):
+            summary[key] = [
+                {
+                    "source": item.get("source"),
+                    "mime_type": item.get("mime_type"),
+                    "data": f"<{len(str(item.get('data', '')))} base64 chars>",
+                }
+                for item in value[:4]
+                if isinstance(item, dict)
+            ]
+            if len(value) > 4:
+                summary[key].append({"remaining": len(value) - 4})
+            continue
+        if isinstance(value, str):
+            summary[key] = _truncate_log_text(value)
+            continue
+        if isinstance(value, dict):
+            summary[key] = {nested_key: _truncate_log_text(nested_value) for nested_key, nested_value in value.items()}
+            continue
+        if isinstance(value, list):
+            summary[key] = f"<list len={len(value)}>"
+            continue
+        summary[key] = value
+    return json.dumps(summary, ensure_ascii=False)
+
+
+def _normalize_system_events(events: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for event in events:
+        text = str(event).strip()
+        if not text:
+            continue
+        if text.startswith("[SYSTEM_EVENT:"):
+            text = text.replace("[SYSTEM_EVENT:", "[SYSTEM_RESULT:", 1)
+        normalized.append(text)
+    return normalized
 
 
 async def get_user_balance(user_id: str) -> dict[str, int | bool]:
@@ -363,6 +657,9 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     user_id = str(user_id_int)
 
     session = await manager.connect(user_id, ws)
+    requested_character_id = str(ws.query_params.get("characterId") or "").strip().lower()
+    if requested_character_id in CHARACTER_CATALOG:
+        session.character_id = requested_character_id
     session.total_focus_seconds = session.total_focus_seconds or DEFAULT_TOTAL_SECONDS
     session.focus_time_remaining = (
         session.focus_time_remaining
@@ -371,12 +668,13 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     )
     await apply_balance_gate(user_id, session)
     await _hydrate_session_plan(user_id, session)
+    await _hydrate_chat_history(user_id, session)
 
     task = watchdog_tasks.get(user_id)
     if task is None or task.done():
         watchdog_tasks[user_id] = asyncio.create_task(run_watchdog(user_id))
 
-    await send_model_info(user_id)
+    await send_model_info(user_id, session)
     await send_supervision_state(user_id, session)
     await send_timer_sync(user_id, session)
     if session.current_plan_data is not None:
@@ -386,21 +684,23 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 
     try:
         while True:
-            message = await ws.receive_json()
-            await dispatch_message(user_id, session, message)
+            try:
+                message = await ws.receive_json()
+            except RuntimeError as exc:
+                logger.info("WebSocket receive ended, user_id=%s error=%s", user_id, exc)
+                break
+            asyncio.create_task(dispatch_message(user_id, session, message))
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected, user_id=%s", user_id)
     finally:
-        manager.disconnect(user_id)
-        task = watchdog_tasks.pop(user_id, None)
-        if task is not None:
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-        audio_buffers.pop(user_id, None)
+        disconnected_current = manager.disconnect(user_id, ws)
+        if disconnected_current:
+            audio_buffers.pop(user_id, None)
 
 
 async def dispatch_message(user_id: str, session: SessionState, msg: dict[str, Any]) -> None:
     """Route frontend messages by protocol type from backend-interface.md."""
+    logger.info("ws rx user_id=%s payload=%s", user_id, _summarize_payload(msg))
     msg_type = msg.get("type")
 
     if msg_type == "text-input":
@@ -429,6 +729,38 @@ async def dispatch_message(user_id: str, session: SessionState, msg: dict[str, A
 
     if msg_type == "capture-context-result":
         await handle_capture_context_result(user_id, session, msg)
+        return
+
+    if msg_type == "set-locale":
+        locale = str(msg.get("locale", "")).strip().lower()
+        if locale in {"zh", "en"}:
+            session.language_mode = locale
+        return
+
+    if msg_type == "set-character":
+        character_id = str(msg.get("characterId", "")).strip().lower()
+        if character_id in CHARACTER_CATALOG:
+            if session.character_id == character_id:
+                return
+            session.character_id = character_id
+            session.chat_history = []
+            await send_model_info(user_id, session)
+            await send_control(user_id, "chat-cleared", {"reason": "character_switched", "characterId": character_id})
+        return
+
+    if msg_type == "resume-now":
+        if session.supervision_state == "paused":
+            await handle_resume(user_id, session)
+            phase_text = await stream_agent_reply(
+                user_id=user_id,
+                user_text="[SYSTEM_RESULT: RESUME_APPROVED]",
+                images=[],
+                current_task=session.current_plan,
+                language_mode=session.language_mode,
+                character_id=session.character_id,
+                include_audio=not session.is_bankrupt,
+            )
+            await _append_chat(session, user_id, "assistant", phase_text)
         return
 
     if msg_type == "ping":
@@ -462,36 +794,46 @@ async def handle_mic_audio_end(
     logger.info("mic-audio-end received, user_id=%s samples=%s", user_id, len(audio_samples))
     user_text = await transcribe_audio(audio_samples)
     if not user_text:
-        user_text = "我会继续专注。"
+        logger.info("ignoring empty ASR transcript as noise, user_id=%s", user_id)
+        return
 
     logger.info("ASR transcript generated, user_id=%s text=%s", user_id, user_text)
-
-    session.append_chat("user", user_text)
-    await send_user_transcript(user_id, user_text)
-
-    sent_text = False
-    async for chunk in process_text_chat(
-        user_text=user_text,
-        session_id=user_id,
+    await _handle_user_turn(
+        user_id=user_id,
+        session=session,
+        text=user_text,
         images=images,
-        current_task=session.current_plan,
-    ):
-        text = str(chunk.get("text", ""))
-        expression = str(chunk.get("expression", "neutral"))
-        audio = str(chunk.get("audio", ""))
-
-        if text:
-            sent_text = True
-            await send_agent_text_chunk(user_id, text)
-        if audio:
-            await send_audio(user_id, audio=audio, expression=expression, text=text or "...")
-
-    if sent_text:
-        await send_agent_text_end(user_id)
+        is_tool_result=False,
+        emit_user_transcript=True,
+    )
 
 
 async def handle_text(user_id: str, session: SessionState, msg: dict[str, Any]) -> None:
-    """Handle text-input: white-brain-first with <<SYS>> trigger for system agent.
+    """Handle text-input by routing through the shared two-phase agent flow."""
+    text = str(msg.get("text", ""))
+    images = msg.get("images", [])
+    is_tool_result = bool(msg.get("tool_result"))
+    await _handle_user_turn(
+        user_id=user_id,
+        session=session,
+        text=text,
+        images=images,
+        is_tool_result=is_tool_result,
+        emit_user_transcript=False,
+    )
+
+
+async def _handle_user_turn(
+    user_id: str,
+    session: SessionState,
+    text: str,
+    images: list[dict[str, Any]] | None,
+    is_tool_result: bool,
+    append_user_message: bool = True,
+    emit_user_transcript: bool = False,
+    stage_depth: int = 0,
+) -> None:
+    """Run one user turn through white-brain-first and optional system-agent follow-up.
 
     Phase 1: stream white brain reply while detecting <<SYS>> marker.
     If no <<SYS>>: done (simple chat).
@@ -500,54 +842,114 @@ async def handle_text(user_id: str, session: SessionState, msg: dict[str, Any]) 
       - Execute directive (start/pause/resume/complete/plan/visual-capture)
       - Phase 2: call white brain again with [SYSTEM_RESULT: ...] context
     """
-    text = str(msg.get("text", ""))
-    images = msg.get("images", [])
-    is_tool_result = bool(msg.get("tool_result"))
     logger.info("text-input received, user_id=%s text=%s", user_id, text)
 
-    session.append_chat("user", text)
+    if stage_depth >= MAX_AGENT_STAGES:
+        logger.warning("agent stage limit reached, user_id=%s text=%s", user_id, _truncate_log_text(text))
+        await send_tool_call_status(user_id, "orchestration", "error", "stage limit reached")
+        return
+
+    if emit_user_transcript:
+        await send_user_transcript(user_id, text)
+
+    if append_user_message:
+        await _append_chat(session, user_id, "user", text)
+
+    async def _run_system_agent() -> Any:
+        await send_tool_call_status(user_id, "system.agent", "calling", "processing system request")
+        return await system_agent.build_directive(user_id, text, session)
 
     # Phase 1: stream white brain, detect <<SYS>> trigger
-    phase1_text, sys_detected = await _stream_and_detect_sys(
+    phase1_text, sys_detected, directive_task = await _stream_and_detect_sys(
         user_id=user_id,
         user_text=text,
         images=images,
         current_task=session.current_plan,
+        language_mode=session.language_mode,
+        character_id=session.character_id,
         include_audio=not session.is_bankrupt,
+        on_sys_detected=_run_system_agent,
     )
 
     if not sys_detected:
-        session.append_chat("assistant", phase1_text)
+        await _append_chat(session, user_id, "assistant", phase1_text)
         return
+
+    logger.info(
+        "phase1 handoff accepted, user_id=%s assistant_text=%s",
+        user_id,
+        _truncate_log_text(phase1_text),
+    )
 
     # <<SYS>> detected — invoke system agent for structured directive
-    await send_tool_call_status(user_id, "system.agent", "calling", "processing system request")
-    directive = await system_agent.build_directive(user_id, text, session)
+    directive = await (directive_task or asyncio.create_task(_run_system_agent()))
     if directive.error_message:
         await send_tool_call_status(user_id, "system.agent", "error", directive.error_message)
-        fallback_text = "我这边替你提交了，但系统处理超时了。你先别急，我再试一次。"
-        await send_agent_text_chunk(user_id, fallback_text)
-        await send_agent_text_end(user_id)
-        session.append_chat("assistant", fallback_text)
-        return
-    await send_tool_call_status(user_id, "system.agent", "success", f"action={directive.action}")
-    system_events = list(directive.system_events)
-
-    # Handle visual capture request
-    if directive.requires_capture and not images and not is_tool_result:
-        request_id = uuid.uuid4().hex
-        session.set_pending_capture(request_id, text, directive.capture_sources)
-        await send_tool_call_status(user_id, "visual.capture", "calling", "capturing visual context")
-        await send_control(
-            user_id,
-            "request-visual-context",
-            {
-                "requestId": request_id,
-                "prompt": text,
-                "sources": directive.capture_sources,
-            },
+        await _handle_user_turn(
+            user_id=user_id,
+            session=session,
+            text=f"{text}\n[SYSTEM_RESULT: SYSTEM_AGENT_ERROR, DETAIL: {_truncate_log_text(directive.error_message)}]",
+            images=images,
+            is_tool_result=True,
+            append_user_message=False,
+            emit_user_transcript=False,
+            stage_depth=stage_depth + 1,
         )
         return
+    await send_tool_call_status(user_id, "system.agent", "success", f"action={directive.action}")
+    system_events = _normalize_system_events(list(directive.system_events))
+
+    # Handle visual capture request
+    if directive.requires_capture:
+        if _has_system_result(system_events, "profile_incomplete"):
+            # Profile completion has higher priority than visual checks.
+            directive.requires_capture = False
+
+        capture_sources = directive.capture_sources or START_CAPTURE_SOURCES
+        needs_start_readiness = (
+            directive.action == "start"
+            or _has_system_result(system_events, "START_ENV_CHECK_REQUIRED")
+        )
+
+        if needs_start_readiness and images and session.supervision_state == "setup":
+            profile_ready = await _is_profile_ready_for_start(user_id)
+            if not profile_ready:
+                await send_tool_call_status(user_id, "supervision.start", "error", "profile incomplete")
+                system_events = ["[SYSTEM_RESULT: START_REJECTED, CODE: profile_incomplete, DETAIL: 请先轻松聊聊你的称呼和教育背景]"]
+            elif not _can_start_session(session):
+                await send_tool_call_status(user_id, "supervision.start", "error", "task not agreed")
+                system_events = ["[SYSTEM_RESULT: START_REJECTED, CODE: task_not_agreed]"]
+            else:
+                readiness = await evaluate_start_readiness(
+                    images=images,
+                    current_task=session.current_plan,
+                    session_id=user_id,
+                )
+                if not readiness.get("approved"):
+                    await send_tool_call_status(user_id, "supervision.start", "error", "environment check failed")
+                    system_events = [f"[SYSTEM_RESULT: START_REJECTED, CODE: environment_check_failed, DETAIL: {readiness.get('reason') or '机位或全屏共享不满足要求'}]"]
+                else:
+                    duration_seconds = directive.duration_seconds or session.suggested_focus_seconds or DEFAULT_TOTAL_SECONDS
+                    start_result = await handle_start(user_id, session, duration_seconds=duration_seconds)
+                    system_events = _build_start_outcome_system_events(start_result, duration_seconds)
+
+        elif not images and not is_tool_result:
+            request_id = uuid.uuid4().hex
+            capture_mode = "start-readiness" if needs_start_readiness else "system-agent"
+            if directive.action == "start" and directive.duration_seconds:
+                session.suggested_focus_seconds = directive.duration_seconds
+            session.set_pending_capture(request_id, text, capture_sources, mode=capture_mode)
+            await send_tool_call_status(user_id, "visual.capture", "calling", "capturing visual context")
+            await send_control(
+                user_id,
+                "request-visual-context",
+                {
+                    "requestId": request_id,
+                    "prompt": text,
+                    "sources": capture_sources,
+                },
+            )
+            return
 
     # Execute directive actions
     if directive.action == "complete" and session.supervision_state in {"active", "paused"}:
@@ -560,24 +962,48 @@ async def handle_text(user_id: str, session: SessionState, msg: dict[str, Any]) 
         plan_title = _first_task_title(session.current_plan_data)
         if plan_title:
             session.current_plan = plan_title
-        session.suggested_focus_seconds = int(
-            (session.current_plan_data or {}).get("suggestedDuration") or DEFAULT_TOTAL_SECONDS
-        )
-        await send_plan_update(user_id, session.current_plan_data)
+        session.suggested_focus_seconds = _plan_focus_seconds(session.current_plan_data) or DEFAULT_TOTAL_SECONDS
+        if session.current_plan_data is not None:
+            await send_plan_update(user_id, session.current_plan_data)
         await send_tool_call_status(user_id, "plan.update", "success", "plan updated")
 
     elif directive.action == "start" and session.supervision_state == "setup":
-        duration_seconds = directive.duration_seconds or session.suggested_focus_seconds or DEFAULT_TOTAL_SECONDS
-        start_result = await handle_start(user_id, session, duration_seconds=duration_seconds)
-        if start_result:
-            system_events = _build_fallback_system_events(
-                directive,
-                session,
+        profile_ready = await _is_profile_ready_for_start(user_id)
+        if not profile_ready:
+            await send_tool_call_status(user_id, "supervision.start", "error", "profile incomplete")
+            system_events = ["[SYSTEM_RESULT: START_REJECTED, CODE: profile_incomplete, DETAIL: 请先轻松聊聊你的称呼和教育背景]"]
+        elif not _can_start_session(session):
+            await send_tool_call_status(user_id, "supervision.start", "error", "task not agreed")
+            system_events = ["[SYSTEM_RESULT: START_REJECTED, CODE: task_not_agreed]"]
+        elif not images:
+            request_id = uuid.uuid4().hex
+            duration_seconds = directive.duration_seconds or session.suggested_focus_seconds or DEFAULT_TOTAL_SECONDS
+            session.suggested_focus_seconds = duration_seconds
+            session.set_pending_capture(request_id, text, START_CAPTURE_SOURCES, mode="start-readiness")
+            await send_tool_call_status(user_id, "visual.capture", "calling", "checking camera and full-screen share before start")
+            await send_control(
+                user_id,
+                "request-visual-context",
                 {
-                    "minutes": max(duration_seconds // 60, 1),
-                    "cost": start_result.get("upfront_cost"),
+                    "requestId": request_id,
+                    "prompt": text,
+                    "sources": START_CAPTURE_SOURCES,
                 },
             )
+            return
+        else:
+            readiness = await evaluate_start_readiness(
+                images=images,
+                current_task=session.current_plan,
+                session_id=user_id,
+            )
+            if not readiness.get("approved"):
+                await send_tool_call_status(user_id, "supervision.start", "error", "environment check failed")
+                system_events = [f"[SYSTEM_RESULT: START_REJECTED, CODE: environment_check_failed, DETAIL: {readiness.get('reason') or '机位或全屏共享不满足要求'}]"]
+            else:
+                duration_seconds = directive.duration_seconds or session.suggested_focus_seconds or DEFAULT_TOTAL_SECONDS
+                start_result = await handle_start(user_id, session, duration_seconds=duration_seconds)
+                system_events = _build_start_outcome_system_events(start_result, duration_seconds)
 
     elif directive.action == "pause" and session.supervision_state == "active":
         session.pause_requests_count += 1
@@ -601,35 +1027,44 @@ async def handle_text(user_id: str, session: SessionState, msg: dict[str, Any]) 
                 pause_seconds=None,
                 decision_reason="pause rejected",
             )
-            system_events = _build_fallback_system_events(
+            system_events = _normalize_system_events(_build_fallback_system_events(
                 directive,
                 session,
                 {"reason": "此次暂停审核未通过"},
-            )
+            ))
 
     elif directive.action == "resume" and session.supervision_state == "paused":
         await handle_resume(user_id, session)
-        system_events = _build_fallback_system_events(directive, session)
+        system_events = _normalize_system_events(_build_fallback_system_events(directive, session))
 
     if session.is_bankrupt and directive.action != "complete":
         await send_control(user_id, "downgrade")
         system_events.append("[SYSTEM_EVENT: DEGRADE_MODE_ACTIVE]")
 
     if not system_events:
-        system_events = _build_fallback_system_events(directive, session)
+        system_events = _normalize_system_events(_build_fallback_system_events(directive, session))
 
-    # Phase 2: call white brain again with system results
+    # Continue the turn with system results. The white brain may decide to stop
+    # here or emit <<SYS>> again for another system round.
     result_context = "\n".join(system_events) if system_events else f"[SYSTEM_RESULT: action={directive.action}, approved={directive.approved}]"
     enriched_text = f"{text}\n{result_context}"
-
-    phase2_text = await stream_agent_reply(
-        user_id=user_id,
-        user_text=enriched_text,
-        images=images,
-        current_task=session.current_plan,
-        include_audio=not session.is_bankrupt,
+    logger.info(
+        "follow-up request, user_id=%s stage=%s action=%s result_context=%s",
+        user_id,
+        stage_depth + 1,
+        directive.action,
+        _truncate_log_text(result_context),
     )
-    session.append_chat("assistant", phase2_text)
+    await _handle_user_turn(
+        user_id=user_id,
+        session=session,
+        text=enriched_text,
+        images=images,
+        is_tool_result=True,
+        append_user_message=False,
+        emit_user_transcript=False,
+        stage_depth=stage_depth + 1,
+    )
 
 
 async def handle_capture_context_result(
@@ -646,29 +1081,177 @@ async def handle_capture_context_result(
         return
 
     prompt = str(msg.get("prompt", "")).strip() or (session.pending_capture_prompt or "")
+    capture_mode = session.pending_capture_mode
     session.clear_pending_capture()
     if error or not images:
         await send_tool_call_status(user_id, "visual.capture", "error", error or "no images captured")
-        await stream_agent_reply(
+        await _handle_user_turn(
             user_id=user_id,
-            user_text="[SYSTEM_EVENT: VISUAL_CONTEXT_CAPTURE_FAILED]\n我这边还没看到画面，你先确认桌面共享和摄像头权限。",
+            session=session,
+            text=(f"{prompt}\n[SYSTEM_EVENT: VISUAL_CONTEXT_CAPTURE_FAILED]" if prompt else "[SYSTEM_EVENT: VISUAL_CONTEXT_CAPTURE_FAILED]"),
             images=[],
-            current_task=session.current_plan,
-            include_audio=not session.is_bankrupt,
+            is_tool_result=True,
+            append_user_message=False,
+            emit_user_transcript=False,
+            stage_depth=1,
         )
         return
 
     await send_tool_call_status(user_id, "visual.capture", "success", "visual context captured")
-    await handle_text(
-        user_id,
-        session,
-        {
-            "type": "text-input",
-            "text": prompt,
-            "images": images,
-            "tool_result": True,
-        },
+    if capture_mode == "start-readiness":
+        profile_ready = await _is_profile_ready_for_start(user_id)
+        if not profile_ready:
+            await send_tool_call_status(user_id, "supervision.start", "error", "profile incomplete")
+            system_events = [
+                "[SYSTEM_RESULT: START_REJECTED, CODE: profile_incomplete, DETAIL: 请先轻松聊聊你的称呼和教育背景]"
+            ]
+            result_context = "\n".join(system_events)
+            await _handle_user_turn(
+                user_id=user_id,
+                session=session,
+                text=f"{prompt}\n{result_context}",
+                images=images,
+                is_tool_result=True,
+                append_user_message=False,
+                emit_user_transcript=False,
+                stage_depth=1,
+            )
+            return
+
+        readiness = await evaluate_start_readiness(
+            images=images,
+            current_task=session.current_plan,
+            session_id=user_id,
+        )
+        if readiness.get("approved"):
+            duration_seconds = session.suggested_focus_seconds or DEFAULT_TOTAL_SECONDS
+            start_result = await handle_start(user_id, session, duration_seconds=duration_seconds)
+            system_events = _build_start_outcome_system_events(start_result, duration_seconds)
+        else:
+            await send_tool_call_status(user_id, "supervision.start", "error", "environment check failed")
+            system_events = [
+                f"[SYSTEM_RESULT: START_REJECTED, CODE: environment_check_failed, DETAIL: {readiness.get('reason') or '机位或全屏共享不满足要求'}]"
+            ]
+
+        result_context = "\n".join(system_events)
+        await _handle_user_turn(
+            user_id=user_id,
+            session=session,
+            text=f"{prompt}\n{result_context}",
+            images=images,
+            is_tool_result=True,
+            append_user_message=False,
+            emit_user_transcript=False,
+            stage_depth=1,
+        )
+        return
+
+    await _handle_user_turn(
+        user_id=user_id,
+        session=session,
+        text=prompt,
+        images=images,
+        is_tool_result=True,
+        append_user_message=False,
+        emit_user_transcript=False,
     )
+
+
+def _build_temporal_stitched_image(session: SessionState, current_images: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    import time
+    import io
+    import base64
+    from PIL import Image, ImageDraw, ImageFont
+
+    now = time.time()
+    session.image_timeline.append((now, current_images))
+    session.image_timeline = [item for item in session.image_timeline if now - item[0] < 400]
+
+    targets = [0, 5, 10, 30, 60, 120]
+    selected = []
+    seen_ids = set()
+
+    for t_offset in targets:
+        target_time = now - t_offset
+        if not session.image_timeline:
+            break
+        closest = min(session.image_timeline, key=lambda x: abs(x[0] - target_time))
+        # only include if not chosen before
+        item_id = id(closest[1])
+        if item_id not in seen_ids:
+            seen_ids.add(item_id)
+            selected.append(closest)
+
+    selected.sort(key=lambda x: x[0], reverse=True)
+    ROW_HEIGHT = 240
+    row_images = []
+
+    try:
+        font = ImageFont.load_default()
+    except Exception:
+        font = None
+
+    for timestamp, imgs in selected:
+        pil_imgs = []
+        for img_dict in imgs:
+            b64 = str(img_dict.get("data", ""))
+            if not b64:
+                continue
+            try:
+                img_data = base64.b64decode(b64)
+                pil_imgs.append(Image.open(io.BytesIO(img_data)).convert("RGB"))
+            except Exception:
+                pass
+
+        if not pil_imgs:
+            continue
+
+        scaled_imgs = []
+        total_w = 0
+        for pimg in pil_imgs:
+            w, h = pimg.size
+            new_w = int(w * (ROW_HEIGHT / h))
+            scaled = pimg.resize((new_w, ROW_HEIGHT), Image.Resampling.LANCZOS)
+            scaled_imgs.append(scaled)
+            total_w += new_w
+
+        group_img = Image.new('RGB', (total_w, ROW_HEIGHT))
+        x_offset = 0
+        for sc in scaled_imgs:
+            group_img.paste(sc, (x_offset, 0))
+            x_offset += sc.width
+
+        dt = int(now - timestamp)
+        label = "T" if dt <= 1 else f"T-{dt}s"
+        txt_height = 24
+        
+        row_final = Image.new('RGB', (group_img.width, group_img.height + txt_height), color=(30, 30, 30))
+        row_final.paste(group_img, (0, txt_height))
+        draw = ImageDraw.Draw(row_final)
+        draw.text((5, 2), label, fill=(255, 255, 0), font=font)
+        row_images.append(row_final)
+
+    if not row_images:
+        return current_images
+
+    final_w = max(r.width for r in row_images)
+    final_h = sum(r.height for r in row_images)
+
+    final_img = Image.new('RGB', (final_w, final_h), color=(0, 0, 0))
+    y_offset = 0
+    for r in row_images:
+        final_img.paste(r, (0, y_offset))
+        y_offset += r.height
+
+    buf = io.BytesIO()
+    final_img.save(buf, format="JPEG", quality=75)
+    final_b64 = base64.b64encode(buf.getvalue()).decode()
+
+    return [{
+        "source": "temporal_stitched",
+        "hint": "Stitched sparse time series image",
+        "data": final_b64
+    }]
 
 
 async def handle_screenshot(user_id: str, session: SessionState, msg: dict[str, Any]) -> None:
@@ -677,8 +1260,14 @@ async def handle_screenshot(user_id: str, session: SessionState, msg: dict[str, 
         return
 
     images = msg.get("images", [])
-    is_distracted = await evaluate_vision(
-        images,
+    
+    if images:
+        images_for_vision = _build_temporal_stitched_image(session, images)
+    else:
+        images_for_vision = []
+        
+    is_distracted, reason = await evaluate_vision(
+        images_for_vision,
         current_task=session.current_plan,
         session_id=user_id,
     )
@@ -688,12 +1277,30 @@ async def handle_screenshot(user_id: str, session: SessionState, msg: dict[str, 
         return
 
     session.distraction_streak += 1
+    
+    # 附加上 reason 帮助聊天模型给出具体提醒
+    reason_str = f"走神原因: {reason}。" if reason else ""
+    
     if session.distraction_streak < DISTRACTION_THRESHOLD:
         await send_supervision_alert(
             user_id,
             message="检测到注意力波动，请回到当前任务。",
             severity="soft",
             streak_count=session.distraction_streak,
+        )
+        prompt_text = (
+            f"系统自动检测到用户走神了（{reason_str}），请根据以下事件使用严厉的语气结合检测到的原因去催促用户回到学习，要求极短。\n"
+            f"[SYSTEM_EVENT: DISTRACTION_WARNING, STREAK: {session.distraction_streak}]"
+        )
+        await _handle_user_turn(
+            user_id=user_id,
+            session=session,
+            text=prompt_text,
+            images=[],
+            is_tool_result=True,
+            append_user_message=False,
+            emit_user_transcript=False,
+            stage_depth=1,
         )
         return
 
@@ -718,8 +1325,20 @@ async def handle_screenshot(user_id: str, session: SessionState, msg: dict[str, 
         )
         await send_control(user_id, "downgrade")
     else:
-        await send_agent_text_chunk(user_id, "请立即停止分心行为，回到学习任务。")
-        await send_agent_text_end(user_id)
+        prompt_text = (
+            f"系统自动执行了走神惩罚（{reason_str}），请根据以下事件严厉警告用户，要求极短。\n"
+            f"[SYSTEM_EVENT: DISTRACTION_PENALTY_APPLIED, AMOUNT_RMB: {_format_rmb_from_cents(PENALTY_AMOUNT)}]"
+        )
+        await _handle_user_turn(
+            user_id=user_id,
+            session=session,
+            text=prompt_text,
+            images=images,
+            is_tool_result=True,
+            append_user_message=False,
+            emit_user_transcript=False,
+            stage_depth=1,
+        )
 
     session.distraction_streak = 0
 
@@ -753,7 +1372,7 @@ async def apply_balance_gate(user_id: str, session: SessionState) -> None:
     session.is_bankrupt = bool(result.get("is_bankrupt", balance <= 0))
 
 
-async def handle_start(user_id: str, session: SessionState, duration_seconds: int) -> None:
+async def handle_start(user_id: str, session: SessionState, duration_seconds: int) -> dict[str, Any] | None:
     """Start supervision and publish state/timer changes."""
     await send_tool_call_status(user_id, "supervision.start", "calling", "starting supervision")
     try:
@@ -779,10 +1398,10 @@ async def handle_start(user_id: str, session: SessionState, duration_seconds: in
         )
         session.session_ref = str(result.get("session_ref") or "") or None
         await send_tool_call_status(user_id, "supervision.start", "success", "supervision started")
-        return result
+        return {"ok": True, **result}
     except ValueError as exc:
         await send_tool_call_status(user_id, "supervision.start", "error", str(exc))
-        return None
+        return {"ok": False, "error": str(exc)}
 
 
 async def handle_pause(user_id: str, session: SessionState, pause_seconds: int) -> None:
@@ -843,6 +1462,8 @@ async def stream_agent_reply(
     user_text: str,
     images: list[dict[str, Any]] | None,
     current_task: str | None,
+    language_mode: str,
+    character_id: str,
     include_audio: bool,
 ) -> str:
     """Stream one white-brain reply; optionally suppress audio in degraded mode.
@@ -856,15 +1477,17 @@ async def stream_agent_reply(
         session_id=user_id,
         images=images,
         current_task=current_task,
+        language_mode=language_mode,
+        character_id=character_id,
     ):
-        chunk_text = str(chunk.get("text", ""))
+        chunk_text = _sanitize_agent_text(str(chunk.get("text", "")))
         expression = str(chunk.get("expression", "neutral"))
         audio = str(chunk.get("audio", ""))
         if chunk_text:
             parts.append(chunk_text)
             sent_text = True
             await send_agent_text_chunk(user_id, chunk_text)
-        if include_audio and audio:
+        if include_audio and audio and chunk_text:
             await send_audio(
                 user_id,
                 audio=audio,
@@ -876,10 +1499,9 @@ async def stream_agent_reply(
         await send_agent_text_end(user_id)
         return "".join(parts)
 
-    fallback = f"收到：{user_text}"
-    await send_agent_text_chunk(user_id, fallback)
+    logger.warning("empty white-brain reply, user_id=%s text=%s", user_id, _truncate_log_text(user_text))
     await send_agent_text_end(user_id)
-    return fallback
+    return ""
 
 
 async def _stream_and_detect_sys(
@@ -887,71 +1509,82 @@ async def _stream_and_detect_sys(
     user_text: str,
     images: list[dict[str, Any]] | None,
     current_task: str | None,
+    language_mode: str,
+    character_id: str,
     include_audio: bool,
-) -> tuple[str, bool]:
+    on_sys_detected: Callable[[], Coroutine[Any, Any, Any]] | None = None,
+) -> tuple[str, bool, asyncio.Task[Any] | None]:
     """Stream white-brain reply while detecting the <<SYS>> trigger marker.
 
     Returns (collected_clean_text, sys_detected).
     """
     parts: list[str] = []
-    pending_text = ""
     sys_detected = False
     sent_text = False
+    sys_task: asyncio.Task[Any] | None = None
 
     async for chunk in process_text_chat(
         user_text=user_text,
         session_id=user_id,
         images=images,
         current_task=current_task,
+        language_mode=language_mode,
+        character_id=character_id,
     ):
-        chunk_text = str(chunk.get("text", ""))
+        chunk_text = _sanitize_agent_text(str(chunk.get("text", "")))
         expression = str(chunk.get("expression", "neutral"))
         audio = str(chunk.get("audio", ""))
-        emit_text = ""
+        chunk_sys_triggered = bool(chunk.get("sys_triggered"))
 
         if chunk_text:
-            emit_text, pending_text, sys_detected = _split_sys_marker_buffer(pending_text + chunk_text)
-            if emit_text:
-                parts.append(emit_text)
-                sent_text = True
-                await send_agent_text_chunk(user_id, emit_text)
+            parts.append(chunk_text)
+            sent_text = True
+            await send_agent_text_chunk(user_id, chunk_text)
 
-        if sys_detected:
+        if chunk_sys_triggered and not sys_detected:
+            sys_detected = True
             logger.info("SYS trigger detected for user_id=%s", user_id)
-            pending_text = ""
-            continue
+            if on_sys_detected is not None:
+                sys_task = asyncio.create_task(on_sys_detected())
 
-        if include_audio and audio and emit_text and not pending_text and emit_text == chunk_text:
+        if include_audio and audio and chunk_text:
             await send_audio(
                 user_id,
                 audio=audio,
                 expression=expression,
-                text=emit_text,
+                text=chunk_text,
             )
-
-    if pending_text and not sys_detected:
-        parts.append(pending_text)
-        sent_text = True
-        await send_agent_text_chunk(user_id, pending_text)
 
     if sent_text:
         await send_agent_text_end(user_id)
     elif not sys_detected:
-        fallback = f"收到：{user_text}"
-        parts.append(fallback)
-        await send_agent_text_chunk(user_id, fallback)
+        logger.warning("empty phase1 reply without SYS, user_id=%s text=%s", user_id, _truncate_log_text(user_text))
         await send_agent_text_end(user_id)
 
-    return "".join(parts), sys_detected
+    return "".join(parts), sys_detected, sys_task
 
 
-async def send_model_info(user_id: str) -> None:
+def _resolve_character(session: SessionState) -> tuple[str, dict[str, Any]]:
+    character_id = session.character_id if session.character_id in CHARACTER_CATALOG else DEFAULT_CHARACTER_ID
+    return character_id, CHARACTER_CATALOG[character_id]
+
+
+async def send_model_info(user_id: str, session: SessionState) -> None:
     """Send Live2D model configuration payload."""
+    character_id, character = _resolve_character(session)
     await manager.send_personal_message(
         user_id,
         {
             "type": "model-info",
-            "model_info": MODEL_INFO,
+            "character_id": character_id,
+            "character": {
+                "name": character.get("name"),
+                "displayName": character.get("displayName"),
+                "description": character.get("description"),
+                "languageHints": character.get("languageHints", []),
+                "personaStyle": character.get("personaStyle"),
+            },
+            "model_info": character.get("modelInfo", {}),
         },
     )
 

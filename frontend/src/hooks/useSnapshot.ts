@@ -8,6 +8,33 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import type { SnapshotImage } from "@/lib/protocol";
 
+async function ensureVideoReady(
+  video: HTMLVideoElement,
+  timeoutMs = 1500,
+): Promise<boolean> {
+  if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0 && video.videoHeight > 0) {
+    return true;
+  }
+
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (result: boolean) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      video.removeEventListener("loadeddata", handleReady);
+      video.removeEventListener("canplay", handleReady);
+      resolve(result);
+    };
+    const handleReady = () => finish(true);
+    const timer = window.setTimeout(() => finish(false), timeoutMs);
+
+    video.addEventListener("loadeddata", handleReady, { once: true });
+    video.addEventListener("canplay", handleReady, { once: true });
+    void video.play().catch(() => undefined);
+  });
+}
+
 function captureFrameFromStream(
   stream: MediaStream,
   canvas: HTMLCanvasElement,
@@ -26,16 +53,7 @@ function captureFrameFromStream(
   if (!ctx) return null;
 
   const streamKey = track.id;
-  let video = videoCache.get(streamKey);
-  if (!video) {
-    video = document.createElement("video");
-    video.srcObject = stream;
-    video.muted = true;
-    video.playsInline = true;
-    video.autoplay = true;
-    video.play().catch(() => undefined);
-    videoCache.set(streamKey, video);
-  }
+  const video = getOrCreateVideoElement(stream, streamKey, videoCache);
 
   if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
     return null;
@@ -47,6 +65,38 @@ function captureFrameFromStream(
   } catch {
     return null;
   }
+}
+
+function getOrCreateVideoElement(
+  stream: MediaStream,
+  streamKey: string,
+  videoCache: Map<string, HTMLVideoElement>,
+): HTMLVideoElement {
+  let video = videoCache.get(streamKey);
+  if (!video) {
+    video = document.createElement("video");
+    video.srcObject = stream;
+    video.muted = true;
+    video.playsInline = true;
+    video.autoplay = true;
+    video.play().catch(() => undefined);
+    videoCache.set(streamKey, video);
+  }
+  return video;
+}
+
+
+async function captureFrameFromStreamWithWait(
+  stream: MediaStream,
+  canvas: HTMLCanvasElement,
+  videoCache: Map<string, HTMLVideoElement>,
+): Promise<string | null> {
+  const track = stream.getVideoTracks()[0];
+  if (!track || track.readyState !== "live") return null;
+
+  const video = getOrCreateVideoElement(stream, track.id, videoCache);
+  await ensureVideoReady(video);
+  return captureFrameFromStream(stream, canvas, videoCache);
 }
 
 export async function captureImagesFromStreams(options: {
@@ -61,16 +111,38 @@ export async function captureImagesFromStreams(options: {
 
   try {
     if (options.cameraEnabled && options.cameraStream) {
-      const data = captureFrameFromStream(options.cameraStream, canvas, videoCache);
+      const cameraTrack = options.cameraStream.getVideoTracks()[0];
+      const cameraSettings = cameraTrack?.getSettings?.() ?? {};
+      const data = await captureFrameFromStreamWithWait(options.cameraStream, canvas, videoCache);
       if (data) {
-        images.push({ source: "camera", data, mime_type: "image/jpeg" });
+        images.push({
+          source: "camera",
+          data,
+          mime_type: "image/jpeg",
+          metadata: {
+            width: Number(cameraSettings.width) || undefined,
+            height: Number(cameraSettings.height) || undefined,
+            facingMode: typeof cameraSettings.facingMode === "string" ? cameraSettings.facingMode : undefined,
+          },
+        });
       }
     }
 
     if (options.screenEnabled && options.screenStream) {
-      const data = captureFrameFromStream(options.screenStream, canvas, videoCache);
+      const screenTrack = options.screenStream.getVideoTracks()[0];
+      const screenSettings = screenTrack?.getSettings?.() ?? {};
+      const data = await captureFrameFromStreamWithWait(options.screenStream, canvas, videoCache);
       if (data) {
-        images.push({ source: "screen", data, mime_type: "image/jpeg" });
+        images.push({
+          source: "screen",
+          data,
+          mime_type: "image/jpeg",
+          metadata: {
+            width: Number(screenSettings.width) || undefined,
+            height: Number(screenSettings.height) || undefined,
+            displaySurface: typeof screenSettings.displaySurface === "string" ? screenSettings.displaySurface : undefined,
+          },
+        });
       }
     }
   } finally {

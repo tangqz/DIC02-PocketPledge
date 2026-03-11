@@ -14,11 +14,12 @@ import {
   useMemo,
   useCallback,
 } from "react";
-import { DEFAULT_MODEL_CONFIG } from "@/lib/modelConfig";
+import { DEFAULT_MODEL_CONFIG, type ModelConfig } from "@/lib/modelConfig";
 import { useI18n } from "@/lib/i18n";
 import { useAudioQueue } from "@/components/AudioPlayer/useAudioQueue";
 import { useAvatarStore } from "@/stores/avatarStore";
 import { useSessionStore } from "@/stores/sessionStore";
+import { updateModelConfig } from "@/live2d/WebSDK/src/lappdefine";
 
 const IS_DEV = import.meta.env.DEV;
 
@@ -36,7 +37,9 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
     initializeLive2D?: () => void;
     LAppAdapter?: {
       getInstance: () => {
-        getModel: () => unknown;
+        getModel: () => {
+          _modelSetting?: unknown;
+        } | null;
         getExpressionCount: () => number;
         getMotionGroups: () => string[];
         getExpressionName: (index: number) => string;
@@ -72,6 +75,19 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
   const [debugText, setDebugText] = useState("init");
   const [isLoaded, setIsLoaded] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const [lastGoodConfig, setLastGoodConfig] = useState<ModelConfig | null>(null);
+  const [fallbackToDefault, setFallbackToDefault] = useState(false);
+
+  const activeConfig = useMemo(() => {
+    if (!fallbackToDefault || !lastGoodConfig) {
+      return config;
+    }
+    return lastGoodConfig;
+  }, [config, fallbackToDefault, lastGoodConfig]);
+
+  useEffect(() => {
+    setFallbackToDefault(false);
+  }, [config.url]);
 
   const setExpression = useCallback(
     (emotionKeyword: string) => {
@@ -110,8 +126,9 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
     }
 
     const modelDir = parts[parts.length - 2];
+    const modelFileName = parts[parts.length - 1].replace(/\.model3\.json$/i, "");
     const resourceRoot = `/${parts.slice(0, parts.length - 2).join("/")}`;
-    return { resourceRoot, modelDir };
+    return { resourceRoot, modelDir, modelFileName };
   };
 
   const playBase64Audio = async (base64Wav: string) => {
@@ -195,6 +212,10 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
           return;
         }
         const model = adapter.getModel();
+        if (!model || !model._modelSetting) {
+          setDebugText(`loaded=${isLoaded ? 1 : 0} model=0 ready=0`);
+          return;
+        }
         const expressionCount = adapter.getExpressionCount();
         const motionGroups = adapter.getMotionGroups();
         setDebugText(
@@ -243,6 +264,8 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
 
   useEffect(() => {
     let disposed = false;
+    setIsLoaded(false);
+    setError(null);
 
     const init = async () => {
       try {
@@ -259,17 +282,40 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
 
         sdkRef.current = { initializeLive2D, LAppAdapter, LAppDelegate };
 
+        const { resourceRoot, modelDir, modelFileName } = parseModelPath(activeConfig.url);
+        updateModelConfig(resourceRoot, modelDir, modelFileName, Number(activeConfig.kScale) || undefined);
         initializeLive2D();
-        const adapter = LAppAdapter.getInstance();
-        const { resourceRoot, modelDir } = parseModelPath(config.url);
-        adapter.setChara(resourceRoot, modelDir);
+
+        if (disposed) {
+          LAppDelegate.releaseInstance();
+          return;
+        }
+
+        // Give runtime a short window to finish async model setup; fallback if MOC is unsupported.
+        await new Promise((resolve) => window.setTimeout(resolve, 700));
+        const adapter = LAppAdapter?.getInstance?.();
+        const model = adapter?.getModel?.();
+        const runtimeModel = (model as unknown as { _model?: unknown } | null)?._model;
+        if (!runtimeModel) {
+          throw new Error("Model runtime not ready (possibly unsupported moc version)");
+        }
 
         if (!disposed) {
           setIsLoaded(true);
+          if (!fallbackToDefault) {
+            setLastGoodConfig(config);
+          }
         }
       } catch (e) {
         if (!disposed) {
-          setError(e as Error);
+          const err = e as Error;
+          // Auto-fallback only to last known good config; avoid first-login cross-character flip.
+          if (!fallbackToDefault && lastGoodConfig && config.url !== lastGoodConfig.url) {
+            console.warn("[Live2DCanvas] model load failed, fallback to last good model", err);
+            setFallbackToDefault(true);
+            return;
+          }
+          setError(err);
         }
       }
     };
@@ -278,17 +324,21 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
 
     return () => {
       disposed = true;
-      sdkRef.current?.LAppDelegate?.releaseInstance?.();
+      try {
+        sdkRef.current?.LAppDelegate?.releaseInstance?.();
+      } catch (releaseError) {
+        console.warn("[Live2DCanvas] releaseInstance failed", releaseError);
+      }
       stopAudio();
     };
-  }, [config.url, stopAudio]);
+  }, [activeConfig.url, activeConfig.kScale, config, lastGoodConfig, fallbackToDefault, stopAudio]);
 
   return (
     <div id="live2d" className="relative h-full w-full">
       <canvas
         id="canvas"
         ref={canvasRef}
-        className="h-full w-full cursor-pointer"
+        className="h-full w-full cursor-default"
       />
 
       {/* Loading overlay */}

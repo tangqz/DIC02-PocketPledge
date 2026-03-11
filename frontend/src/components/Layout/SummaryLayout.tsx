@@ -2,10 +2,21 @@
  *  SummaryLayout  –  Session end summary
  * ──────────────────────────────────────────────── */
 import { useSessionStore } from "@/stores/sessionStore";
+import { useChatStore } from "@/stores/chatStore";
+import { useAvatarStore } from "@/stores/avatarStore";
+import { useMediaStore } from "@/stores/mediaStore";
 import { useI18n } from "@/lib/i18n";
+import { formatRmbFromCents, formatSignedRmbFromCents } from "@/lib/currency";
 
 export default function SummaryLayout() {
   const { totalDuration, balance, balanceHistory, reset } = useSessionStore();
+  const clearMessages = useChatStore((s) => s.clearMessages);
+  const clearStreaming = useChatStore((s) => s.clearStreaming);
+  const setAgentSpeaking = useChatStore((s) => s.setAgentSpeaking);
+  const clearAudioMessages = useAvatarStore((s) => s.clearAudioMessages);
+  const requestPlaybackInterrupt = useAvatarStore((s) => s.requestPlaybackInterrupt);
+  const stopCamera = useMediaStore((s) => s.stopCamera);
+  const stopScreenShare = useMediaStore((s) => s.stopScreenShare);
   const { t, locale } = useI18n();
 
   const totalDeductions = balanceHistory
@@ -17,7 +28,20 @@ export default function SummaryLayout() {
 
   const minutes = Math.floor(totalDuration / 60);
 
-  const coinSuffix = locale === "zh" ? "币" : "";
+  const coinSuffix = locale === "zh" ? "元" : "RMB";
+
+  const handleRestart = () => {
+    // Cleanup all transient runtime states before a hard reload.
+    requestPlaybackInterrupt();
+    clearAudioMessages();
+    clearStreaming();
+    setAgentSpeaking(false);
+    clearMessages();
+    stopCamera();
+    stopScreenShare();
+    reset();
+    window.location.reload();
+  };
 
   return (
     <div className="flex h-full items-center justify-center p-8 animate-fade-in">
@@ -35,16 +59,16 @@ export default function SummaryLayout() {
 
         {/* Stats */}
         <div className="grid grid-cols-3 gap-4">
-          <StatCard label={t("summary.finalBalance")} value={balance} suffix={coinSuffix} color="text-success" />
+          <StatCard label={t("summary.finalBalance")} value={formatRmbFromCents(balance)} suffix={coinSuffix} color="text-success" />
           <StatCard
             label={t("summary.deductions")}
-            value={Math.abs(totalDeductions)}
+            value={formatRmbFromCents(Math.abs(totalDeductions))}
             suffix={coinSuffix}
             color="text-danger"
           />
           <StatCard
             label={t("summary.rewards")}
-            value={totalRewards}
+            value={formatRmbFromCents(totalRewards)}
             suffix={coinSuffix}
             color="text-accent"
           />
@@ -68,8 +92,7 @@ export default function SummaryLayout() {
                       event.change < 0 ? "text-danger" : "text-success"
                     }`}
                   >
-                    {event.change > 0 ? "+" : ""}
-                    {event.change}
+                    {formatSignedRmbFromCents(event.change)}
                   </span>
                 </div>
               ))}
@@ -79,7 +102,7 @@ export default function SummaryLayout() {
 
         {/* Action */}
         <button
-          onClick={reset}
+          onClick={handleRestart}
           className="w-full rounded-2xl bg-surface-elevated py-3 text-sm font-medium text-white/70 transition-all hover:bg-surface-elevated/80 hover:text-white"
         >
           {t("summary.restart")}
@@ -96,7 +119,7 @@ function StatCard({
   color,
 }: {
   label: string;
-  value: number;
+  value: string;
   suffix: string;
   color: string;
 }) {

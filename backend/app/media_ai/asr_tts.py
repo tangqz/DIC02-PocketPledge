@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import struct
 import tempfile
+import threading
 import wave
 from typing import Any, Protocol, cast
 
@@ -15,6 +16,7 @@ import numpy as np
 
 
 DEFAULT_SAMPLE_RATE = 16000
+QWEN_TTS_SAMPLE_RATE = 24000
 logger = logging.getLogger(__name__)
 _WHISPER_MODELS: dict[tuple[str, str, str], object] = {}
 _SHERPA_RECOGNIZERS: dict[tuple[str, str, str, int, bool, str], object] = {}
@@ -37,7 +39,7 @@ class ASRService(Protocol):
 
 
 class TTSService(Protocol):
-	async def synthesize(self, text: str, expression: str = "neutral") -> bytes: ...
+	async def synthesize(self, text: str, expression: str = "neutral", character_id: str = "milly") -> bytes: ...
 
 
 def pcm16_wav_bytes(audio_samples: list[float], sample_rate: int = DEFAULT_SAMPLE_RATE) -> bytes:
@@ -52,6 +54,17 @@ def pcm16_wav_bytes(audio_samples: list[float], sample_rate: int = DEFAULT_SAMPL
 			clipped = max(-1.0, min(1.0, float(sample)))
 			frames.extend(struct.pack("<h", int(clipped * 32767)))
 		wav_file.writeframes(bytes(frames))
+	return buffer.getvalue()
+
+
+def pcm16_bytes_to_wav_bytes(audio_bytes: bytes, sample_rate: int) -> bytes:
+	"""Wrap raw PCM16 mono bytes in a WAV container for browser playback."""
+	buffer = io.BytesIO()
+	with wave.open(buffer, "wb") as wav_file:
+		wav_file.setnchannels(1)
+		wav_file.setsampwidth(2)
+		wav_file.setframerate(sample_rate)
+		wav_file.writeframes(audio_bytes)
 	return buffer.getvalue()
 
 
@@ -256,7 +269,7 @@ class SherpaOnnxASRService:
 class MockTTSService:
 	"""Return a synthetic WAV payload so frontend playback can be exercised locally."""
 
-	async def synthesize(self, text: str, expression: str = "neutral") -> bytes:
+	async def synthesize(self, text: str, expression: str = "neutral", character_id: str = "milly") -> bytes:
 		await asyncio.sleep(0)
 		return synthetic_wav_bytes(text=text, expression=expression)
 
@@ -267,7 +280,7 @@ class EdgeTTSService:
 	def __init__(self, voice: str | None = None) -> None:
 		self.voice = voice or os.getenv("MEDIA_AI_TTS_VOICE", "zh-CN-XiaoxiaoNeural")
 
-	async def synthesize(self, text: str, expression: str = "neutral") -> bytes:
+	async def synthesize(self, text: str, expression: str = "neutral", character_id: str = "milly") -> bytes:
 		try:
 			import edge_tts
 		except ImportError as exc:
@@ -285,6 +298,138 @@ class EdgeTTSService:
 		return b"".join(audio_chunks)
 
 
+class _QwenRealtimeCallback:
+	"""Collect one realtime TTS response into an in-memory PCM buffer."""
+
+	def __init__(self) -> None:
+		self.complete_event = threading.Event()
+		self.audio_chunks: list[bytes] = []
+		self.error_message: str | None = None
+
+	def on_open(self) -> None:
+		return None
+
+	def on_close(self, close_status_code, close_msg) -> None:
+		if close_status_code not in (None, 1000):
+			self.error_message = f"websocket closed code={close_status_code} msg={close_msg}"
+		self.complete_event.set()
+
+	def on_event(self, response: dict[str, Any]) -> None:
+		try:
+			event_type = response.get("type")
+			if event_type == "response.audio.delta":
+				delta = response.get("delta", "")
+				if isinstance(delta, str) and delta:
+					import base64
+
+					self.audio_chunks.append(base64.b64decode(delta))
+			elif event_type in {"response.done", "session.finished"}:
+				self.complete_event.set()
+		except Exception as exc:
+			self.error_message = str(exc)
+			self.complete_event.set()
+
+	def wait_for_finished(self, timeout_seconds: float) -> bool:
+		return self.complete_event.wait(timeout_seconds)
+
+
+class QwenRealtimeTTSService:
+	"""Low-latency TTS backed by DashScope qwen realtime websocket API."""
+
+	def __init__(self) -> None:
+		self.model = os.getenv("MEDIA_AI_TTS_MODEL", "qwen3-tts-instruct-flash-realtime")
+		self.voice = os.getenv("MEDIA_AI_TTS_VOICE", "Cherry")
+		self.male_voice = os.getenv("MEDIA_AI_TTS_VOICE_MALE", "Ethan")
+		self.mode = os.getenv("MEDIA_AI_TTS_MODE", "server_commit")
+		self.timeout_seconds = max(3.0, float(os.getenv("MEDIA_AI_TTS_TIMEOUT", "20")))
+		speech_rate = os.getenv("MEDIA_AI_TTS_SPEECH_RATE", "1.05")
+		self.speech_rate = float(speech_rate)
+		self.pitch_rate = float(os.getenv("MEDIA_AI_TTS_PITCH_RATE", "1.0"))
+		self.volume = int(os.getenv("MEDIA_AI_TTS_VOLUME", "50"))
+		self.enable_tn = os.getenv("MEDIA_AI_TTS_ENABLE_TN", "true").lower() in {"1", "true", "yes"}
+		self.instructions = os.getenv(
+			"MEDIA_AI_TTS_INSTRUCTIONS",
+			"语气自然亲切，节奏偏快，停顿短，适合实时陪伴对话。",
+		)
+		self.api_key = (
+			os.getenv("MEDIA_AI_TTS_API_KEY")
+			or os.getenv("DASHSCOPE_API_KEY")
+			or os.getenv("LOCAL_AGENT_API_KEY")
+			or os.getenv("LOCAL_CHAT_API_KEY")
+		)
+
+	def _select_voice_for_character(self, character_id: str) -> str:
+		normalized = (character_id or "").strip().lower()
+		if normalized in {"ren", "natori"}:
+			return self.male_voice
+		return self.voice
+
+	def _synthesize_sync(self, text: str, expression: str, character_id: str) -> bytes:
+		if not self.api_key:
+			raise RuntimeError("No DashScope API key configured for qwen realtime TTS")
+
+		import dashscope
+		from dashscope.audio.qwen_tts_realtime import AudioFormat, QwenTtsRealtime
+
+		dashscope.api_key = self.api_key
+		callback = _QwenRealtimeCallback()
+		client = QwenTtsRealtime(
+			model=self.model,
+			callback=cast(Any, callback),
+		)
+
+		instructions = self.instructions
+		if expression == "encouraging":
+			instructions = f"{self.instructions} 语气更鼓励一些。"
+		elif expression == "proud":
+			instructions = f"{self.instructions} 语气更得意一点。"
+		elif expression == "angry":
+			instructions = f"{self.instructions} 语气更严厉一点，但不要过激。"
+		elif expression == "sad":
+			instructions = f"{self.instructions} 语气更柔和一点。"
+
+		client.connect()
+		selected_voice = self._select_voice_for_character(character_id)
+		client.update_session(
+			voice=selected_voice,
+			response_format=AudioFormat.PCM_24000HZ_MONO_16BIT,
+			mode=self.mode,
+			speech_rate=self.speech_rate,
+			pitch_rate=self.pitch_rate,
+			volume=self.volume,
+			enable_tn=self.enable_tn,
+			instructions=instructions,
+		)
+		client.append_text(text)
+		client.finish()
+
+		finished = callback.wait_for_finished(self.timeout_seconds)
+		if not finished:
+			raise TimeoutError(f"qwen realtime TTS timed out after {self.timeout_seconds}s")
+		if callback.error_message:
+			raise RuntimeError(callback.error_message)
+		pcm_bytes = b"".join(callback.audio_chunks)
+		if not pcm_bytes:
+			raise RuntimeError("qwen realtime TTS returned no audio")
+
+		logger.info(
+			"qwen realtime tts synthesized chars=%s first_audio_delay_ms=%s session_id=%s",
+			len(text),
+			getattr(client, "get_first_audio_delay", lambda: None)(),
+			getattr(client, "get_session_id", lambda: None)(),
+		)
+		return pcm16_bytes_to_wav_bytes(pcm_bytes, sample_rate=QWEN_TTS_SAMPLE_RATE)
+
+	async def synthesize(self, text: str, expression: str = "neutral", character_id: str = "milly") -> bytes:
+		if not text.strip():
+			return synthetic_wav_bytes(text="...", expression=expression)
+		try:
+			return await asyncio.to_thread(self._synthesize_sync, text, expression, character_id)
+		except Exception:
+			logger.exception("qwen realtime TTS failed; falling back to synthetic wav")
+			return synthetic_wav_bytes(text=text, expression=expression)
+
+
 def get_asr_service() -> ASRService:
 	provider = os.getenv("MEDIA_AI_ASR_PROVIDER", "sherpa-onnx").lower()
 	if provider in {"sherpa-onnx", "sherpa_onnx", "sherpa_onnx_asr"}:
@@ -296,6 +441,8 @@ def get_asr_service() -> ASRService:
 
 def get_tts_service() -> TTSService:
 	provider = os.getenv("MEDIA_AI_TTS_PROVIDER", "mock").lower()
+	if provider in {"qwen", "qwen-realtime", "qwen_tts", "dashscope", "dashscope-qwen"}:
+		return QwenRealtimeTTSService()
 	if provider == "edge":
 		return EdgeTTSService()
 	return MockTTSService()

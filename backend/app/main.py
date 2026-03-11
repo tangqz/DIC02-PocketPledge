@@ -1,6 +1,15 @@
 """FastAPI application entrypoint for the backend service."""
 
-from fastapi import FastAPI
+from __future__ import annotations
+
+import json
+import logging
+import os
+import time
+import uuid
+from typing import Any
+
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth import router as auth_router
@@ -8,20 +17,122 @@ from app.business.api import router as business_router
 from app.business.models import init_db
 from app.gateway.ws_router import router as gateway_router
 
+
+LOG_BODY_LIMIT = 1000
+
+
+def _configure_logging() -> None:
+    level_name = os.getenv("APP_LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    root_logger = logging.getLogger()
+    if not root_logger.handlers:
+        logging.basicConfig(
+            level=level,
+            format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        )
+    root_logger.setLevel(level)
+
+
+def _truncate(value: str, limit: int = LOG_BODY_LIMIT) -> str:
+    if len(value) <= limit:
+        return value
+    return f"{value[:limit]}..."
+
+
+def _mask_sensitive(value: Any) -> Any:
+    if isinstance(value, dict):
+        masked: dict[str, Any] = {}
+        for key, nested_value in value.items():
+            if key.lower() in {"password", "token", "access_token", "refresh_token", "authorization", "api_key"}:
+                masked[key] = "***"
+            else:
+                masked[key] = _mask_sensitive(nested_value)
+        return masked
+    if isinstance(value, list):
+        return [_mask_sensitive(item) for item in value]
+    return value
+
+
+def _format_body_for_log(body: bytes) -> str:
+    if not body:
+        return ""
+    text = body.decode("utf-8", errors="replace").strip()
+    if not text:
+        return ""
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return _truncate(text)
+    return _truncate(json.dumps(_mask_sensitive(parsed), ensure_ascii=False))
+
+
+_configure_logging()
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="Study Buddy Backend")
+
+allowed_origins_str = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173")
+allowed_origins = [origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
+@app.middleware("http")
+async def log_http_requests(request: Request, call_next):
+    request_id = uuid.uuid4().hex[:8]
+    body = await request.body()
+    body_preview = _format_body_for_log(body)
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    request = Request(request.scope, receive)
+    logger.info(
+        "http rx request_id=%s method=%s path=%s query=%s body=%s",
+        request_id,
+        request.method,
+        request.url.path,
+        request.url.query,
+        body_preview,
+    )
+
+    started = time.perf_counter()
+    response = await call_next(request)
+    response_body = b""
+    async for chunk in response.body_iterator:
+        response_body += chunk
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    response_preview = _format_body_for_log(response_body)
+    logger.info(
+        "http tx request_id=%s status=%s duration_ms=%.1f body=%s",
+        request_id,
+        response.status_code,
+        elapsed_ms,
+        response_preview,
+    )
+    return Response(
+        content=response_body,
+        status_code=response.status_code,
+        headers=dict(response.headers),
+        media_type=response.media_type,
+        background=response.background,
+    )
+
+
 @app.on_event("startup")
 def on_startup():
     init_db()
+    logger.info(
+        "backend startup complete agent_backend=%s asr_provider=%s",
+        os.getenv("AGENT_BACKEND", "mock"),
+        os.getenv("MEDIA_AI_ASR_PROVIDER", "sherpa-onnx"),
+    )
 
 
 @app.get("/health")

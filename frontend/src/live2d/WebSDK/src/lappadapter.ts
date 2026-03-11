@@ -42,15 +42,21 @@ export class LAppAdapter {
   /* motion */
 
   public getMotionGroups(): string[] {
-    let groups : string[] = [];
-    for (let i = 0; i < this.getModel()?._modelSetting.getMotionGroupCount(); i++) {
-      groups.push(this.getModel()?._modelSetting.getMotionGroupName(i) ?? "");
+    const model = this.getModel();
+    const modelSetting = model?._modelSetting;
+    if (!modelSetting) {
+      return [];
+    }
+
+    const groups : string[] = [];
+    for (let i = 0; i < modelSetting.getMotionGroupCount(); i++) {
+      groups.push(modelSetting.getMotionGroupName(i) ?? "");
     }
     return groups;
   }
 
   public getMotionCount(group: string): number {
-    return this.getModel()?._modelSetting.getMotionCount(group) ?? 0;
+    return this.getModel()?._modelSetting?.getMotionCount(group) ?? 0;
   }
 
   public startMotion(
@@ -65,7 +71,7 @@ export class LAppAdapter {
   /* expression */
 
   public getExpressionCount(): number {
-    return this.getModel()?._expressions.getSize() ?? 0;
+    return this.getModel()?._expressions?.getSize() ?? 0;
   }
 
   public getExpressionName(index: number): string {
@@ -120,6 +126,44 @@ export class LAppAdapter {
       
       // Set the matrix
       model._modelMatrix.setMatrix(newMatrix);
+    }
+  }
+
+  public translateModel(deltaX: number, deltaY: number): void {
+    const model = this.getModel();
+    if (model && model._modelMatrix) {
+      model._modelMatrix.translateRelative(deltaX, deltaY);
+    }
+  }
+
+  public getModelScale(): number {
+    const model = this.getModel();
+    if (model && model._modelMatrix) {
+      return model._modelMatrix.getScaleX();
+    }
+    return LAppDefine.CurrentKScale;
+  }
+
+  public setModelScale(scale: number): void {
+    const model = this.getModel();
+    if (model && model._modelMatrix) {
+      const matrix = model._modelMatrix.getArray();
+      const currentScaleX = model._modelMatrix.getScaleX() || 1;
+      const currentScaleY = model._modelMatrix.getScaleY() || currentScaleX;
+      const anchorX = 0.0;
+      const anchorY = 0.35;
+
+      const currentTx = matrix[12] ?? 0;
+      const currentTy = matrix[13] ?? 0;
+      const nextTx = currentTx + (currentScaleX - scale) * anchorX;
+      const nextTy = currentTy + (currentScaleY - scale) * anchorY;
+
+      const nextMatrix = [...matrix];
+      nextMatrix[0] = scale;
+      nextMatrix[5] = scale;
+      nextMatrix[12] = nextTx;
+      nextMatrix[13] = nextTy;
+      model._modelMatrix.setMatrix(nextMatrix);
     }
   }
 

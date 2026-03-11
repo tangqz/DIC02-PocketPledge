@@ -32,7 +32,11 @@ class SessionState:
     pending_capture_request_id: str | None = None
     pending_capture_prompt: str | None = None
     pending_capture_sources: list[str] = field(default_factory=list)
+    pending_capture_mode: str = "system-agent"
     chat_history: list[dict[str, str]] = field(default_factory=list)
+    image_timeline: list[tuple[float, list[dict[str, Any]]]] = field(default_factory=list)
+    language_mode: str = "zh"
+    character_id: str = "milly"
 
     MAX_HISTORY_TURNS: int = 30
 
@@ -86,6 +90,11 @@ class SessionState:
 
     def start(self, duration_seconds: int) -> None:
         """Start supervision from setup and initialize timer."""
+        if self.supervision_state == "completed":
+            # Allow starting a new focus session after completion without forcing reconnect.
+            self.supervision_state = "setup"
+            self.start_time = None
+            self.pause_remaining_seconds = None
         self.total_focus_seconds = duration_seconds
         self.focus_time_remaining = duration_seconds
         self.pause_requests_count = 0
@@ -112,15 +121,18 @@ class SessionState:
         request_id: str,
         prompt: str,
         sources: list[str],
+        mode: str = "system-agent",
     ) -> None:
         self.pending_capture_request_id = request_id
         self.pending_capture_prompt = prompt
         self.pending_capture_sources = list(sources)
+        self.pending_capture_mode = mode
 
     def clear_pending_capture(self) -> None:
         self.pending_capture_request_id = None
         self.pending_capture_prompt = None
         self.pending_capture_sources = []
+        self.pending_capture_mode = "system-agent"
 
     def tick(self) -> bool:
         """Advance one timer tick and return True when countdown reaches zero."""

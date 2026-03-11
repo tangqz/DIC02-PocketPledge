@@ -8,14 +8,17 @@
  *   • Provide `send` function via React context so any layout
  *     can send TxMessages without prop-drilling
  * ──────────────────────────────────────────────── */
-import { createContext, useContext, useCallback, useMemo, useEffect, useState } from "react";
+import { createContext, useContext, useCallback, useMemo, useEffect, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useMediaStore } from "@/stores/mediaStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useAvatarStore } from "@/stores/avatarStore";
+import { useCharacterStore } from "@/stores/characterStore";
+import { useChatStore } from "@/stores/chatStore";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useVAD } from "@/hooks/useVAD";
 import { captureImagesFromStreams, useSnapshot } from "@/hooks/useSnapshot";
+import { useI18n } from "@/lib/i18n";
 import LoginPage from "@/components/Auth/LoginPage";
 import SetupLayout from "@/components/Layout/SetupLayout";
 import FocusLayout from "@/components/Layout/FocusLayout";
@@ -51,6 +54,10 @@ function AuthenticatedApp() {
   const user = useAuthStore((s) => s.user);
   const setBalance = useSessionStore((s) => s.setBalance);
   const setDegradedMode = useSessionStore((s) => s.setDegradedMode);
+  const selectedCharacterId = useCharacterStore((s) => s.selectedCharacterId);
+  const setSelectedCharacterId = useCharacterStore((s) => s.setSelectedCharacterId);
+  const { locale } = useI18n();
+  const lastSentCharacterRef = useRef<string>("");
 
   // ── WebSocket (global, persistent) ──
   const captureVisualContext = useCallback(async (
@@ -96,6 +103,9 @@ function AuthenticatedApp() {
 
       if (msg.type === "model-info") {
         useAvatarStore.getState().setModelInfo(msg.model_info);
+        if (msg.character_id && msg.character_id !== useCharacterStore.getState().selectedCharacterId) {
+          setSelectedCharacterId(msg.character_id);
+        }
         return;
       }
 
@@ -121,9 +131,27 @@ function AuthenticatedApp() {
             });
           });
         }
+
+        if (msg.command === "chat-cleared") {
+          useChatStore.getState().clearMessages();
+          useAvatarStore.getState().clearAudioMessages();
+          return;
+        }
       }
     },
   });
+
+  useEffect(() => {
+    send({ type: "set-locale", locale });
+  }, [locale, send]);
+
+  useEffect(() => {
+    if (!selectedCharacterId || selectedCharacterId === lastSentCharacterRef.current) {
+      return;
+    }
+    lastSentCharacterRef.current = selectedCharacterId;
+    send({ type: "set-character", characterId: selectedCharacterId });
+  }, [selectedCharacterId, send]);
 
   // ── VAD → WS bridge ──
   const handleSpeechEnd = useCallback(
@@ -174,8 +202,9 @@ function AuthenticatedApp() {
   useEffect(() => {
     if (typeof user?.balance === "number") {
       setBalance(user.balance);
+      setDegradedMode(user.balance <= 0);
     }
-  }, [setBalance, user?.balance]);
+  }, [setBalance, setDegradedMode, user?.balance]);
 
   const sendValue = useMemo(() => send, [send]);
 

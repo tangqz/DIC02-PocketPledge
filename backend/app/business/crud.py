@@ -1,11 +1,13 @@
 import json
 import uuid
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from .models import (
+    ChatMessage,
     PauseRequest,
     SessionSummary,
     StudyPlan,
@@ -15,9 +17,19 @@ from .models import (
     Wallet,
 )
 
-SERVICE_FEE_PER_MINUTE = 15  # 单位：分，15分=0.15元/分钟
-PENALTY_PER_DISTRACTION = 50  # 单位：分，每走神一次扣50分=0.5元
+FEN_PER_RMB = Decimal("100")
+SERVICE_FEE_PER_HOUR_RMB = Decimal("8.00")
+PENALTY_PER_DISTRACTION = 300  # 单位：分，每走神一次扣3元
 PROFILE_DOC_MAX_CHARS = 4000
+CHAT_MESSAGE_MAX_CHARS = 2000
+
+
+def _focus_fee_cents(planned_focus_minutes: int) -> int:
+    """Calculate focus fee in cents from RMB 8/hour, rounded to 2 decimals RMB."""
+    fee_rmb = (Decimal(planned_focus_minutes) * SERVICE_FEE_PER_HOUR_RMB / Decimal("60")).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+    return int((fee_rmb * FEN_PER_RMB).to_integral_value(rounding=ROUND_HALF_UP))
 
 
 def _now_iso() -> str:
@@ -62,7 +74,7 @@ def start_focus_session(db: Session, user_id: int, planned_focus_minutes: int) -
     _, user_wallet = _get_or_create_user_with_wallet(db, user_id)
     pool_wallet = _require_wallet(db, 1)
 
-    upfront_cost = planned_focus_minutes * SERVICE_FEE_PER_MINUTE
+    upfront_cost = _focus_fee_cents(planned_focus_minutes)
     if user_wallet.balance < upfront_cost:
         raise ValueError(f"insufficient balance: need {upfront_cost}, have {user_wallet.balance}")
 
@@ -84,7 +96,7 @@ def start_focus_session(db: Session, user_id: int, planned_focus_minutes: int) -
             meta_json=json.dumps(
                 {
                     "planned_focus_minutes": planned_focus_minutes,
-                    "service_fee_per_minute": SERVICE_FEE_PER_MINUTE,
+                    "service_fee_per_hour_rmb": str(SERVICE_FEE_PER_HOUR_RMB),
                     "created_at": _now_iso(),
                 },
                 ensure_ascii=False,
@@ -236,6 +248,23 @@ def get_user_status(db: Session, user_id: int) -> dict:
 
 
 def _normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    def _parse_int(value: object) -> int | None:
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+            try:
+                return int(stripped)
+            except ValueError:
+                return None
+        return None
+
     raw_tasks = plan.get("tasks") or []
     tasks: list[dict[str, Any]] = []
     for index, raw_task in enumerate(raw_tasks, start=1):
@@ -259,16 +288,25 @@ def _normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
         )
 
     total_minutes = plan.get("totalMinutes")
-    try:
-        normalized_total_minutes = int(total_minutes)
-    except (TypeError, ValueError):
+    normalized_total_minutes = _parse_int(total_minutes)
+    if normalized_total_minutes is None:
         normalized_total_minutes = sum(task.get("estimatedMinutes") or 0 for task in tasks)
 
     suggested_duration = plan.get("suggestedDuration")
-    try:
-        normalized_duration = int(suggested_duration)
-    except (TypeError, ValueError):
-        normalized_duration = max(normalized_total_minutes, 0) * 60
+    derived_duration = 0
+    first_task = tasks[0] if tasks else None
+    first_task_minutes = first_task.get("estimatedMinutes") if isinstance(first_task, dict) else None
+    if isinstance(first_task_minutes, int) and first_task_minutes > 0:
+        derived_duration = first_task_minutes * 60
+    elif normalized_total_minutes > 0 and len(tasks) <= 1:
+        derived_duration = normalized_total_minutes * 60
+
+    normalized_duration = _parse_int(suggested_duration)
+    if normalized_duration is None:
+        normalized_duration = derived_duration or max(normalized_total_minutes, 0) * 60
+
+    if derived_duration > 0 and normalized_duration > 0 and abs(normalized_duration - derived_duration) >= 60:
+        normalized_duration = derived_duration
 
     return {
         "tasks": tasks,
@@ -379,6 +417,88 @@ def upsert_user_profile_document(db: Session, user_id: int, content: str) -> dic
         "content": row.content,
         "updated_at": row.updated_at.isoformat(),
         "max_chars": PROFILE_DOC_MAX_CHARS,
+    }
+
+
+def append_user_profile_memory(db: Session, user_id: int, memory_line: str) -> dict[str, Any]:
+    """Append one profile memory line while keeping the profile document bounded."""
+    normalized_line = memory_line.strip()
+    if not normalized_line:
+        return get_user_profile_document(db, user_id)
+
+    current = get_user_profile_document(db, user_id).get("content", "")
+    merged = f"{current}\n{normalized_line}".strip() if current else normalized_line
+
+    # Keep recent lines to respect max size.
+    lines = [line.strip() for line in merged.splitlines() if line.strip()]
+    while lines and len("\n".join(lines)) > PROFILE_DOC_MAX_CHARS:
+        lines.pop(0)
+
+    return upsert_user_profile_document(db, user_id, "\n".join(lines))
+
+
+def create_chat_message(
+    db: Session,
+    user_id: int,
+    role: str,
+    content: str,
+    session_ref: str | None = None,
+) -> dict[str, Any]:
+    normalized_role = role.strip().lower()
+    if normalized_role not in {"user", "assistant", "system"}:
+        normalized_role = "system"
+
+    normalized_content = content.strip()
+    if not normalized_content:
+        return {"ok": False, "error": "empty content"}
+    if len(normalized_content) > CHAT_MESSAGE_MAX_CHARS:
+        normalized_content = normalized_content[:CHAT_MESSAGE_MAX_CHARS]
+
+    row = ChatMessage(
+        id=f"chat_{uuid.uuid4().hex[:24]}",
+        user_id=user_id,
+        session_ref=session_ref,
+        role=normalized_role,
+        content=normalized_content,
+        created_at=datetime.utcnow(),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {
+        "ok": True,
+        "id": row.id,
+        "user_id": row.user_id,
+        "session_ref": row.session_ref,
+        "role": row.role,
+        "content": row.content,
+        "created_at": row.created_at.isoformat(),
+    }
+
+
+def list_recent_chat_messages(db: Session, user_id: int, limit: int = 40) -> dict[str, Any]:
+    rows = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.user_id == user_id)
+        .order_by(ChatMessage.created_at.desc())
+        .limit(max(1, min(limit, 200)))
+        .all()
+    )
+    ordered_rows = list(reversed(rows))
+    items = [
+        {
+            "id": row.id,
+            "role": row.role,
+            "content": row.content,
+            "session_ref": row.session_ref,
+            "created_at": row.created_at.isoformat(),
+        }
+        for row in ordered_rows
+    ]
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "items": items,
     }
 
 

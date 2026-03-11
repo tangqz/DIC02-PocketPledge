@@ -1,10 +1,30 @@
+# ── Core web framework ──────────────────────────────────────────────────────
 fastapi>=0.116.0
 uvicorn>=0.35.0
+
+# ── Database ─────────────────────────────────────────────────────────────────
 sqlalchemy==2.0.30
+
+# ── Data validation ──────────────────────────────────────────────────────────
 pydantic==2.7.4
+
+# ── HTTP clients ─────────────────────────────────────────────────────────────
 httpx>=0.28.1
-edge-tts>=6.1.12
+openai>=1.30.0          # OpenAI-compatible chat completions (Gemini etc.)
+
+# ── TTS ──────────────────────────────────────────────────────────────────────
+dashscope>=1.24.2       # Qwen Realtime TTS (default)
+edge-tts>=6.1.12        # Edge TTS fallback
+
+# ── ASR (default: sherpa-onnx SenseVoice) ────────────────────────────────────
 numpy>=1.26.4
-onnxruntime>=1.20.1
-sherpa-onnx>=1.10.39
-faster-whisper>=1.1.0
+onnxruntime>=1.20.1     # required for sherpa-onnx CUDA provider detection
+sherpa-onnx>=1.10.39    # primary ASR engine; see README for model download
+
+# ── Image processing ─────────────────────────────────────────────────────────
+pillow>=10.2.0
+
+# ── Optional / alternative ASR ───────────────────────────────────────────────
+# Uncomment if you want to use faster-whisper instead of sherpa-onnx.
+# Requires ctranslate2; on Windows you may need VS C++ Build Tools.
+# faster-whisper>=1.1.0
