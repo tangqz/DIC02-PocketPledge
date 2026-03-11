@@ -346,7 +346,7 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="flex flex-col items-center gap-3">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-            <span className="text-sm text-white/50">{t("live2d.loading")}</span>
+            <span className="text-sm text-slate-500">{t("live2d.loading")}</span>
           </div>
         </div>
       )}
@@ -363,7 +363,7 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
 
       {/* Debug overlay (dev only) */}
       {IS_DEV && (
-        <div className="pointer-events-none absolute right-2 top-2 rounded bg-black/55 px-2 py-1 font-mono text-[10px] leading-tight text-white/80">
+        <div className="pointer-events-none absolute right-2 top-2 rounded bg-slate-800/55 px-2 py-1 font-mono text-[10px] leading-tight text-slate-700">
           {debugText}
         </div>
       )}

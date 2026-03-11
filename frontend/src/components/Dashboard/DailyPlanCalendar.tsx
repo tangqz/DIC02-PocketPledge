@@ -278,12 +278,12 @@ export default function DailyPlanCalendar({ plan }: DailyPlanCalendarProps) {
   });
 
   return (
-    <section className="rounded-2xl border border-white/10 bg-surface-elevated/70 p-4 backdrop-blur-sm">
+    <section className="rounded-2xl border border-slate-200 bg-surface-elevated/70 p-4 backdrop-blur-sm">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-white/85">
+        <h3 className="text-sm font-semibold text-slate-700">
           {locale === "zh" ? "每日任务" : "Daily Mission"}
         </h3>
-        <span className="rounded bg-black/20 px-2 py-0.5 text-[11px] text-white/55">
+        <span className="rounded bg-slate-50 px-2 py-0.5 text-[11px] text-slate-500">
           {mode === "calendar"
             ? (locale === "zh" ? "自动视图: 日历" : "Auto View: Calendar")
             : mode === "progress"
@@ -297,20 +297,20 @@ export default function DailyPlanCalendar({ plan }: DailyPlanCalendarProps) {
           <div className="mb-2 flex items-center justify-between">
             <button
               onClick={() => setDisplayMonth((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
-              className="rounded bg-black/20 px-2 py-0.5 text-xs text-white/70 hover:bg-black/30"
+              className="rounded bg-slate-50 px-2 py-0.5 text-xs text-slate-600 hover:bg-black/30"
             >
               {locale === "zh" ? "上月" : "Prev"}
             </button>
-            <p className="text-sm text-white/80">{monthLabel}</p>
+            <p className="text-sm text-slate-700">{monthLabel}</p>
             <button
               onClick={() => setDisplayMonth((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
-              className="rounded bg-black/20 px-2 py-0.5 text-xs text-white/70 hover:bg-black/30"
+              className="rounded bg-slate-50 px-2 py-0.5 text-xs text-slate-600 hover:bg-black/30"
             >
               {locale === "zh" ? "下月" : "Next"}
             </button>
           </div>
 
-          <div className="grid grid-cols-7 gap-1 text-[11px] text-white/45">
+          <div className="grid grid-cols-7 gap-1 text-[11px] text-slate-500">
             {weekdayLabels.map((label) => (
               <div key={label} className="text-center">{label}</div>
             ))}
@@ -329,10 +329,10 @@ export default function DailyPlanCalendar({ plan }: DailyPlanCalendarProps) {
                   onMouseEnter={() => setHoveredDateKey(key)}
                   onMouseLeave={() => setHoveredDateKey((current) => (current === key ? null : current))}
                   className={`relative flex aspect-square items-center justify-center rounded-md text-[11px] ${
-                    inMonth ? "text-white/80" : "text-white/30"
+                    inMonth ? "text-slate-700" : "text-slate-400"
                   } ${
                     items.length === 0
-                      ? "bg-white/5"
+                      ? "bg-slate-100"
                       : isDone
                         ? "bg-success/25 text-success"
                         : "bg-accent/20 text-accent"
@@ -345,10 +345,10 @@ export default function DailyPlanCalendar({ plan }: DailyPlanCalendarProps) {
             })}
           </div>
 
-          <div className="mt-3 min-h-12 rounded-lg bg-black/20 p-2 text-xs text-white/65">
+          <div className="mt-3 min-h-12 rounded-lg bg-slate-50 p-2 text-xs text-slate-600">
             {selectedDateItems.length > 0 ? (
               <div className="space-y-1">
-                <p className="text-white/50">{hoveredDateKey}</p>
+                <p className="text-slate-500">{hoveredDateKey}</p>
                 {selectedDateItems.map((item, index) => (
                   <p key={`${item.taskTitle}-${index}`}>
                     {item.taskTitle}
@@ -365,24 +365,24 @@ export default function DailyPlanCalendar({ plan }: DailyPlanCalendarProps) {
 
       {mode === "progress" ? (
         <>
-          <div className="rounded-xl bg-black/20 p-3">
-            <p className="text-xs text-white/60">{locale === "zh" ? "已完成天数" : "Completed Days"}</p>
-            <p className="mt-1 text-2xl font-semibold text-white/85">
+          <div className="rounded-xl bg-slate-50 p-3">
+            <p className="text-xs text-slate-500">{locale === "zh" ? "已完成天数" : "Completed Days"}</p>
+            <p className="mt-1 text-2xl font-semibold text-slate-700">
               {completed}
-              <span className="ml-1 text-sm text-white/45">/ {Math.max(total, 1)}</span>
+              <span className="ml-1 text-sm text-slate-500">/ {Math.max(total, 1)}</span>
             </p>
-            <p className="mt-2 text-xs text-white/50">
+            <p className="mt-2 text-xs text-slate-500">
               {locale === "zh" ? "DDL" : "Deadline"}: {deadlineDate ? deadlineDate.toLocaleDateString(locale === "zh" ? "zh-CN" : "en-US") : (locale === "zh" ? "未设置" : "Not set")}
             </p>
           </div>
-          <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/8">
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-200">
             <div className="h-full bg-gradient-to-r from-accent to-success" style={{ width: `${Math.round(progressRatio * 100)}%` }} />
           </div>
         </>
       ) : null}
 
       {mode === "task" ? (
-        <div className="rounded-xl bg-black/20 p-3 text-xs text-white/75">
+        <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
           {tasks[0]
             ? `${tasks[0].title}${tasks[0].estimatedMinutes ? ` (${tasks[0].estimatedMinutes}m)` : ""}`
             : locale === "zh"
@@ -391,7 +391,7 @@ export default function DailyPlanCalendar({ plan }: DailyPlanCalendarProps) {
         </div>
       ) : null}
 
-      <div className="mt-4 text-xs text-white/45">{completed}/{total}</div>
+      <div className="mt-4 text-xs text-slate-500">{completed}/{total}</div>
     </section>
   );
 }

@@ -2,13 +2,13 @@
 
 /* ── Custom Design Tokens ── */
 @theme {
-  --color-surface: oklch(0.15 0.01 260);
-  --color-surface-elevated: oklch(0.2 0.015 260);
-  --color-surface-glass: oklch(0.18 0.01 260 / 0.7);
-  --color-accent: oklch(0.7 0.15 200);
-  --color-accent-soft: oklch(0.7 0.15 200 / 0.15);
+  --color-surface: oklch(0.97 0.01 75);
+  --color-surface-elevated: oklch(1 0 0);
+  --color-surface-glass: oklch(1 0 0 / 0.7);
+  --color-accent: oklch(0.6 0.18 25);
+  --color-accent-soft: oklch(0.6 0.18 25 / 0.1);
   --color-danger: oklch(0.65 0.2 25);
-  --color-success: oklch(0.7 0.18 145);
+  --color-success: oklch(0.65 0.18 145);
   --color-warning: oklch(0.75 0.15 70);
   --font-family-display: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-family-mono: "JetBrains Mono", ui-monospace, monospace;
