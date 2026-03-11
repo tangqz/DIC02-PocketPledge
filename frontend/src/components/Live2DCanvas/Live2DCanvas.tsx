@@ -19,6 +19,7 @@ import { useI18n } from "@/lib/i18n";
 import { useAudioQueue } from "@/components/AudioPlayer/useAudioQueue";
 import { useAvatarStore } from "@/stores/avatarStore";
 import { useSessionStore } from "@/stores/sessionStore";
+import { updateModelConfig } from "@/live2d/WebSDK/src/lappdefine";
 
 const IS_DEV = import.meta.env.DEV;
 
@@ -36,7 +37,9 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
     initializeLive2D?: () => void;
     LAppAdapter?: {
       getInstance: () => {
-        getModel: () => unknown;
+        getModel: () => {
+          _modelSetting?: unknown;
+        } | null;
         getExpressionCount: () => number;
         getMotionGroups: () => string[];
         getExpressionName: (index: number) => string;
@@ -110,8 +113,9 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
     }
 
     const modelDir = parts[parts.length - 2];
+    const modelFileName = parts[parts.length - 1].replace(/\.model3\.json$/i, "");
     const resourceRoot = `/${parts.slice(0, parts.length - 2).join("/")}`;
-    return { resourceRoot, modelDir };
+    return { resourceRoot, modelDir, modelFileName };
   };
 
   const playBase64Audio = async (base64Wav: string) => {
@@ -195,6 +199,10 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
           return;
         }
         const model = adapter.getModel();
+        if (!model || !model._modelSetting) {
+          setDebugText(`loaded=${isLoaded ? 1 : 0} model=0 ready=0`);
+          return;
+        }
         const expressionCount = adapter.getExpressionCount();
         const motionGroups = adapter.getMotionGroups();
         setDebugText(
@@ -243,6 +251,8 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
 
   useEffect(() => {
     let disposed = false;
+    setIsLoaded(false);
+    setError(null);
 
     const init = async () => {
       try {
@@ -259,10 +269,14 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
 
         sdkRef.current = { initializeLive2D, LAppAdapter, LAppDelegate };
 
+        const { resourceRoot, modelDir, modelFileName } = parseModelPath(config.url);
+        updateModelConfig(resourceRoot, modelDir, modelFileName, Number(config.kScale) || undefined);
         initializeLive2D();
-        const adapter = LAppAdapter.getInstance();
-        const { resourceRoot, modelDir } = parseModelPath(config.url);
-        adapter.setChara(resourceRoot, modelDir);
+
+        if (disposed) {
+          LAppDelegate.releaseInstance();
+          return;
+        }
 
         if (!disposed) {
           setIsLoaded(true);
@@ -278,7 +292,11 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
 
     return () => {
       disposed = true;
-      sdkRef.current?.LAppDelegate?.releaseInstance?.();
+      try {
+        sdkRef.current?.LAppDelegate?.releaseInstance?.();
+      } catch (releaseError) {
+        console.warn("[Live2DCanvas] releaseInstance failed", releaseError);
+      }
       stopAudio();
     };
   }, [config.url, stopAudio]);

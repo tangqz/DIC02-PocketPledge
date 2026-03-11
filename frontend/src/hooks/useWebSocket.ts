@@ -85,11 +85,15 @@ export function useWebSocket({
     }
     const wsUrl = `${url}?token=${encodeURIComponent(token)}`;
     manualCloseRef.current = false;
+    clearTimeout(reconnectTimerRef.current);
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
     console.log("[WS] Connecting to", wsUrl);
 
     ws.onopen = () => {
+      if (wsRef.current !== ws) {
+        return;
+      }
       console.log("[WS] Connected to", url);
       setIsConnected(true);
       reconnectCountRef.current = 0;
@@ -97,6 +101,9 @@ export function useWebSocket({
     };
 
     ws.onclose = (event) => {
+      if (wsRef.current !== ws) {
+        return;
+      }
       console.log("[WS] Disconnected", { code: event.code, reason: event.reason });
       setIsConnected(false);
       wsRef.current = null;
@@ -109,11 +116,17 @@ export function useWebSocket({
     };
 
     ws.onerror = (err) => {
+      if (wsRef.current !== ws) {
+        return;
+      }
       console.error("[WS] Error:", err);
       ws.close();
     };
 
     ws.onmessage = (event) => {
+      if (wsRef.current !== ws) {
+        return;
+      }
       try {
         const msg = JSON.parse(event.data) as RxMessage;
         dispatch(msg);

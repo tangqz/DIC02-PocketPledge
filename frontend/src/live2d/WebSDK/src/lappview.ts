@@ -38,6 +38,9 @@ export class LAppView {
 
     // 画面の表示の拡大縮小や移動の変換を行う行列
     this._viewMatrix = new CubismViewMatrix();
+    this._lastPointerViewX = 0.0;
+    this._lastPointerViewY = 0.0;
+    this._modelDragging = false;
   }
 
   /**
@@ -93,17 +96,24 @@ export class LAppView {
     // this._gear.release();
     // this._gear = null;
 
-    this._back.release();
-    this._back = null;
+    if (this._back) {
+      this._back.release();
+      this._back = null;
+    }
 
-    gl.deleteProgram(this._programId);
-    this._programId = null;
+    if (gl && this._programId) {
+      gl.deleteProgram(this._programId);
+      this._programId = null;
+    }
   }
 
   /**
    * 描画する。
    */
   public render(): void {
+    if (!gl || !this._viewMatrix) {
+      return;
+    }
     gl.useProgram(this._programId);
 
     if (this._back) {
@@ -185,10 +195,13 @@ export class LAppView {
    * @param pointY スクリーンY座標
    */
   public onTouchesBegan(pointX: number, pointY: number): void {
-    this._touchManager.touchesBegan(
-      pointX * window.devicePixelRatio,
-      pointY * window.devicePixelRatio
-    );
+    const deviceX = pointX * window.devicePixelRatio;
+    const deviceY = pointY * window.devicePixelRatio;
+
+    this._touchManager.touchesBegan(deviceX, deviceY);
+    this._lastPointerViewX = this.transformViewX(deviceX);
+    this._lastPointerViewY = this.transformViewY(deviceY);
+    this._modelDragging = false;
   }
 
   /**
@@ -198,16 +211,32 @@ export class LAppView {
    * @param pointY スクリーンY座標
    */
   public onTouchesMoved(pointX: number, pointY: number): void {
-    const viewX: number = this.transformViewX(this._touchManager.getX());
-    const viewY: number = this.transformViewY(this._touchManager.getY());
-
-    this._touchManager.touchesMoved(
-      pointX * window.devicePixelRatio,
-      pointY * window.devicePixelRatio
+    const deviceX = pointX * window.devicePixelRatio;
+    const deviceY = pointY * window.devicePixelRatio;
+    const viewX: number = this.transformViewX(deviceX);
+    const viewY: number = this.transformViewY(deviceY);
+    const dragDistance = this._touchManager.calculateDistance(
+      this._touchManager.getStartX(),
+      this._touchManager.getStartY(),
+      deviceX,
+      deviceY
     );
 
+    this._touchManager.touchesMoved(deviceX, deviceY);
+
     const live2DManager: LAppLive2DManager = LAppLive2DManager.getInstance();
-    live2DManager.onDrag(viewX, viewY);
+    if (dragDistance >= LAppDefine.ModelInteractionDragThreshold * window.devicePixelRatio) {
+      this._modelDragging = true;
+      LAppDelegate.getInstance().getAdapter()?.translateModel(
+        viewX - this._lastPointerViewX,
+        viewY - this._lastPointerViewY
+      );
+    } else {
+      live2DManager.onDrag(viewX, viewY);
+    }
+
+    this._lastPointerViewX = viewX;
+    this._lastPointerViewY = viewY;
   }
 
   /**
@@ -220,6 +249,11 @@ export class LAppView {
     // タッチ終了
     const live2DManager: LAppLive2DManager = LAppLive2DManager.getInstance();
     live2DManager.onDrag(0.0, 0.0);
+
+    if (this._modelDragging) {
+      this._modelDragging = false;
+      return;
+    }
 
     {
       // シングルタップ
@@ -284,6 +318,24 @@ export class LAppView {
     return this._deviceToScreen.transformY(deviceY);
   }
 
+  public onMouseWheel(deltaY: number): void {
+    const adapter = LAppDelegate.getInstance().getAdapter();
+    if (!adapter) {
+      return;
+    }
+
+    const currentScale = adapter.getModelScale();
+    const zoomFactor = deltaY < 0
+      ? 1 + LAppDefine.ModelInteractionWheelScaleStep
+      : 1 - LAppDefine.ModelInteractionWheelScaleStep;
+    const nextScale = Math.min(
+      LAppDefine.ModelInteractionMaxScale,
+      Math.max(LAppDefine.ModelInteractionMinScale, currentScale * zoomFactor)
+    );
+
+    adapter.setModelScale(nextScale);
+  }
+
   _touchManager: TouchManager; // タッチマネージャー
   _deviceToScreen: CubismMatrix44; // デバイスからスクリーンへの行列
   _viewMatrix: CubismViewMatrix; // viewMatrix
@@ -292,4 +344,7 @@ export class LAppView {
   // _gear: LAppSprite; // ギア画像
   _changeModel: boolean; // モデル切り替えフラグ
   _isClick: boolean; // クリック中
+  _lastPointerViewX: number;
+  _lastPointerViewY: number;
+  _modelDragging: boolean;
 }

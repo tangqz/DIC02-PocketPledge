@@ -118,6 +118,7 @@ python -m pip install -r requirements.txt
 - sqlalchemy
 - pydantic
 - httpx
+- dashscope
 - edge-tts
 - sherpa-onnx
 - onnxruntime
@@ -182,6 +183,12 @@ start-dev.cmd
 | `AUTH_INITIAL_BALANCE` | 新用户初始余额 | `3000` |
 | `MEDIA_AI_USE_REAL_DIFY` | 是否启用真实 Dify | `0` |
 | `MEDIA_AI_ASR_PROVIDER` | 本地语音转写提供方 | `sherpa-onnx` |
+| `MEDIA_AI_TTS_PROVIDER` | 本地语音合成提供方 | `qwen-realtime` |
+| `MEDIA_AI_TTS_MODEL` | Qwen 实时 TTS 模型 | `qwen3-tts-instruct-flash-realtime` |
+| `MEDIA_AI_TTS_VOICE` | Qwen TTS 音色 | `Cherry` |
+| `MEDIA_AI_TTS_MODE` | Qwen TTS 提交模式 | `server_commit` |
+| `MEDIA_AI_TTS_SPEECH_RATE` | Qwen TTS 语速 | `1.05` |
+| `MEDIA_AI_TTS_ENABLE_TN` | Qwen TTS 是否启用文本归一化 | `1` |
 | `MEDIA_AI_SHERPA_MODEL_TYPE` | sherpa-onnx 模型类型 | `sense_voice` |
 | `MEDIA_AI_SHERPA_MODEL_PATH` | SenseVoice ONNX 模型路径 | `Open-LLM-VTuber/models/.../model.int8.onnx` |
 | `MEDIA_AI_SHERPA_TOKENS_PATH` | sherpa-onnx tokens.txt 路径 | `Open-LLM-VTuber/models/.../tokens.txt` |
@@ -199,6 +206,19 @@ start-dev.cmd
 | `DIFY_TOOL_BEARER_TOKEN` | Dify 自定义工具固定 Bearer Token | 空 |
 
 如果不配置真实 Dify，后端会回退到本地 Mock 行为，便于联调前端和网关逻辑。
+
+### Qwen Realtime TTS
+
+当前默认 TTS 已切到 DashScope 的 Qwen 实时语音合成，目标是尽量降低陪伴对话首包延迟，同时保持前端音频协议不变。
+
+实现方式：
+
+- 后端调用 `qwen3-tts-instruct-flash-realtime`
+- 输出格式固定为 `PCM_24000HZ_MONO_16BIT`
+- 后端把返回的 PCM 封装为 WAV，再按现有 WebSocket `audio` 消息下发给前端
+- API Key 默认优先读取 `MEDIA_AI_TTS_API_KEY`，否则依次回退到 `DASHSCOPE_API_KEY`、`LOCAL_AGENT_API_KEY`、`LOCAL_CHAT_API_KEY`
+
+如果你已经在 `.env` 中配置了同一套 DashScope / Qwen Key，通常不需要再额外复制一份 TTS key。
 
 ### Sherpa-ONNX ASR
 

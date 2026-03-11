@@ -63,11 +63,24 @@ class ConnectionManager:
                 await self.send_personal_message(user_id, payload)
         return session
 
-    def disconnect(self, user_id: str) -> None:
-        """Mark one user as disconnected while preserving session for TTL."""
+    def disconnect(self, user_id: str, websocket: WebSocket | None = None) -> bool:
+        """Mark one user as disconnected while preserving session for TTL.
+
+        Returns True only when the disconnect applies to the currently active
+        websocket. Stale websocket handlers must not clear a newer connection.
+        """
+        current = self.active_connections.get(user_id)
+        if websocket is not None and current is not None and current is not websocket:
+            logger.info("ignoring stale ws disconnect user_id=%s", user_id)
+            return False
+
+        if current is None and websocket is not None:
+            return False
+
         self.active_connections.pop(user_id, None)
         self.disconnected_at[user_id] = datetime.now(UTC)
         self.cleanup_expired_states()
+        return True
 
     async def send_personal_message(self, user_id: str, payload: dict) -> None:
         """Send one message to a specific active user."""
@@ -81,7 +94,8 @@ class ConnectionManager:
             await websocket.send_json(payload)
         except Exception:
             logger.exception("ws tx failed, queueing for retry user_id=%s", user_id)
-            self.active_connections.pop(user_id, None)
+            if self.active_connections.get(user_id) is websocket:
+                self.active_connections.pop(user_id, None)
             self.pending_messages.setdefault(user_id, []).append(payload)
 
     async def broadcast(self, payload: dict) -> None:
@@ -517,12 +531,9 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected, user_id=%s", user_id)
     finally:
-        manager.disconnect(user_id)
-        task = watchdog_tasks.pop(user_id, None)
-        if task is not None:
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-        audio_buffers.pop(user_id, None)
+        disconnected_current = manager.disconnect(user_id, ws)
+        if disconnected_current:
+            audio_buffers.pop(user_id, None)
 
 
 async def dispatch_message(user_id: str, session: SessionState, msg: dict[str, Any]) -> None:
