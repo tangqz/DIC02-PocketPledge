@@ -50,27 +50,32 @@ pip install -r requirements.txt
 **配置环境变量**：
 在 backend/.env 或项目根目录新建 .env 文件。提供大模型 API 密钥以及刚才准备的 ASR 模型路径：
 
-`ini
-# --- ASR 模型路径 (严格替换为你本地包含以上两个文件的真实绝对路径) ---
+
+#### ASR 模型路径 (严格替换为你本地包含以上两个文件的真实绝对路径)
+```
 MEDIA_AI_SHERPA_MODEL_PATH="C:/Users/YourName/path/to/sherpa-onnx/model.int8.onnx"
 MEDIA_AI_SHERPA_TOKENS_PATH="C:/Users/YourName/path/to/sherpa-onnx/tokens.txt"
+```
 
-# --- 大模型与 TTS (DashScope 用于 Qwen 本地代理与流式语音合成) ---
+#### 大模型与 TTS (DashScope 用于 Qwen 本地代理与流式语音合成)
+```
 DASHSCOPE_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+```
 
-# （可选）连接真实的 Dify 工作流
-# MEDIA_AI_USE_REAL_DIFY=1
-# DIFY_API_BASE="http://your-dify-ip/v1"
-# DIFY_CHAT_API_KEY="app-xxx"
-# DIFY_VISION_API_KEY="app-xxx"
-# DIFY_SYSTEM_AGENT_API_KEY="app-xxx"
-`
+#### （可选）连接真实的 Dify 工作流
+```
+MEDIA_AI_USE_REAL_DIFY=1
+DIFY_API_BASE="http://your-dify-ip/v1"
+DIFY_CHAT_API_KEY="app-xxx"
+DIFY_VISION_API_KEY="app-xxx"
+DIFY_SYSTEM_AGENT_API_KEY="app-xxx"
+```
 
 **启动后端**：
-`bash
+```bash
 cd backend
 uvicorn app.main:app --host 0.0.0.0 --port 12393 --reload
-`
+```
 *启动后会自动在 backend/reward.db 初始化数据库和预设账户。*
 
 ### 3. 前端配置与启动 (Frontend)
