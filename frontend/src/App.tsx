@@ -13,9 +13,12 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { useMediaStore } from "@/stores/mediaStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useAvatarStore } from "@/stores/avatarStore";
+import { useCharacterStore } from "@/stores/characterStore";
+import { useChatStore } from "@/stores/chatStore";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useVAD } from "@/hooks/useVAD";
 import { captureImagesFromStreams, useSnapshot } from "@/hooks/useSnapshot";
+import { useI18n } from "@/lib/i18n";
 import LoginPage from "@/components/Auth/LoginPage";
 import SetupLayout from "@/components/Layout/SetupLayout";
 import FocusLayout from "@/components/Layout/FocusLayout";
@@ -51,6 +54,9 @@ function AuthenticatedApp() {
   const user = useAuthStore((s) => s.user);
   const setBalance = useSessionStore((s) => s.setBalance);
   const setDegradedMode = useSessionStore((s) => s.setDegradedMode);
+  const selectedCharacterId = useCharacterStore((s) => s.selectedCharacterId);
+  const setSelectedCharacterId = useCharacterStore((s) => s.setSelectedCharacterId);
+  const { locale } = useI18n();
 
   // ── WebSocket (global, persistent) ──
   const captureVisualContext = useCallback(async (
@@ -96,6 +102,9 @@ function AuthenticatedApp() {
 
       if (msg.type === "model-info") {
         useAvatarStore.getState().setModelInfo(msg.model_info);
+        if (msg.character_id) {
+          setSelectedCharacterId(msg.character_id);
+        }
         return;
       }
 
@@ -121,9 +130,23 @@ function AuthenticatedApp() {
             });
           });
         }
+
+        if (msg.command === "chat-cleared") {
+          useChatStore.getState().clearMessages();
+          useAvatarStore.getState().clearAudioMessages();
+          return;
+        }
       }
     },
   });
+
+  useEffect(() => {
+    send({ type: "set-locale", locale });
+  }, [locale, send]);
+
+  useEffect(() => {
+    send({ type: "set-character", characterId: selectedCharacterId });
+  }, [selectedCharacterId, send]);
 
   // ── VAD → WS bridge ──
   const handleSpeechEnd = useCallback(

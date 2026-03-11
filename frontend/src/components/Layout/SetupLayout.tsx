@@ -1,51 +1,60 @@
-/* ────────────────────────────────────────────────
- *  SetupLayout  –  Chat-driven session setup
- *
- *  The user talks to the Agent to:
- *   1. Discuss and set a study plan
- *   2. Calibrate camera environment
- *   3. Agree on session duration & rules
- *
- *  The Agent calls tools (plan.update, supervision.start) which
- *  trigger state transitions via WS. The frontend never directly
- *  calls setSupervisionState("active").
- *
- *  Layout: Left = chat panel, Right = Live2D + overlaid status cards
- * ──────────────────────────────────────────────── */
-import { useCallback, useRef } from "react";
-import { useSessionStore } from "@/stores/sessionStore";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSend } from "@/App";
 import { useChatStore } from "@/stores/chatStore";
+import { useSessionStore } from "@/stores/sessionStore";
 import { useAvatarStore } from "@/stores/avatarStore";
 import { useMediaStore } from "@/stores/mediaStore";
-import { useSend } from "@/App";
-import CameraPreview from "@/components/SupervisionPanel/CameraPreview";
-import ChatPanel from "@/components/ChatPanel/ChatPanel";
-import Live2DCanvas, {
-  type Live2DCanvasHandle,
-} from "@/components/Live2DCanvas/Live2DCanvas";
-import VoiceInput from "@/components/VoiceInput/VoiceInput";
+import { useCharacterStore } from "@/stores/characterStore";
+import { useAuthStore } from "@/stores/authStore";
 import { useI18n } from "@/lib/i18n";
-import type { PlanData } from "@/lib/protocol";
+import ChatPanel from "@/components/ChatPanel/ChatPanel";
+import VoiceInput from "@/components/VoiceInput/VoiceInput";
+import Live2DCanvas, { type Live2DCanvasHandle } from "@/components/Live2DCanvas/Live2DCanvas";
+import DailyPlanCalendar from "@/components/Dashboard/DailyPlanCalendar";
+import CharacterMarket from "@/components/Dashboard/CharacterMarket";
 
 export default function SetupLayout() {
-  const { plan, balance, activeToolCall, degradedMode } = useSessionStore();
-  const {
-    cameraGranted,
-    screenGranted,
-    screenShareSupported,
-    requestScreenShare,
-    requestCamera,
-    micGranted,
-    micSupported,
-    vadActive,
-    micMuted,
-    requestMicrophone,
-    snapshotInterval,
-    setSnapshotInterval,
-  } = useMediaStore();
-  const { t, locale, setLocale } = useI18n();
   const live2dRef = useRef<Live2DCanvasHandle>(null);
   const send = useSend();
+  const { t, locale, setLocale } = useI18n();
+  const selectedCharacterId = useCharacterStore((s) => s.selectedCharacterId);
+  const token = useAuthStore((s) => s.token);
+
+  const [sessionSummaries, setSessionSummaries] = useState<Array<{ id: string; summary_text: string; created_at: string }>>([]);
+  const [transactions, setTransactions] = useState<Array<{ id: string; amount: number; reason: string; created_at: string; tx_type: string }>>([]);
+
+  const plan = useSessionStore((s) => s.plan);
+  const balance = useSessionStore((s) => s.balance);
+  const activeToolCall = useSessionStore((s) => s.activeToolCall);
+  const degradedMode = useSessionStore((s) => s.degradedMode);
+
+  const micGranted = useMediaStore((s) => s.micGranted);
+  const cameraGranted = useMediaStore((s) => s.cameraGranted);
+  const screenGranted = useMediaStore((s) => s.screenGranted);
+  const requestMicrophone = useMediaStore((s) => s.requestMicrophone);
+  const requestCamera = useMediaStore((s) => s.requestCamera);
+  const requestScreenShare = useMediaStore((s) => s.requestScreenShare);
+  const snapshotInterval = useMediaStore((s) => s.snapshotInterval);
+  const setSnapshotInterval = useMediaStore((s) => s.setSnapshotInterval);
+
+  useEffect(() => {
+    send({ type: "set-character", characterId: selectedCharacterId });
+  }, [selectedCharacterId, send]);
+
+  useEffect(() => {
+    const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:12393";
+    if (!token) {
+      return;
+    }
+    const headers = { Authorization: `Bearer ${token}` };
+    void Promise.all([
+      fetch(`${API_BASE}/api/business/me/session-summaries?limit=6`, { headers }).then((r) => r.json()).catch(() => ({ items: [] })),
+      fetch(`${API_BASE}/api/business/me/transactions?limit=8`, { headers }).then((r) => r.json()).catch(() => ({ items: [] })),
+    ]).then(([summaryData, txData]) => {
+      setSessionSummaries(Array.isArray(summaryData?.items) ? summaryData.items : []);
+      setTransactions(Array.isArray(txData?.items) ? txData.items : []);
+    });
+  }, [token]);
 
   const interruptAgentOutput = useCallback(() => {
     const chat = useChatStore.getState();
@@ -59,10 +68,7 @@ export default function SetupLayout() {
     avatar.clearAudioMessages();
     chat.clearStreaming();
     chat.setAgentSpeaking(false);
-    send({
-      type: "interrupt-signal",
-      text: chat.streamingText || lastMessage?.text || "",
-    });
+    send({ type: "interrupt-signal", text: chat.streamingText || lastMessage?.text || "" });
   }, [send]);
 
   const handleSendText = useCallback((text: string) => {
@@ -71,180 +77,140 @@ export default function SetupLayout() {
     send({ type: "text-input", text });
   }, [interruptAgentOutput, send]);
 
+  const handleSwitchCharacter = useCallback((characterId: string) => {
+    useChatStore.getState().clearMessages();
+    useAvatarStore.getState().clearAudioMessages();
+    send({ type: "set-character", characterId });
+  }, [send]);
+
   return (
-    <div className="flex h-full animate-fade-in">
-      {/* ── Left: Chat area (primary interaction) ── */}
-      <div className="flex w-[45%] flex-shrink-0 flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 pt-6 pb-2">
+    <div className="flex h-full min-h-0 animate-fade-in">
+      <aside className="flex w-[48%] min-w-[360px] flex-col gap-3 overflow-y-auto border-r border-white/10 bg-surface/55 p-4">
+        <div className="flex items-start justify-between gap-3 rounded-2xl border border-white/10 bg-surface-elevated/70 p-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">
-              {t("app.title")}
-            </h1>
-            <p className="mt-0.5 text-sm text-white/50">
-              {t("setup.chatHint")}
-            </p>
+            <h1 className="text-2xl font-bold tracking-tight text-white/90">{t("app.title")}</h1>
+            <p className="mt-1 text-sm text-white/55">{t("setup.chatHint")}</p>
           </div>
-          <div className="flex items-center gap-3">
-            {/* Tool-call indicator */}
-            {activeToolCall && (
-              <span className="flex items-center gap-1.5 rounded-full bg-accent/10 px-3 py-1 text-xs text-accent">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
-                {activeToolCall.tool}
-              </span>
-            )}
-            {/* Locale toggle */}
-            <button
-              onClick={() => setLocale(locale === "zh" ? "en" : "zh")}
-              className="rounded-lg bg-surface-elevated/60 px-2.5 py-1 text-xs font-medium text-white/60 transition-colors hover:text-white"
-            >
-              {locale === "zh" ? "EN" : "中"}
-            </button>
-          </div>
+          <button
+            onClick={() => {
+              const nextLocale = locale === "zh" ? "en" : "zh";
+              setLocale(nextLocale);
+              send({ type: "set-locale", locale: nextLocale });
+            }}
+            className="rounded-lg bg-white/10 px-2.5 py-1 text-xs font-medium text-white/75 hover:bg-white/20"
+          >
+            {locale === "zh" ? "EN" : "中"}
+          </button>
         </div>
 
-        {/* Chat panel — expanded mode with text input */}
-        <div className="flex-1 overflow-hidden rounded-tr-2xl bg-surface-elevated/30 backdrop-blur-sm">
-          <ChatPanel expanded onSendText={handleSendText} />
-        </div>
-      </div>
+        <DailyPlanCalendar plan={plan} />
 
-      {/* ── Right: Live2D stage + overlaid status cards ── */}
-      <div className="relative flex-1">
-        {/* Live2D canvas (fills the entire right area) */}
-        <div id="live2d-container" className="absolute inset-0">
-          {degradedMode ? <DowngradePanel /> : <Live2DCanvas ref={live2dRef} />}
-        </div>
-
-        {/* Voice input indicator — centered near bottom */}
-        {!degradedMode && (
-          <div className="absolute bottom-8 left-1/2 z-20 -translate-x-1/2">
-            <VoiceInput />
-          </div>
-        )}
-
-        {/* ── Overlaid status cards (bottom-left of the Live2D area) ── */}
-        <div className="absolute bottom-6 left-6 z-10 flex max-w-xs flex-col gap-3">
-          {/* Camera preview (compact) */}
-          <div className="h-28 w-40 overflow-hidden rounded-xl bg-surface-elevated/80 shadow-lg backdrop-blur-md">
-            <CameraPreview />
-          </div>
-
-          {/* Permissions & balance */}
-          <div className="space-y-1.5 rounded-xl bg-surface-elevated/80 p-3 shadow-lg backdrop-blur-md">
-            <PermissionRow
-              label={t("setup.micLabel")}
-              granted={micGranted}
-              active={micGranted && vadActive && !micMuted && !degradedMode}
-              required
-              supported={micSupported}
-              locale={locale}
-              onRequest={
-                !micGranted && micSupported
-                  ? requestMicrophone
-                  : undefined
-              }
-            />
-            <PermissionRow
-              label={t("setup.cameraLabel")}
-              granted={cameraGranted}
-              required
-              locale={locale}
-              onRequest={!cameraGranted ? requestCamera : undefined}
-            />
-            <PermissionRow
-              label={t("setup.screenShare")}
-              granted={screenGranted}
-              supported={screenShareSupported}
-              locale={locale}
-              onRequest={!screenGranted && screenShareSupported ? requestScreenShare : undefined}
-            />
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-white/70">{t("status.balance")}</span>
-              <span className="font-mono font-medium text-success">{balance}</span>
+        <section className="rounded-2xl border border-white/10 bg-surface-elevated/70 p-4 backdrop-blur-sm">
+          <h3 className="mb-3 text-sm font-semibold text-white/85">
+            {locale === "zh" ? "监督准备" : "Supervision Setup"}
+          </h3>
+          <div className="space-y-2 text-sm">
+            <PermissionRow label={locale === "zh" ? "麦克风" : "Microphone"} granted={micGranted} onRequest={requestMicrophone} />
+            <PermissionRow label={locale === "zh" ? "摄像头" : "Camera"} granted={cameraGranted} onRequest={requestCamera} />
+            <PermissionRow label={locale === "zh" ? "屏幕共享" : "Screen Share"} granted={screenGranted} onRequest={requestScreenShare} />
+            <div className="mt-3 flex items-center justify-between rounded-lg bg-black/20 px-3 py-2">
+              <span className="text-white/65">{t("status.balance")}</span>
+              <span className="font-mono text-success">{balance}</span>
             </div>
-            {!degradedMode && (
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-white/70">{locale === "zh" ? "监控间隔 (秒)" : "Snapshot Interval (s)"}</span>
+            <div className="mt-2 rounded-lg bg-black/20 px-3 py-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-white/65">
+                  {locale === "zh" ? "监督流请求频率(秒)" : "Supervision Stream Interval (s)"}
+                </span>
                 <input
                   type="number"
-                  min="5"
-                  max="300"
+                  min={5}
+                  max={300}
                   value={snapshotInterval}
-                  onChange={(e) => setSnapshotInterval(Number(e.target.value) || 15)}
-                  className="w-16 rounded bg-surface/50 px-2 py-0.5 text-right font-mono text-white/90 outline-none focus:bg-surface"
+                  onChange={(e) => {
+                    const next = Number(e.target.value);
+                    const clamped = Number.isFinite(next) ? Math.max(5, Math.min(300, Math.round(next))) : 60;
+                    setSnapshotInterval(clamped);
+                  }}
+                  className="w-20 rounded bg-white/10 px-2 py-1 text-right font-mono text-white/90 outline-none"
                 />
               </div>
-            )}
-          </div>
-        </div>
-
-        {/* ── Overlaid plan preview (bottom-right) ── */}
-        <div className="absolute right-6 bottom-6 z-10 w-60">
-          {plan ? (
-            <PlanPreview plan={plan} locale={locale} />
-          ) : (
-            <div className="rounded-xl bg-surface-elevated/60 px-4 py-3 text-center text-xs text-white/40 shadow-lg backdrop-blur-md">
-              {t("setup.agentStartHint")}
+              <p className="mt-1 text-[11px] text-white/40">
+                {locale === "zh"
+                  ? "仅在非专注模式可调整，用于临时演示调试。"
+                  : "Editable in non-focus mode for temporary demo tuning."}
+              </p>
             </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DowngradePanel() {
-  return (
-    <div className="flex h-full items-center justify-center bg-black/35 backdrop-blur-sm">
-      <div className="rounded-2xl border border-white/10 bg-surface-elevated/80 px-6 py-5 text-center shadow-lg">
-        <p className="text-sm uppercase tracking-[0.3em] text-white/30">Fallback Mode</p>
-        <p className="mt-3 text-lg font-semibold text-white/80">余额不足，陪伴模式已停用</p>
-        <p className="mt-2 text-sm text-white/45">当前仅保留基础文本与状态同步能力。</p>
-      </div>
-    </div>
-  );
-}
-
-/** Read-only plan preview card */
-function PlanPreview({ plan, locale }: { plan: PlanData; locale: string }) {
-  return (
-    <div className="space-y-2 rounded-xl bg-surface-elevated/50 p-4">
-      <h3 className="text-sm font-medium text-white/60">
-        {locale === "zh" ? "学习计划" : "Study Plan"}
-      </h3>
-      <div className="space-y-1.5">
-        {plan.tasks.map((task) => (
-          <div key={task.id} className="flex items-center gap-2 text-sm">
-            <span
-              className={`h-4 w-4 rounded border text-center text-xs leading-4 ${
-                task.completed
-                  ? "border-success bg-success/20 text-success"
-                  : "border-white/20 text-transparent"
-              }`}
-            >
-              ✓
-            </span>
-            <span
-              className={`flex-1 ${task.completed ? "text-white/40 line-through" : "text-white/80"}`}
-            >
-              {task.title}
-            </span>
-            {task.estimatedMinutes && (
-              <span className="text-xs text-white/30">
-                {task.estimatedMinutes}m
-              </span>
-            )}
           </div>
-        ))}
-      </div>
-      {plan.suggestedDuration && (
-        <p className="mt-2 text-xs text-white/40">
+        </section>
+
+        <CharacterMarket onSwitch={handleSwitchCharacter} />
+
+        <section className="rounded-2xl border border-white/10 bg-surface-elevated/70 p-4 backdrop-blur-sm">
+          <h3 className="mb-3 text-sm font-semibold text-white/85">
+            {locale === "zh" ? "过去专注记录" : "Past Focus Records"}
+          </h3>
+          <div className="space-y-2 text-xs">
+            {sessionSummaries.length === 0 ? (
+              <p className="text-white/45">{locale === "zh" ? "暂无历史记录" : "No records yet"}</p>
+            ) : sessionSummaries.map((item) => (
+              <div key={item.id} className="rounded-lg bg-black/20 p-2 text-white/70">
+                <p>{item.summary_text}</p>
+                <p className="mt-1 text-[11px] text-white/40">{new Date(item.created_at).toLocaleString()}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-white/10 bg-surface-elevated/70 p-4 backdrop-blur-sm">
+          <h3 className="mb-3 text-sm font-semibold text-white/85">
+            {locale === "zh" ? "资金记录" : "Fund Records"}
+          </h3>
+          <div className="space-y-2 text-xs">
+            {transactions.length === 0 ? (
+              <p className="text-white/45">{locale === "zh" ? "暂无资金流水" : "No transactions yet"}</p>
+            ) : transactions.map((item) => (
+              <div key={item.id} className="flex items-center justify-between rounded-lg bg-black/20 px-2 py-1.5 text-white/70">
+                <div>
+                  <p>{item.reason}</p>
+                  <p className="text-[11px] text-white/40">{new Date(item.created_at).toLocaleDateString()} · {item.tx_type}</p>
+                </div>
+                <span className={`font-mono ${item.amount > 0 ? "text-success" : "text-danger"}`}>{item.amount > 0 ? `+${item.amount}` : item.amount}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-white/10 bg-surface-elevated/70 p-4 text-xs text-white/55 backdrop-blur-sm">
           {locale === "zh"
-            ? `建议时长: ${plan.suggestedDuration / 60} 分钟`
-            : `Suggested: ${plan.suggestedDuration / 60} min`}
-        </p>
-      )}
+            ? "提示：切换角色会立即热切换模型，并清空聊天记录以保证人设一致性。"
+            : "Tip: Switching character hot-loads the model and clears chat history to keep persona consistency."}
+        </section>
+      </aside>
+
+      <main className="relative flex flex-1 min-w-0 flex-col bg-gradient-to-b from-surface/20 to-transparent">
+        <div className="relative min-h-0 flex-1">
+          <div id="live2d-container" className="absolute inset-0">
+            {degradedMode ? <DowngradePanel locale={locale} /> : <Live2DCanvas ref={live2dRef} />}
+          </div>
+
+          {!degradedMode ? (
+            <div className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2">
+              <VoiceInput />
+            </div>
+          ) : null}
+
+          {activeToolCall ? (
+            <div className="absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-full bg-accent/20 px-4 py-1.5 text-xs font-medium text-accent">
+              {activeToolCall.tool}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="h-[36%] min-h-[220px] border-t border-white/10 bg-surface-elevated/55 backdrop-blur-lg">
+          <ChatPanel expanded onSendText={handleSendText} />
+        </div>
+      </main>
     </div>
   );
 }
@@ -252,53 +218,35 @@ function PlanPreview({ plan, locale }: { plan: PlanData; locale: string }) {
 function PermissionRow({
   label,
   granted,
-  active = false,
-  required,
-  supported = true,
-  locale = "zh",
   onRequest,
 }: {
   label: string;
   granted: boolean;
-  active?: boolean;
-  required?: boolean;
-  supported?: boolean;
-  locale?: string;
-  /** If provided, the status badge becomes a clickable button to request permission */
-  onRequest?: () => void;
+  onRequest: () => Promise<boolean>;
 }) {
-  const statusContent = !supported ? (
-    <span className="text-white/30">
-      {locale === "zh" ? "不支持" : "Not Supported"}
-    </span>
-  ) : active ? (
-    <span className="text-accent">
-      ● {locale === "zh" ? "正在使用" : "In Use"}
-    </span>
-  ) : granted ? (
-    <span className="text-success">
-      ✓ {locale === "zh" ? "已授权" : "Authorized"}
-    </span>
-  ) : onRequest ? (
-    <button
-      onClick={onRequest}
-      className="rounded-md bg-accent/20 px-2 py-0.5 text-accent transition-colors hover:bg-accent/30"
-    >
-      {locale === "zh" ? "点击授权" : "Authorize"}
-    </button>
-  ) : (
-    <span className="text-warning">
-      {locale === "zh" ? "待授权" : "Pending"}
-    </span>
-  );
-
   return (
-    <div className="flex items-center justify-between text-sm">
-      <span className="text-white/70">
-        {label}
-        {required && <span className="ml-1 text-danger">*</span>}
-      </span>
-      {statusContent}
+    <div className="flex items-center justify-between rounded-lg bg-black/20 px-3 py-2">
+      <span className="text-white/70">{label}</span>
+      {granted ? (
+        <span className="text-success">Ready</span>
+      ) : (
+        <button className="rounded bg-accent/25 px-2 py-0.5 text-accent hover:bg-accent/35" onClick={() => void onRequest()}>
+          Authorize
+        </button>
+      )}
+    </div>
+  );
+}
+
+function DowngradePanel({ locale }: { locale: "zh" | "en" }) {
+  return (
+    <div className="flex h-full items-center justify-center bg-black/35 backdrop-blur-sm">
+      <div className="rounded-2xl border border-white/10 bg-surface-elevated/80 px-6 py-5 text-center shadow-lg">
+        <p className="text-sm uppercase tracking-[0.3em] text-white/30">Fallback Mode</p>
+        <p className="mt-3 text-lg font-semibold text-white/80">
+          {locale === "zh" ? "余额不足，陪伴模式已停用" : "Balance exhausted. Companion mode is disabled."}
+        </p>
+      </div>
     </div>
   );
 }

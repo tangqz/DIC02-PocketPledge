@@ -67,8 +67,10 @@ class MockDifyClient:
 		session_id: str,
 		images: list[dict[str, Any]] | None = None,
 		current_task: str | None = None,
+		language_mode: str = "zh",
+		character_id: str = "milly",
 	) -> AsyncIterator[str]:
-		_ = session_id
+		_ = (session_id, language_mode, character_id)
 		lower_text = user_text.lower()
 		has_system_result = "[SYSTEM_RESULT:" in user_text
 
@@ -330,6 +332,8 @@ class DifyClient:
 		session_id: str,
 		images: list[dict[str, Any]] | None = None,
 		current_task: str | None = None,
+		language_mode: str = "zh",
+		character_id: str = "milly",
 	) -> AsyncIterator[str]:
 		if not self.base_url or not self.chat_api_key:
 			raise RuntimeError("Missing Dify chat configuration")
@@ -337,6 +341,8 @@ class DifyClient:
 		payload: dict[str, Any] = {
 			"inputs": {
 				"current_task": current_task or "",
+				"language_mode": language_mode,
+				"character_id": character_id,
 			},
 			"query": user_text,
 			"response_mode": "streaming",

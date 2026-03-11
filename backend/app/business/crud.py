@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from .models import (
+    ChatMessage,
     PauseRequest,
     SessionSummary,
     StudyPlan,
@@ -18,6 +19,7 @@ from .models import (
 SERVICE_FEE_PER_MINUTE = 15  # 单位：分，15分=0.15元/分钟
 PENALTY_PER_DISTRACTION = 50  # 单位：分，每走神一次扣50分=0.5元
 PROFILE_DOC_MAX_CHARS = 4000
+CHAT_MESSAGE_MAX_CHARS = 2000
 
 
 def _now_iso() -> str:
@@ -405,6 +407,88 @@ def upsert_user_profile_document(db: Session, user_id: int, content: str) -> dic
         "content": row.content,
         "updated_at": row.updated_at.isoformat(),
         "max_chars": PROFILE_DOC_MAX_CHARS,
+    }
+
+
+def append_user_profile_memory(db: Session, user_id: int, memory_line: str) -> dict[str, Any]:
+    """Append one profile memory line while keeping the profile document bounded."""
+    normalized_line = memory_line.strip()
+    if not normalized_line:
+        return get_user_profile_document(db, user_id)
+
+    current = get_user_profile_document(db, user_id).get("content", "")
+    merged = f"{current}\n{normalized_line}".strip() if current else normalized_line
+
+    # Keep recent lines to respect max size.
+    lines = [line.strip() for line in merged.splitlines() if line.strip()]
+    while lines and len("\n".join(lines)) > PROFILE_DOC_MAX_CHARS:
+        lines.pop(0)
+
+    return upsert_user_profile_document(db, user_id, "\n".join(lines))
+
+
+def create_chat_message(
+    db: Session,
+    user_id: int,
+    role: str,
+    content: str,
+    session_ref: str | None = None,
+) -> dict[str, Any]:
+    normalized_role = role.strip().lower()
+    if normalized_role not in {"user", "assistant", "system"}:
+        normalized_role = "system"
+
+    normalized_content = content.strip()
+    if not normalized_content:
+        return {"ok": False, "error": "empty content"}
+    if len(normalized_content) > CHAT_MESSAGE_MAX_CHARS:
+        normalized_content = normalized_content[:CHAT_MESSAGE_MAX_CHARS]
+
+    row = ChatMessage(
+        id=f"chat_{uuid.uuid4().hex[:24]}",
+        user_id=user_id,
+        session_ref=session_ref,
+        role=normalized_role,
+        content=normalized_content,
+        created_at=datetime.utcnow(),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {
+        "ok": True,
+        "id": row.id,
+        "user_id": row.user_id,
+        "session_ref": row.session_ref,
+        "role": row.role,
+        "content": row.content,
+        "created_at": row.created_at.isoformat(),
+    }
+
+
+def list_recent_chat_messages(db: Session, user_id: int, limit: int = 40) -> dict[str, Any]:
+    rows = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.user_id == user_id)
+        .order_by(ChatMessage.created_at.desc())
+        .limit(max(1, min(limit, 200)))
+        .all()
+    )
+    ordered_rows = list(reversed(rows))
+    items = [
+        {
+            "id": row.id,
+            "role": row.role,
+            "content": row.content,
+            "session_ref": row.session_ref,
+            "created_at": row.created_at.isoformat(),
+        }
+        for row in ordered_rows
+    ]
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "items": items,
     }
 
 

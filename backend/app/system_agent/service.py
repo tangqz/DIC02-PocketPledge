@@ -52,6 +52,8 @@ class SystemAgentService:
         return {
             "user_text": text,
             "chat_history": session.format_chat_history(),
+            "language_mode": session.language_mode,
+            "character_id": session.character_id,
             "supervision_state": session.supervision_state,
             "current_task": session.current_plan or "",
             "total_focus_seconds": session.total_focus_seconds or 0,

@@ -91,6 +91,16 @@ export interface ResumeNow {
   type: "resume-now";
 }
 
+export interface SetLocale {
+  type: "set-locale";
+  locale: "zh" | "en";
+}
+
+export interface SetCharacter {
+  type: "set-character";
+  characterId: string;
+}
+
 export type TxMessage =
   | MicAudioData
   | MicAudioEnd
@@ -99,7 +109,9 @@ export type TxMessage =
   | PeriodicScreenshot
   | FrontendPlaybackComplete
   | CaptureContextResult
-  | ResumeNow;
+  | ResumeNow
+  | SetLocale
+  | SetCharacter;
 
 // ── Downstream (Backend → Frontend)  Rx ──
 //
@@ -225,6 +237,14 @@ export interface TimerSync {
 
 export interface ModelInfo {
   type: "model-info";
+  character_id?: string;
+  character?: {
+    name?: string;
+    displayName?: string;
+    description?: string;
+    languageHints?: string[];
+    personaStyle?: string;
+  };
   model_info: {
     name: string;
     url: string;

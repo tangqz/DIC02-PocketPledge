@@ -39,7 +39,7 @@ class ASRService(Protocol):
 
 
 class TTSService(Protocol):
-	async def synthesize(self, text: str, expression: str = "neutral") -> bytes: ...
+	async def synthesize(self, text: str, expression: str = "neutral", character_id: str = "milly") -> bytes: ...
 
 
 def pcm16_wav_bytes(audio_samples: list[float], sample_rate: int = DEFAULT_SAMPLE_RATE) -> bytes:
@@ -269,7 +269,7 @@ class SherpaOnnxASRService:
 class MockTTSService:
 	"""Return a synthetic WAV payload so frontend playback can be exercised locally."""
 
-	async def synthesize(self, text: str, expression: str = "neutral") -> bytes:
+	async def synthesize(self, text: str, expression: str = "neutral", character_id: str = "milly") -> bytes:
 		await asyncio.sleep(0)
 		return synthetic_wav_bytes(text=text, expression=expression)
 
@@ -280,7 +280,7 @@ class EdgeTTSService:
 	def __init__(self, voice: str | None = None) -> None:
 		self.voice = voice or os.getenv("MEDIA_AI_TTS_VOICE", "zh-CN-XiaoxiaoNeural")
 
-	async def synthesize(self, text: str, expression: str = "neutral") -> bytes:
+	async def synthesize(self, text: str, expression: str = "neutral", character_id: str = "milly") -> bytes:
 		try:
 			import edge_tts
 		except ImportError as exc:
@@ -339,6 +339,7 @@ class QwenRealtimeTTSService:
 	def __init__(self) -> None:
 		self.model = os.getenv("MEDIA_AI_TTS_MODEL", "qwen3-tts-instruct-flash-realtime")
 		self.voice = os.getenv("MEDIA_AI_TTS_VOICE", "Cherry")
+		self.male_voice = os.getenv("MEDIA_AI_TTS_VOICE_MALE", "Ethan")
 		self.mode = os.getenv("MEDIA_AI_TTS_MODE", "server_commit")
 		self.timeout_seconds = max(3.0, float(os.getenv("MEDIA_AI_TTS_TIMEOUT", "20")))
 		speech_rate = os.getenv("MEDIA_AI_TTS_SPEECH_RATE", "1.05")
@@ -357,7 +358,13 @@ class QwenRealtimeTTSService:
 			or os.getenv("LOCAL_CHAT_API_KEY")
 		)
 
-	def _synthesize_sync(self, text: str, expression: str) -> bytes:
+	def _select_voice_for_character(self, character_id: str) -> str:
+		normalized = (character_id or "").strip().lower()
+		if normalized in {"ren", "natori"}:
+			return self.male_voice
+		return self.voice
+
+	def _synthesize_sync(self, text: str, expression: str, character_id: str) -> bytes:
 		if not self.api_key:
 			raise RuntimeError("No DashScope API key configured for qwen realtime TTS")
 
@@ -382,8 +389,9 @@ class QwenRealtimeTTSService:
 			instructions = f"{self.instructions} 语气更柔和一点。"
 
 		client.connect()
+		selected_voice = self._select_voice_for_character(character_id)
 		client.update_session(
-			voice=self.voice,
+			voice=selected_voice,
 			response_format=AudioFormat.PCM_24000HZ_MONO_16BIT,
 			mode=self.mode,
 			speech_rate=self.speech_rate,
@@ -412,11 +420,11 @@ class QwenRealtimeTTSService:
 		)
 		return pcm16_bytes_to_wav_bytes(pcm_bytes, sample_rate=QWEN_TTS_SAMPLE_RATE)
 
-	async def synthesize(self, text: str, expression: str = "neutral") -> bytes:
+	async def synthesize(self, text: str, expression: str = "neutral", character_id: str = "milly") -> bytes:
 		if not text.strip():
 			return synthetic_wav_bytes(text="...", expression=expression)
 		try:
-			return await asyncio.to_thread(self._synthesize_sync, text, expression)
+			return await asyncio.to_thread(self._synthesize_sync, text, expression, character_id)
 		except Exception:
 			logger.exception("qwen realtime TTS failed; falling back to synthetic wav")
 			return synthetic_wav_bytes(text=text, expression=expression)

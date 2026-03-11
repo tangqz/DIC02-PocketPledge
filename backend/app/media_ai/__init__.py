@@ -12,15 +12,22 @@ from .parser import SentenceBuffer, extract_expression_and_clean
 
 logger = logging.getLogger(__name__)
 
+INVALID_ASR_UTTERANCES = {".", "。", "..", "...", "。。", "。。。"}
 
-async def _build_audio_chunk(text: str, expression: str) -> str:
+
+async def _build_audio_chunk(text: str, expression: str, character_id: str = "milly") -> str:
 	tts_service = get_tts_service()
-	audio_bytes = await tts_service.synthesize(text=text, expression=expression)
+	audio_bytes = await tts_service.synthesize(text=text, expression=expression, character_id=character_id)
 	return base64.b64encode(audio_bytes).decode("ascii")
 
 
-async def _build_audio_chunk_with_service(text: str, expression: str, tts_service: Any) -> str:
-	audio_bytes = await tts_service.synthesize(text=text, expression=expression)
+async def _build_audio_chunk_with_service(
+	text: str,
+	expression: str,
+	tts_service: Any,
+	character_id: str = "milly",
+) -> str:
+	audio_bytes = await tts_service.synthesize(text=text, expression=expression, character_id=character_id)
 	return base64.b64encode(audio_bytes).decode("ascii")
 
 
@@ -29,6 +36,8 @@ async def process_text_chat(
 	session_id: str,
 	images: list[dict[str, Any]] | None = None,
 	current_task: str | None = None,
+	language_mode: str = "zh",
+	character_id: str = "milly",
 ) -> AsyncIterator[dict[str, Any]]:
 	"""Stream chat response chunks as text, expression, and base64 audio."""
 	dify_client = get_dify_client()
@@ -41,6 +50,8 @@ async def process_text_chat(
 			session_id=session_id,
 			images=images,
 			current_task=current_task,
+			language_mode=language_mode,
+			character_id=character_id,
 		):
 			for sentence in buffer.push(token):
 				has_sys = "<<SYS>>" in sentence
@@ -55,6 +66,7 @@ async def process_text_chat(
 						clean_text,
 						expression,
 						tts_service,
+						character_id,
 					),
 				}
 
@@ -71,6 +83,7 @@ async def process_text_chat(
 						clean_text,
 						expression,
 						tts_service,
+						character_id,
 					),
 				}
 	except Exception:
@@ -83,6 +96,7 @@ async def process_text_chat(
 				fallback_text,
 				"neutral",
 				tts_service,
+				character_id,
 			),
 		}
 
@@ -91,7 +105,11 @@ async def transcribe_audio(audio_samples: list[float]) -> str:
 	"""Convert raw float PCM samples into one user utterance string."""
 	asr_service = get_asr_service()
 	user_text = await asr_service.audio_samples_to_text(audio_samples)
-	return user_text.strip()
+	normalized = user_text.strip()
+	if normalized in INVALID_ASR_UTTERANCES:
+		logger.info("ignoring punctuation-only ASR transcript as invalid VAD activation")
+		return ""
+	return normalized
 
 
 async def process_voice_chat(
@@ -99,6 +117,8 @@ async def process_voice_chat(
 	images: list[dict[str, Any]] | None = None,
 	session_id: str = "anonymous",
 	current_task: str | None = None,
+	language_mode: str = "zh",
+	character_id: str = "milly",
 ) -> AsyncIterator[dict[str, str]]:
 	"""Transcribe audio first, then reuse the same text chat pipeline."""
 	user_text = await transcribe_audio(audio_samples)
@@ -110,6 +130,8 @@ async def process_voice_chat(
 		session_id=session_id,
 		images=images,
 		current_task=current_task,
+		language_mode=language_mode,
+		character_id=character_id,
 	):
 		yield chunk
 

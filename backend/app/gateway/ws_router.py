@@ -14,10 +14,13 @@ from app.auth.security import decode_access_token
 from app.business.models import SessionLocal
 from app.business.crud import (
     PENALTY_PER_DISTRACTION,
+    append_user_profile_memory as db_append_user_profile_memory,
+    create_chat_message as db_create_chat_message,
     create_session_summary as db_create_session_summary,
     execute_penalty as db_execute_penalty,
     get_active_plan as db_get_active_plan,
     get_user_status as db_get_user_status,
+    list_recent_chat_messages as db_list_recent_chat_messages,
     record_pause_request as db_record_pause_request,
     start_focus_session as db_start_focus_session,
     upsert_study_plan as db_upsert_study_plan,
@@ -119,17 +122,51 @@ class ConnectionManager:
 
 manager = ConnectionManager(reconnect_ttl_seconds=300)
 
-MODEL_INFO = {
-    "name": "mao_pro",
-    "url": "/live2d-models/mao_pro/mao_pro.model3.json",
-    "kScale": 0.5,
-    "emotionMap": {
-        "happy": 3,
-        "neutral": 0,
+CHARACTER_CATALOG: dict[str, dict[str, Any]] = {
+    "milly": {
+        "name": "milly",
+        "displayName": "Milly",
+        "description": "Warm but strict study partner. Keeps pressure when needed.",
+        "languageHints": ["zh", "en"],
+        "personaStyle": "supportive-strict",
+        "modelInfo": {
+            "name": "mao_pro",
+            "url": "/live2d-models/mao_pro/mao_pro.model3.json",
+            "kScale": 0.5,
+            "emotionMap": {
+                "neutral": 0,
+                "happy": 3,
+                "encouraging": 4,
+                "angry": 2,
+                "proud": 7,
+            },
+            "idleMotionGroup": "Idle",
+            "talkMotionGroup": "",
+        },
     },
-    "idleMotionGroup": "Idle",
-    "talkMotionGroup": "",
+    "ren": {
+        "name": "natori",
+        "displayName": "Natori",
+        "description": "Calm mentor companion. Rational, concise and disciplined.",
+        "languageHints": ["zh", "en"],
+        "personaStyle": "calm-mentor",
+        "modelInfo": {
+            "name": "natori_pro_zh",
+            "url": "/live2d-models/natori_pro_zh/runtime/natori_pro_t06.model3.json",
+            "kScale": 0.52,
+            "emotionMap": {
+                "neutral": 2,
+                "happy": 4,
+                "encouraging": 4,
+                "angry": 0,
+                "proud": 4,
+            },
+            "idleMotionGroup": "Idle",
+            "talkMotionGroup": "Tap",
+        },
+    },
 }
+DEFAULT_CHARACTER_ID = "milly"
 
 DEFAULT_TOTAL_SECONDS = 1500
 DISTRACTION_THRESHOLD = 3
@@ -365,10 +402,70 @@ async def _persist_session_summary(user_id: str, session: SessionState) -> None:
             session_ref=session.session_ref,
             meta=meta,
         )
+        profile_line = (
+            f"- session_ref={session.session_ref or 'n/a'}; task={session.current_plan or 'untitled'}; "
+            f"focused_minutes={meta.get('focused_seconds', 0) // 60}; "
+            f"pause_requests={meta.get('pause_requests_count', 0)}; "
+            f"bankrupt={meta.get('is_bankrupt', False)}"
+        )
+        db_append_user_profile_memory(db=db, user_id=uid, memory_line=profile_line)
     except Exception:
         logger.exception("failed to persist session summary, user_id=%s", user_id)
     finally:
         db.close()
+
+
+async def _persist_chat_message(user_id: str, role: str, content: str, session_ref: str | None) -> None:
+    try:
+        uid = int(user_id)
+    except ValueError:
+        return
+
+    db = SessionLocal()
+    try:
+        db_create_chat_message(
+            db=db,
+            user_id=uid,
+            role=role,
+            content=content,
+            session_ref=session_ref,
+        )
+    except Exception:
+        logger.exception("failed to persist chat message, user_id=%s role=%s", user_id, role)
+    finally:
+        db.close()
+
+
+async def _append_chat(session: SessionState, user_id: str, role: str, content: str) -> None:
+    session.append_chat(role, content)
+    await _persist_chat_message(user_id=user_id, role=role, content=content, session_ref=session.session_ref)
+
+
+async def _hydrate_chat_history(user_id: str, session: SessionState) -> None:
+    if session.chat_history:
+        return
+    try:
+        uid = int(user_id)
+    except ValueError:
+        return
+
+    db = SessionLocal()
+    try:
+        result = db_list_recent_chat_messages(db=db, user_id=uid, limit=session.MAX_HISTORY_TURNS)
+    except Exception:
+        logger.exception("failed to load chat history, user_id=%s", user_id)
+        return
+    finally:
+        db.close()
+
+    for item in result.get("items", []):
+        role = str(item.get("role", "")).strip().lower()
+        if role not in {"user", "assistant", "system"}:
+            continue
+        content = str(item.get("content", "")).strip()
+        if not content:
+            continue
+        session.chat_history.append({"role": role, "content": content})
 
 
 def _split_sys_marker_buffer(buffer: str) -> tuple[str, str, bool]:
@@ -527,12 +624,13 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     )
     await apply_balance_gate(user_id, session)
     await _hydrate_session_plan(user_id, session)
+    await _hydrate_chat_history(user_id, session)
 
     task = watchdog_tasks.get(user_id)
     if task is None or task.done():
         watchdog_tasks[user_id] = asyncio.create_task(run_watchdog(user_id))
 
-    await send_model_info(user_id)
+    await send_model_info(user_id, session)
     await send_supervision_state(user_id, session)
     await send_timer_sync(user_id, session)
     if session.current_plan_data is not None:
@@ -589,6 +687,21 @@ async def dispatch_message(user_id: str, session: SessionState, msg: dict[str, A
         await handle_capture_context_result(user_id, session, msg)
         return
 
+    if msg_type == "set-locale":
+        locale = str(msg.get("locale", "")).strip().lower()
+        if locale in {"zh", "en"}:
+            session.language_mode = locale
+        return
+
+    if msg_type == "set-character":
+        character_id = str(msg.get("characterId", "")).strip().lower()
+        if character_id in CHARACTER_CATALOG:
+            session.character_id = character_id
+            session.chat_history = []
+            await send_model_info(user_id, session)
+            await send_control(user_id, "chat-cleared", {"reason": "character_switched", "characterId": character_id})
+        return
+
     if msg_type == "resume-now":
         if session.supervision_state == "paused":
             await handle_resume(user_id, session)
@@ -597,9 +710,11 @@ async def dispatch_message(user_id: str, session: SessionState, msg: dict[str, A
                 user_text="[SYSTEM_RESULT: RESUME_APPROVED]",
                 images=[],
                 current_task=session.current_plan,
+                language_mode=session.language_mode,
+                character_id=session.character_id,
                 include_audio=not session.is_bankrupt,
             )
-            session.append_chat("assistant", phase_text)
+            await _append_chat(session, user_id, "assistant", phase_text)
         return
 
     if msg_type == "ping":
@@ -692,7 +807,7 @@ async def _handle_user_turn(
         await send_user_transcript(user_id, text)
 
     if append_user_message:
-        session.append_chat("user", text)
+        await _append_chat(session, user_id, "user", text)
 
     async def _run_system_agent() -> Any:
         await send_tool_call_status(user_id, "system.agent", "calling", "processing system request")
@@ -704,12 +819,14 @@ async def _handle_user_turn(
         user_text=text,
         images=images,
         current_task=session.current_plan,
+        language_mode=session.language_mode,
+        character_id=session.character_id,
         include_audio=not session.is_bankrupt,
         on_sys_detected=_run_system_agent,
     )
 
     if not sys_detected:
-        session.append_chat("assistant", phase1_text)
+        await _append_chat(session, user_id, "assistant", phase1_text)
         return
 
     logger.info(
@@ -1268,6 +1385,8 @@ async def stream_agent_reply(
     user_text: str,
     images: list[dict[str, Any]] | None,
     current_task: str | None,
+    language_mode: str,
+    character_id: str,
     include_audio: bool,
 ) -> str:
     """Stream one white-brain reply; optionally suppress audio in degraded mode.
@@ -1281,6 +1400,8 @@ async def stream_agent_reply(
         session_id=user_id,
         images=images,
         current_task=current_task,
+        language_mode=language_mode,
+        character_id=character_id,
     ):
         chunk_text = _sanitize_agent_text(str(chunk.get("text", "")))
         expression = str(chunk.get("expression", "neutral"))
@@ -1311,6 +1432,8 @@ async def _stream_and_detect_sys(
     user_text: str,
     images: list[dict[str, Any]] | None,
     current_task: str | None,
+    language_mode: str,
+    character_id: str,
     include_audio: bool,
     on_sys_detected: Callable[[], Coroutine[Any, Any, Any]] | None = None,
 ) -> tuple[str, bool, asyncio.Task[Any] | None]:
@@ -1328,6 +1451,8 @@ async def _stream_and_detect_sys(
         session_id=user_id,
         images=images,
         current_task=current_task,
+        language_mode=language_mode,
+        character_id=character_id,
     ):
         chunk_text = _sanitize_agent_text(str(chunk.get("text", "")))
         expression = str(chunk.get("expression", "neutral"))
@@ -1362,13 +1487,27 @@ async def _stream_and_detect_sys(
     return "".join(parts), sys_detected, sys_task
 
 
-async def send_model_info(user_id: str) -> None:
+def _resolve_character(session: SessionState) -> tuple[str, dict[str, Any]]:
+    character_id = session.character_id if session.character_id in CHARACTER_CATALOG else DEFAULT_CHARACTER_ID
+    return character_id, CHARACTER_CATALOG[character_id]
+
+
+async def send_model_info(user_id: str, session: SessionState) -> None:
     """Send Live2D model configuration payload."""
+    character_id, character = _resolve_character(session)
     await manager.send_personal_message(
         user_id,
         {
             "type": "model-info",
-            "model_info": MODEL_INFO,
+            "character_id": character_id,
+            "character": {
+                "name": character.get("name"),
+                "displayName": character.get("displayName"),
+                "description": character.get("description"),
+                "languageHints": character.get("languageHints", []),
+                "personaStyle": character.get("personaStyle"),
+            },
+            "model_info": character.get("modelInfo", {}),
         },
     )
 

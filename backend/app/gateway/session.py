@@ -35,6 +35,8 @@ class SessionState:
     pending_capture_mode: str = "system-agent"
     chat_history: list[dict[str, str]] = field(default_factory=list)
     image_timeline: list[tuple[float, list[dict[str, Any]]]] = field(default_factory=list)
+    language_mode: str = "zh"
+    character_id: str = "milly"
 
     MAX_HISTORY_TURNS: int = 30
 
@@ -88,6 +90,11 @@ class SessionState:
 
     def start(self, duration_seconds: int) -> None:
         """Start supervision from setup and initialize timer."""
+        if self.supervision_state == "completed":
+            # Allow starting a new focus session after completion without forcing reconnect.
+            self.supervision_state = "setup"
+            self.start_time = None
+            self.pause_remaining_seconds = None
         self.total_focus_seconds = duration_seconds
         self.focus_time_remaining = duration_seconds
         self.pause_requests_count = 0

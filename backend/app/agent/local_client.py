@@ -139,6 +139,42 @@ def _build_chat_system_prompt(profile_content: str, current_task: str | None) ->
     return "\n".join(parts)
 
 
+def _build_language_block(language_mode: str) -> str:
+    normalized = language_mode.strip().lower()
+    if normalized == "en":
+        return "\nCurrent language mode: en. You must respond in natural English only."
+    return "\n当前语言模式：zh。你必须只用自然中文回复。"
+
+
+def _build_character_block(character_id: str) -> str:
+    normalized = character_id.strip().lower()
+    if normalized == "ren":
+        return (
+            "\nCharacter profile:\n"
+            "- Name: Ren\n"
+            "- Tone: calm, concise, mentor-like\n"
+            "- Style: rational encouragement, clear boundaries, low drama\n"
+            "- Preferred expressions: [neutral] [encouraging] [proud]"
+        )
+    return (
+        "\n角色人设：\n"
+        "- 名字：米莉\n"
+        "- 风格：温柔但有压迫感，允许小脾气\n"
+        "- 表达：短句、口语化、陪伴感强\n"
+        "- 优先表情：[neutral] [happy] [encouraging] [angry] [proud]"
+    )
+
+
+def _build_runtime_chat_system_prompt(
+    profile_content: str,
+    current_task: str | None,
+    language_mode: str,
+    character_id: str,
+) -> str:
+    base = _build_chat_system_prompt(profile_content, current_task)
+    return f"{base}{_build_language_block(language_mode)}{_build_character_block(character_id)}"
+
+
 def _build_user_content(
     user_text: str,
     images: list[dict[str, Any]] | None,
@@ -214,10 +250,17 @@ class LocalLLMClient:
         session_id: str,
         images: list[dict[str, Any]] | None = None,
         current_task: str | None = None,
+        language_mode: str = "zh",
+        character_id: str = "milly",
     ) -> AsyncIterator[str]:
         """Stream chat response tokens, matching DifyClient.stream_chat interface."""
         profile_content = _load_profile_content(session_id)
-        system_prompt = _build_chat_system_prompt(profile_content, current_task)
+        system_prompt = _build_runtime_chat_system_prompt(
+            profile_content=profile_content,
+            current_task=current_task,
+            language_mode=language_mode,
+            character_id=character_id,
+        )
         history = self._get_history(session_id)
 
         user_content = _build_user_content(user_text, images)
@@ -232,11 +275,13 @@ class LocalLLMClient:
         collected_text = ""
         try:
             logger.info(
-                "local chat api request session_id=%s model=%s current_task=%s images=%s user=%s",
+                "local chat api request session_id=%s model=%s current_task=%s images=%s lang=%s character=%s user=%s",
                 session_id,
                 self._chat_model,
                 _truncate_text(current_task or ""),
                 len(images or []),
+                language_mode,
+                character_id,
                 _truncate_text(user_text),
             )
             stream = await _get_chat_client().chat.completions.create(
@@ -549,6 +594,8 @@ class LocalLLMClient:
         lines = [
             f"user_text: {inputs.get('user_text', '')}",
             f"chat_history:\n{inputs.get('chat_history', '')}",
+            f"language_mode: {inputs.get('language_mode', 'zh')}",
+            f"character_id: {inputs.get('character_id', 'milly')}",
             f"supervision_state: {inputs.get('supervision_state', 'setup')}",
             f"current_task: {inputs.get('current_task', '')}",
             f"total_focus_seconds: {inputs.get('total_focus_seconds', 0)}",
