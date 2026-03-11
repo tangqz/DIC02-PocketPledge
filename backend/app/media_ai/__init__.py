@@ -99,7 +99,7 @@ async def process_voice_chat(
 	"""Transcribe audio first, then reuse the same text chat pipeline."""
 	user_text = await transcribe_audio(audio_samples)
 	if not user_text:
-		user_text = "我会继续专注。"
+		return
 
 	async for chunk in process_text_chat(
 		user_text=user_text,

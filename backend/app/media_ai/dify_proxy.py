@@ -512,6 +512,20 @@ class DifyClient:
 
 
 def get_dify_client() -> MockDifyClient | DifyClient:
+	"""Return the appropriate LLM client based on AGENT_BACKEND env var.
+
+	Values: "local" | "dify" | "mock" (default).
+	Legacy MEDIA_AI_USE_REAL_DIFY=1 is still respected as a fallback.
+	"""
+	backend = os.getenv("AGENT_BACKEND", "").strip().lower()
+	if backend == "local":
+		from app.agent.local_client import LocalLLMClient
+		return LocalLLMClient()  # type: ignore[return-value]
+	if backend == "dify":
+		return DifyClient()
+	if backend == "mock":
+		return MockDifyClient()
+	# Legacy fallback
 	if os.getenv("MEDIA_AI_USE_REAL_DIFY", "0") == "1":
 		return DifyClient()
 	return MockDifyClient()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 import logging
 from datetime import UTC, datetime, timedelta
@@ -36,6 +37,7 @@ class ConnectionManager:
         self.active_connections: dict[str, WebSocket] = {}
         self.user_states: dict[str, SessionState] = {}
         self.disconnected_at: dict[str, datetime] = {}
+        self.pending_messages: dict[str, list[dict[str, Any]]] = {}
         self.reconnect_ttl = timedelta(seconds=reconnect_ttl_seconds)
 
     async def connect(self, user_id: str, websocket: WebSocket) -> SessionState:
@@ -53,6 +55,12 @@ class ConnectionManager:
         if session is None:
             session = SessionState()
             self.user_states[user_id] = session
+
+        queued_messages = self.pending_messages.pop(user_id, [])
+        if queued_messages:
+            logger.info("flushing queued ws messages user_id=%s count=%s", user_id, len(queued_messages))
+            for payload in queued_messages:
+                await self.send_personal_message(user_id, payload)
         return session
 
     def disconnect(self, user_id: str) -> None:
@@ -65,8 +73,16 @@ class ConnectionManager:
         """Send one message to a specific active user."""
         websocket = self.active_connections.get(user_id)
         if websocket is None:
+            logger.warning("ws tx queued user_id=%s reason=no-active-connection payload=%s", user_id, _summarize_payload(payload))
+            self.pending_messages.setdefault(user_id, []).append(payload)
             return
-        await websocket.send_json(payload)
+        logger.info("ws tx user_id=%s payload=%s", user_id, _summarize_payload(payload))
+        try:
+            await websocket.send_json(payload)
+        except Exception:
+            logger.exception("ws tx failed, queueing for retry user_id=%s", user_id)
+            self.active_connections.pop(user_id, None)
+            self.pending_messages.setdefault(user_id, []).append(payload)
 
     async def broadcast(self, payload: dict) -> None:
         """Broadcast one message to all active users."""
@@ -106,6 +122,7 @@ PENALTY_AMOUNT = PENALTY_PER_DISTRACTION
 BOT_NAME = "Study Buddy"
 DEFAULT_BALANCE = 100
 SYS_MARKER = "<<SYS>>"
+LOG_PREVIEW_LIMIT = 240
 
 watchdog_tasks: dict[str, asyncio.Task] = {}
 audio_buffers: dict[str, list[float]] = {}
@@ -299,6 +316,111 @@ def _sanitize_agent_text(text: str) -> str:
     return text.replace(SYS_MARKER, "").strip()
 
 
+def _truncate_log_text(value: Any, limit: int = LOG_PREVIEW_LIMIT) -> str:
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}..."
+
+
+def _summarize_payload(payload: dict[str, Any]) -> str:
+    summary: dict[str, Any] = {}
+    for key, value in payload.items():
+        if key == "audio" and isinstance(value, list):
+            summary[key] = f"<{len(value)} samples>"
+            continue
+        if key == "audio" and isinstance(value, str):
+            summary[key] = f"<{len(value)} base64 chars>"
+            continue
+        if key == "images" and isinstance(value, list):
+            summary[key] = [
+                {
+                    "source": item.get("source"),
+                    "mime_type": item.get("mime_type"),
+                    "data": f"<{len(str(item.get('data', '')))} base64 chars>",
+                }
+                for item in value[:4]
+                if isinstance(item, dict)
+            ]
+            if len(value) > 4:
+                summary[key].append({"remaining": len(value) - 4})
+            continue
+        if isinstance(value, str):
+            summary[key] = _truncate_log_text(value)
+            continue
+        if isinstance(value, dict):
+            summary[key] = {nested_key: _truncate_log_text(nested_value) for nested_key, nested_value in value.items()}
+            continue
+        if isinstance(value, list):
+            summary[key] = f"<list len={len(value)}>"
+            continue
+        summary[key] = value
+    return json.dumps(summary, ensure_ascii=False)
+
+
+def _normalize_system_events(events: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for event in events:
+        text = str(event).strip()
+        if not text:
+            continue
+        if text.startswith("[SYSTEM_EVENT:"):
+            text = text.replace("[SYSTEM_EVENT:", "[SYSTEM_RESULT:", 1)
+        normalized.append(text)
+    return normalized
+
+
+def _assistant_requested_system_action(text: str) -> bool:
+    cleaned = text.strip()
+    if not cleaned:
+        return False
+
+    handoff_phrases = (
+        "我帮你申请",
+        "我去替你申请",
+        "我替你申请",
+        "我帮你安排",
+        "我去给你安排",
+        "我替你安排",
+        "我给你安排",
+        "我帮你处理",
+        "我去处理",
+        "我替你处理",
+        "我去替你准备",
+        "我替你准备",
+        "让我看看",
+        "我帮你看看",
+        "我去看一眼",
+    )
+    return any(phrase in cleaned for phrase in handoff_phrases)
+
+
+def _infer_visual_sources_from_text(text: str) -> list[str]:
+    lowered = text.lower()
+    wants_screen = any(keyword in text or keyword in lowered for keyword in (
+        "桌面", "屏幕", "页面", "窗口", "代码", "文档", "screen", "desktop", "window",
+    ))
+    wants_camera = any(keyword in text or keyword in lowered for keyword in (
+        "摄像头", "镜头", "看到我", "看我", "我吗", "我现在", "camera", "cam", "look at me",
+    ))
+    generic_visual = any(keyword in text or keyword in lowered for keyword in (
+        "看看", "看下", "帮我看", "瞧瞧", "看到", "能看到", "分析一下", "show me", "look",
+    ))
+
+    sources: list[str] = []
+    if wants_camera:
+        sources.append("camera")
+    if wants_screen:
+        sources.append("screen")
+    if not sources and generic_visual:
+        sources.append("camera")
+    return sources
+
+
+def _is_direct_visual_chat_request(text: str) -> bool:
+    return bool(_infer_visual_sources_from_text(text))
+
+
 async def get_user_balance(user_id: str) -> dict[str, int | bool]:
     """Query real balance from the database via business CRUD."""
     try:
@@ -401,6 +523,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 
 async def dispatch_message(user_id: str, session: SessionState, msg: dict[str, Any]) -> None:
     """Route frontend messages by protocol type from backend-interface.md."""
+    logger.info("ws rx user_id=%s payload=%s", user_id, _summarize_payload(msg))
     msg_type = msg.get("type")
 
     if msg_type == "text-input":
@@ -462,36 +585,45 @@ async def handle_mic_audio_end(
     logger.info("mic-audio-end received, user_id=%s samples=%s", user_id, len(audio_samples))
     user_text = await transcribe_audio(audio_samples)
     if not user_text:
-        user_text = "我会继续专注。"
+        logger.info("ignoring empty ASR transcript as noise, user_id=%s", user_id)
+        return
 
     logger.info("ASR transcript generated, user_id=%s text=%s", user_id, user_text)
-
-    session.append_chat("user", user_text)
-    await send_user_transcript(user_id, user_text)
-
-    sent_text = False
-    async for chunk in process_text_chat(
-        user_text=user_text,
-        session_id=user_id,
+    await _handle_user_turn(
+        user_id=user_id,
+        session=session,
+        text=user_text,
         images=images,
-        current_task=session.current_plan,
-    ):
-        text = str(chunk.get("text", ""))
-        expression = str(chunk.get("expression", "neutral"))
-        audio = str(chunk.get("audio", ""))
-
-        if text:
-            sent_text = True
-            await send_agent_text_chunk(user_id, text)
-        if audio:
-            await send_audio(user_id, audio=audio, expression=expression, text=text or "...")
-
-    if sent_text:
-        await send_agent_text_end(user_id)
+        is_tool_result=False,
+        emit_user_transcript=True,
+    )
 
 
 async def handle_text(user_id: str, session: SessionState, msg: dict[str, Any]) -> None:
-    """Handle text-input: white-brain-first with <<SYS>> trigger for system agent.
+    """Handle text-input by routing through the shared two-phase agent flow."""
+    text = str(msg.get("text", ""))
+    images = msg.get("images", [])
+    is_tool_result = bool(msg.get("tool_result"))
+    await _handle_user_turn(
+        user_id=user_id,
+        session=session,
+        text=text,
+        images=images,
+        is_tool_result=is_tool_result,
+        emit_user_transcript=False,
+    )
+
+
+async def _handle_user_turn(
+    user_id: str,
+    session: SessionState,
+    text: str,
+    images: list[dict[str, Any]] | None,
+    is_tool_result: bool,
+    append_user_message: bool = True,
+    emit_user_transcript: bool = False,
+) -> None:
+    """Run one user turn through white-brain-first and optional system-agent follow-up.
 
     Phase 1: stream white brain reply while detecting <<SYS>> marker.
     If no <<SYS>>: done (simple chat).
@@ -500,12 +632,35 @@ async def handle_text(user_id: str, session: SessionState, msg: dict[str, Any]) 
       - Execute directive (start/pause/resume/complete/plan/visual-capture)
       - Phase 2: call white brain again with [SYSTEM_RESULT: ...] context
     """
-    text = str(msg.get("text", ""))
-    images = msg.get("images", [])
-    is_tool_result = bool(msg.get("tool_result"))
     logger.info("text-input received, user_id=%s text=%s", user_id, text)
 
-    session.append_chat("user", text)
+    if emit_user_transcript:
+        await send_user_transcript(user_id, text)
+
+    if append_user_message:
+        session.append_chat("user", text)
+
+    if not images and not is_tool_result and _is_direct_visual_chat_request(text):
+        sources = _infer_visual_sources_from_text(text)
+        logger.info(
+            "direct visual chat requested, user_id=%s text=%s sources=%s",
+            user_id,
+            _truncate_log_text(text),
+            sources,
+        )
+        request_id = uuid.uuid4().hex
+        session.set_pending_capture(request_id, text, sources, mode="direct-chat")
+        await send_tool_call_status(user_id, "visual.capture", "calling", "capturing visual context for chat")
+        await send_control(
+            user_id,
+            "request-visual-context",
+            {
+                "requestId": request_id,
+                "prompt": text,
+                "sources": sources,
+            },
+        )
+        return
 
     # Phase 1: stream white brain, detect <<SYS>> trigger
     phase1_text, sys_detected = await _stream_and_detect_sys(
@@ -516,9 +671,26 @@ async def handle_text(user_id: str, session: SessionState, msg: dict[str, Any]) 
         include_audio=not session.is_bankrupt,
     )
 
+    repaired_handoff = False
+    if not sys_detected and _assistant_requested_system_action(phase1_text):
+        repaired_handoff = True
+        sys_detected = True
+        logger.warning(
+            "repairing missing SYS marker from assistant output, user_id=%s assistant_text=%s",
+            user_id,
+            _truncate_log_text(phase1_text),
+        )
+
     if not sys_detected:
         session.append_chat("assistant", phase1_text)
         return
+
+    logger.info(
+        "phase1 handoff accepted, user_id=%s repaired=%s assistant_text=%s",
+        user_id,
+        repaired_handoff,
+        _truncate_log_text(phase1_text),
+    )
 
     # <<SYS>> detected — invoke system agent for structured directive
     await send_tool_call_status(user_id, "system.agent", "calling", "processing system request")
@@ -531,7 +703,7 @@ async def handle_text(user_id: str, session: SessionState, msg: dict[str, Any]) 
         session.append_chat("assistant", fallback_text)
         return
     await send_tool_call_status(user_id, "system.agent", "success", f"action={directive.action}")
-    system_events = list(directive.system_events)
+    system_events = _normalize_system_events(list(directive.system_events))
 
     # Handle visual capture request
     if directive.requires_capture and not images and not is_tool_result:
@@ -570,14 +742,14 @@ async def handle_text(user_id: str, session: SessionState, msg: dict[str, Any]) 
         duration_seconds = directive.duration_seconds or session.suggested_focus_seconds or DEFAULT_TOTAL_SECONDS
         start_result = await handle_start(user_id, session, duration_seconds=duration_seconds)
         if start_result:
-            system_events = _build_fallback_system_events(
+            system_events = _normalize_system_events(_build_fallback_system_events(
                 directive,
                 session,
                 {
                     "minutes": max(duration_seconds // 60, 1),
                     "cost": start_result.get("upfront_cost"),
                 },
-            )
+            ))
 
     elif directive.action == "pause" and session.supervision_state == "active":
         session.pause_requests_count += 1
@@ -601,26 +773,32 @@ async def handle_text(user_id: str, session: SessionState, msg: dict[str, Any]) 
                 pause_seconds=None,
                 decision_reason="pause rejected",
             )
-            system_events = _build_fallback_system_events(
+            system_events = _normalize_system_events(_build_fallback_system_events(
                 directive,
                 session,
                 {"reason": "此次暂停审核未通过"},
-            )
+            ))
 
     elif directive.action == "resume" and session.supervision_state == "paused":
         await handle_resume(user_id, session)
-        system_events = _build_fallback_system_events(directive, session)
+        system_events = _normalize_system_events(_build_fallback_system_events(directive, session))
 
     if session.is_bankrupt and directive.action != "complete":
         await send_control(user_id, "downgrade")
         system_events.append("[SYSTEM_EVENT: DEGRADE_MODE_ACTIVE]")
 
     if not system_events:
-        system_events = _build_fallback_system_events(directive, session)
+        system_events = _normalize_system_events(_build_fallback_system_events(directive, session))
 
     # Phase 2: call white brain again with system results
     result_context = "\n".join(system_events) if system_events else f"[SYSTEM_RESULT: action={directive.action}, approved={directive.approved}]"
     enriched_text = f"{text}\n{result_context}"
+    logger.info(
+        "phase2 request, user_id=%s action=%s result_context=%s",
+        user_id,
+        directive.action,
+        _truncate_log_text(result_context),
+    )
 
     phase2_text = await stream_agent_reply(
         user_id=user_id,
@@ -629,6 +807,7 @@ async def handle_text(user_id: str, session: SessionState, msg: dict[str, Any]) 
         current_task=session.current_plan,
         include_audio=not session.is_bankrupt,
     )
+    logger.info("phase2 reply, user_id=%s text=%s", user_id, _truncate_log_text(phase2_text))
     session.append_chat("assistant", phase2_text)
 
 
@@ -646,6 +825,7 @@ async def handle_capture_context_result(
         return
 
     prompt = str(msg.get("prompt", "")).strip() or (session.pending_capture_prompt or "")
+    capture_mode = session.pending_capture_mode
     session.clear_pending_capture()
     if error or not images:
         await send_tool_call_status(user_id, "visual.capture", "error", error or "no images captured")
@@ -659,15 +839,26 @@ async def handle_capture_context_result(
         return
 
     await send_tool_call_status(user_id, "visual.capture", "success", "visual context captured")
-    await handle_text(
-        user_id,
-        session,
-        {
-            "type": "text-input",
-            "text": prompt,
-            "images": images,
-            "tool_result": True,
-        },
+    if capture_mode == "direct-chat":
+        logger.info("direct visual chat resumed, user_id=%s prompt=%s images=%s", user_id, _truncate_log_text(prompt), len(images))
+        phase_text = await stream_agent_reply(
+            user_id=user_id,
+            user_text=prompt,
+            images=images,
+            current_task=session.current_plan,
+            include_audio=not session.is_bankrupt,
+        )
+        session.append_chat("assistant", phase_text)
+        return
+
+    await _handle_user_turn(
+        user_id=user_id,
+        session=session,
+        text=prompt,
+        images=images,
+        is_tool_result=True,
+        append_user_message=False,
+        emit_user_transcript=False,
     )
 
 

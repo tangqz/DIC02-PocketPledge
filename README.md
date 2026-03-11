@@ -131,6 +131,14 @@ cd backend
 uvicorn app.main:app --host 0.0.0.0 --port 12393 --reload
 ```
 
+Windows 本地联调也可以直接双击或执行根目录脚本：
+
+```bat
+start-dev.cmd
+```
+
+该脚本会分别拉起前端和后端两个 PowerShell 窗口。
+
 后端会在启动时自动读取以下本地配置文件：
 
 - `backend/.env`
@@ -216,6 +224,16 @@ uvicorn app.main:app --host 0.0.0.0 --port 12393 --reload
 - `MEDIA_AI_SHERPA_TOKENS_PATH`
 
 如果模型文件不存在，后端不会改用 whisper，而是记录错误并让该次语音输入回落为空转写。
+
+## 调试日志
+
+当前后端默认会打印以下调试信息：
+
+- HTTP API 请求与响应摘要
+- WebSocket 上下行消息摘要
+- 本地 chat / system / vision 模型请求与响应摘要
+
+这些日志会直接输出在后端终端里，便于本地联调时追踪一整条请求链路。
 
 ## Dify 自定义工具
 
