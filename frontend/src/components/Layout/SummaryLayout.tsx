@@ -3,6 +3,7 @@
  * ──────────────────────────────────────────────── */
 import { useSessionStore } from "@/stores/sessionStore";
 import { useI18n } from "@/lib/i18n";
+import { formatRmbFromCents, formatSignedRmbFromCents } from "@/lib/currency";
 
 export default function SummaryLayout() {
   const { totalDuration, balance, balanceHistory, reset } = useSessionStore();
@@ -17,7 +18,7 @@ export default function SummaryLayout() {
 
   const minutes = Math.floor(totalDuration / 60);
 
-  const coinSuffix = locale === "zh" ? "币" : "";
+  const coinSuffix = locale === "zh" ? "元" : "RMB";
 
   return (
     <div className="flex h-full items-center justify-center p-8 animate-fade-in">
@@ -35,16 +36,16 @@ export default function SummaryLayout() {
 
         {/* Stats */}
         <div className="grid grid-cols-3 gap-4">
-          <StatCard label={t("summary.finalBalance")} value={balance} suffix={coinSuffix} color="text-success" />
+          <StatCard label={t("summary.finalBalance")} value={formatRmbFromCents(balance)} suffix={coinSuffix} color="text-success" />
           <StatCard
             label={t("summary.deductions")}
-            value={Math.abs(totalDeductions)}
+            value={formatRmbFromCents(Math.abs(totalDeductions))}
             suffix={coinSuffix}
             color="text-danger"
           />
           <StatCard
             label={t("summary.rewards")}
-            value={totalRewards}
+            value={formatRmbFromCents(totalRewards)}
             suffix={coinSuffix}
             color="text-accent"
           />
@@ -68,8 +69,7 @@ export default function SummaryLayout() {
                       event.change < 0 ? "text-danger" : "text-success"
                     }`}
                   >
-                    {event.change > 0 ? "+" : ""}
-                    {event.change}
+                    {formatSignedRmbFromCents(event.change)}
                   </span>
                 </div>
               ))}
@@ -96,7 +96,7 @@ function StatCard({
   color,
 }: {
   label: string;
-  value: number;
+  value: string;
   suffix: string;
   color: string;
 }) {

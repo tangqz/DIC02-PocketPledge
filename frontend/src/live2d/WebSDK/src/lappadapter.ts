@@ -147,9 +147,23 @@ export class LAppAdapter {
   public setModelScale(scale: number): void {
     const model = this.getModel();
     if (model && model._modelMatrix) {
-      const currentScale = model._modelMatrix.getScaleX() || 1;
-      const relativeScale = scale / currentScale;
-      model._modelMatrix.scale(relativeScale, relativeScale);
+      const matrix = model._modelMatrix.getArray();
+      const currentScaleX = model._modelMatrix.getScaleX() || 1;
+      const currentScaleY = model._modelMatrix.getScaleY() || currentScaleX;
+      const anchorX = 0.0;
+      const anchorY = 0.35;
+
+      const currentTx = matrix[12] ?? 0;
+      const currentTy = matrix[13] ?? 0;
+      const nextTx = currentTx + (currentScaleX - scale) * anchorX;
+      const nextTy = currentTy + (currentScaleY - scale) * anchorY;
+
+      const nextMatrix = [...matrix];
+      nextMatrix[0] = scale;
+      nextMatrix[5] = scale;
+      nextMatrix[12] = nextTx;
+      nextMatrix[13] = nextTy;
+      model._modelMatrix.setMatrix(nextMatrix);
     }
   }
 

@@ -30,6 +30,9 @@ export default function CharacterMarket({ onSwitch }: CharacterMarketProps) {
             <button
               key={item.id}
               onClick={() => {
+                if (item.id === selectedCharacterId) {
+                  return;
+                }
                 setSelectedCharacterId(item.id);
                 onSwitch(item.id);
               }}

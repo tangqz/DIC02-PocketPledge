@@ -1,5 +1,5 @@
 # DIC02-PocketPledge
-
+![alt text](imgs/logo.jpg)
 这是一个面向学习监督场景的陪伴式系统原型。前端提供 Live2D 交互式学习伙伴界面，后端负责账户、专注会话、监督状态同步和 WebSocket 网关，Dify 工作流负责对话、视觉判定和系统代理决策。
 
 ## 项目简介

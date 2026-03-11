@@ -19,6 +19,7 @@ from app.business.crud import (
     create_session_summary as db_create_session_summary,
     execute_penalty as db_execute_penalty,
     get_active_plan as db_get_active_plan,
+    get_user_profile_document as db_get_user_profile_document,
     get_user_status as db_get_user_status,
     list_recent_chat_messages as db_list_recent_chat_messages,
     record_pause_request as db_record_pause_request,
@@ -189,13 +190,20 @@ def _duration_to_minutes(duration_seconds: int | None) -> int | None:
     return max(1, duration_seconds // 60)
 
 
+def _format_rmb_from_cents(cents: int) -> str:
+    return f"{(int(cents) / 100):.2f}"
+
+
 def _build_start_error_system_event(error_message: str | None) -> str:
     cleaned = str(error_message or "").strip()
     match = re.search(r"insufficient balance: need\s+(\d+),\s+have\s+(\d+)", cleaned, re.IGNORECASE)
     if match:
         need = int(match.group(1))
         have = int(match.group(2))
-        return f"[SYSTEM_RESULT: START_REJECTED, CODE: insufficient_balance, NEED_CENTS: {need}, HAVE_CENTS: {have}]"
+        return (
+            "[SYSTEM_RESULT: START_REJECTED, CODE: insufficient_balance, "
+            f"NEED_RMB: {_format_rmb_from_cents(need)}, HAVE_RMB: {_format_rmb_from_cents(have)}]"
+        )
     if cleaned:
         detail = cleaned.replace("]", " ").replace("\n", " ").strip()
         return f"[SYSTEM_RESULT: START_REJECTED, CODE: generic_error, DETAIL: {detail}]"
@@ -204,8 +212,9 @@ def _build_start_error_system_event(error_message: str | None) -> str:
 
 def _build_start_outcome_system_events(start_result: dict[str, Any] | None, duration_seconds: int) -> list[str]:
     if start_result and start_result.get("ok"):
+        upfront_cost_cents = int(start_result.get("upfront_cost", 0))
         return [
-            f"[SYSTEM_RESULT: SESSION_STARTED, MINUTES: {max(duration_seconds // 60, 1)}, COST_CENTS: {int(start_result.get('upfront_cost', 0))}]"
+            f"[SYSTEM_RESULT: SESSION_STARTED, MINUTES: {max(duration_seconds // 60, 1)}, COST_RMB: {_format_rmb_from_cents(upfront_cost_cents)}]"
         ]
 
     return [_build_start_error_system_event((start_result or {}).get("error"))]
@@ -224,7 +233,7 @@ def _build_fallback_system_events(
         minutes = details.get("minutes") or _duration_to_minutes(directive.duration_seconds)
         cost = details.get("cost")
         if cost is not None:
-            return [f"[SYSTEM_RESULT: SESSION_STARTED, MINUTES: {minutes}, COST_CENTS: {cost}]"]
+            return [f"[SYSTEM_RESULT: SESSION_STARTED, MINUTES: {minutes}, COST_RMB: {_format_rmb_from_cents(int(cost))}]"]
         return [f"[SYSTEM_RESULT: SESSION_STARTED, MINUTES: {minutes}]"]
     if directive.action == "pause":
         if directive.approved:
@@ -498,6 +507,38 @@ def _can_start_session(session: SessionState) -> bool:
     return bool((session.current_plan or "").strip())
 
 
+def _profile_has_minimum_basics(profile_content: str) -> bool:
+    normalized = (profile_content or "").strip().lower()
+    if not normalized:
+        return False
+
+    has_calling_hint = bool(
+        re.search(r"(称呼|叫我|你可以叫我|nickname|call me|preferred name|name[:：])", normalized)
+    )
+    has_education_hint = bool(
+        re.search(r"(教育|学历|学校|年级|专业|本科|研究生|高中|初中|大学|education|school|major|grade|background)", normalized)
+    )
+    return has_calling_hint and has_education_hint
+
+
+async def _is_profile_ready_for_start(user_id: str) -> bool:
+    try:
+        uid = int(user_id)
+    except ValueError:
+        return False
+
+    db = SessionLocal()
+    try:
+        profile_doc = db_get_user_profile_document(db=db, user_id=uid)
+    except Exception:
+        logger.exception("failed to load user profile for start check, user_id=%s", user_id)
+        return False
+    finally:
+        db.close()
+
+    return _profile_has_minimum_basics(str(profile_doc.get("content", "")))
+
+
 def _truncate_log_text(value: Any, limit: int = LOG_PREVIEW_LIMIT) -> str:
     text = str(value)
     if len(text) <= limit:
@@ -616,6 +657,9 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     user_id = str(user_id_int)
 
     session = await manager.connect(user_id, ws)
+    requested_character_id = str(ws.query_params.get("characterId") or "").strip().lower()
+    if requested_character_id in CHARACTER_CATALOG:
+        session.character_id = requested_character_id
     session.total_focus_seconds = session.total_focus_seconds or DEFAULT_TOTAL_SECONDS
     session.focus_time_remaining = (
         session.focus_time_remaining
@@ -696,6 +740,8 @@ async def dispatch_message(user_id: str, session: SessionState, msg: dict[str, A
     if msg_type == "set-character":
         character_id = str(msg.get("characterId", "")).strip().lower()
         if character_id in CHARACTER_CATALOG:
+            if session.character_id == character_id:
+                return
             session.character_id = character_id
             session.chat_history = []
             await send_model_info(user_id, session)
@@ -855,6 +901,10 @@ async def _handle_user_turn(
 
     # Handle visual capture request
     if directive.requires_capture:
+        if _has_system_result(system_events, "profile_incomplete"):
+            # Profile completion has higher priority than visual checks.
+            directive.requires_capture = False
+
         capture_sources = directive.capture_sources or START_CAPTURE_SOURCES
         needs_start_readiness = (
             directive.action == "start"
@@ -862,7 +912,11 @@ async def _handle_user_turn(
         )
 
         if needs_start_readiness and images and session.supervision_state == "setup":
-            if not _can_start_session(session):
+            profile_ready = await _is_profile_ready_for_start(user_id)
+            if not profile_ready:
+                await send_tool_call_status(user_id, "supervision.start", "error", "profile incomplete")
+                system_events = ["[SYSTEM_RESULT: START_REJECTED, CODE: profile_incomplete, DETAIL: 请先轻松聊聊你的称呼和教育背景]"]
+            elif not _can_start_session(session):
                 await send_tool_call_status(user_id, "supervision.start", "error", "task not agreed")
                 system_events = ["[SYSTEM_RESULT: START_REJECTED, CODE: task_not_agreed]"]
             else:
@@ -914,7 +968,11 @@ async def _handle_user_turn(
         await send_tool_call_status(user_id, "plan.update", "success", "plan updated")
 
     elif directive.action == "start" and session.supervision_state == "setup":
-        if not _can_start_session(session):
+        profile_ready = await _is_profile_ready_for_start(user_id)
+        if not profile_ready:
+            await send_tool_call_status(user_id, "supervision.start", "error", "profile incomplete")
+            system_events = ["[SYSTEM_RESULT: START_REJECTED, CODE: profile_incomplete, DETAIL: 请先轻松聊聊你的称呼和教育背景]"]
+        elif not _can_start_session(session):
             await send_tool_call_status(user_id, "supervision.start", "error", "task not agreed")
             system_events = ["[SYSTEM_RESULT: START_REJECTED, CODE: task_not_agreed]"]
         elif not images:
@@ -1041,6 +1099,25 @@ async def handle_capture_context_result(
 
     await send_tool_call_status(user_id, "visual.capture", "success", "visual context captured")
     if capture_mode == "start-readiness":
+        profile_ready = await _is_profile_ready_for_start(user_id)
+        if not profile_ready:
+            await send_tool_call_status(user_id, "supervision.start", "error", "profile incomplete")
+            system_events = [
+                "[SYSTEM_RESULT: START_REJECTED, CODE: profile_incomplete, DETAIL: 请先轻松聊聊你的称呼和教育背景]"
+            ]
+            result_context = "\n".join(system_events)
+            await _handle_user_turn(
+                user_id=user_id,
+                session=session,
+                text=f"{prompt}\n{result_context}",
+                images=images,
+                is_tool_result=True,
+                append_user_message=False,
+                emit_user_transcript=False,
+                stage_depth=1,
+            )
+            return
+
         readiness = await evaluate_start_readiness(
             images=images,
             current_task=session.current_plan,
@@ -1250,7 +1327,7 @@ async def handle_screenshot(user_id: str, session: SessionState, msg: dict[str, 
     else:
         prompt_text = (
             f"系统自动执行了走神惩罚（{reason_str}），请根据以下事件严厉警告用户，要求极短。\n"
-            f"[SYSTEM_EVENT: DISTRACTION_PENALTY_APPLIED, AMOUNT_CENTS: {PENALTY_AMOUNT}]"
+            f"[SYSTEM_EVENT: DISTRACTION_PENALTY_APPLIED, AMOUNT_RMB: {_format_rmb_from_cents(PENALTY_AMOUNT)}]"
         )
         await _handle_user_turn(
             user_id=user_id,

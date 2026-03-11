@@ -24,6 +24,7 @@ import { useEffect, useRef, useCallback } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useChatStore } from "@/stores/chatStore";
 import { useAuthStore } from "@/stores/authStore";
+import { useCharacterStore } from "@/stores/characterStore";
 import type { TxMessage, RxMessage } from "@/lib/protocol";
 
 export interface UseWebSocketOptions {
@@ -79,11 +80,12 @@ export function useWebSocket({
 
     // Attach JWT token as query param for WS authentication
     const token = useAuthStore.getState().token;
+    const selectedCharacterId = useCharacterStore.getState().selectedCharacterId;
     if (!token) {
       console.warn("[WS] No auth token, cannot connect");
       return;
     }
-    const wsUrl = `${url}?token=${encodeURIComponent(token)}`;
+    const wsUrl = `${url}?token=${encodeURIComponent(token)}&characterId=${encodeURIComponent(selectedCharacterId || "")}`;
     manualCloseRef.current = false;
     clearTimeout(reconnectTimerRef.current);
     const ws = new WebSocket(wsUrl);

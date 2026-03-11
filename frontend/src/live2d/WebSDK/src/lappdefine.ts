@@ -116,4 +116,4 @@ export const ModelInteractionDragThreshold = 14;
 export const ModelInteractionDragSensitivity = 0.3;
 export const ModelInteractionWheelScaleStep = 0.05;
 export const ModelInteractionMinScale = 0.15;
-export const ModelInteractionMaxScale = 4.5;
+export const ModelInteractionMaxScale = 8.0;

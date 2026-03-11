@@ -4,9 +4,9 @@ import { useChatStore } from "@/stores/chatStore";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useAvatarStore } from "@/stores/avatarStore";
 import { useMediaStore } from "@/stores/mediaStore";
-import { useCharacterStore } from "@/stores/characterStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useI18n } from "@/lib/i18n";
+import { formatRmbFromCents, formatSignedRmbFromCents } from "@/lib/currency";
 import ChatPanel from "@/components/ChatPanel/ChatPanel";
 import VoiceInput from "@/components/VoiceInput/VoiceInput";
 import Live2DCanvas, { type Live2DCanvasHandle } from "@/components/Live2DCanvas/Live2DCanvas";
@@ -17,11 +17,11 @@ export default function SetupLayout() {
   const live2dRef = useRef<Live2DCanvasHandle>(null);
   const send = useSend();
   const { t, locale, setLocale } = useI18n();
-  const selectedCharacterId = useCharacterStore((s) => s.selectedCharacterId);
   const token = useAuthStore((s) => s.token);
+  const currentUserId = useAuthStore((s) => s.user?.user_id);
 
   const [sessionSummaries, setSessionSummaries] = useState<Array<{ id: string; summary_text: string; created_at: string }>>([]);
-  const [transactions, setTransactions] = useState<Array<{ id: string; amount: number; reason: string; created_at: string; tx_type: string }>>([]);
+  const [transactions, setTransactions] = useState<Array<{ id: string; amount: number; reason: string; created_at: string; tx_type: string; from_user_id?: number | null; to_user_id?: number | null }>>([]);
 
   const plan = useSessionStore((s) => s.plan);
   const balance = useSessionStore((s) => s.balance);
@@ -36,10 +36,6 @@ export default function SetupLayout() {
   const requestScreenShare = useMediaStore((s) => s.requestScreenShare);
   const snapshotInterval = useMediaStore((s) => s.snapshotInterval);
   const setSnapshotInterval = useMediaStore((s) => s.setSnapshotInterval);
-
-  useEffect(() => {
-    send({ type: "set-character", characterId: selectedCharacterId });
-  }, [selectedCharacterId, send]);
 
   useEffect(() => {
     const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:12393";
@@ -77,11 +73,23 @@ export default function SetupLayout() {
     send({ type: "text-input", text });
   }, [interruptAgentOutput, send]);
 
-  const handleSwitchCharacter = useCallback((characterId: string) => {
+  const handleSwitchCharacter = useCallback((_characterId: string) => {
     useChatStore.getState().clearMessages();
     useAvatarStore.getState().clearAudioMessages();
-    send({ type: "set-character", characterId });
-  }, [send]);
+  }, []);
+
+  const getSignedAmount = useCallback((item: { amount: number; from_user_id?: number | null; to_user_id?: number | null }) => {
+    if (!currentUserId) {
+      return item.amount;
+    }
+    if (item.from_user_id === currentUserId && item.to_user_id !== currentUserId) {
+      return -Math.abs(item.amount);
+    }
+    if (item.to_user_id === currentUserId && item.from_user_id !== currentUserId) {
+      return Math.abs(item.amount);
+    }
+    return item.amount;
+  }, [currentUserId]);
 
   return (
     <div className="flex h-full min-h-0 animate-fade-in">
@@ -115,7 +123,7 @@ export default function SetupLayout() {
             <PermissionRow label={locale === "zh" ? "屏幕共享" : "Screen Share"} granted={screenGranted} onRequest={requestScreenShare} />
             <div className="mt-3 flex items-center justify-between rounded-lg bg-black/20 px-3 py-2">
               <span className="text-white/65">{t("status.balance")}</span>
-              <span className="font-mono text-success">{balance}</span>
+              <span className="font-mono text-success">{formatRmbFromCents(balance)}</span>
             </div>
             <div className="mt-2 rounded-lg bg-black/20 px-3 py-2">
               <div className="flex items-center justify-between gap-3">
@@ -129,7 +137,7 @@ export default function SetupLayout() {
                   value={snapshotInterval}
                   onChange={(e) => {
                     const next = Number(e.target.value);
-                    const clamped = Number.isFinite(next) ? Math.max(5, Math.min(300, Math.round(next))) : 60;
+                    const clamped = Number.isFinite(next) ? Math.max(5, Math.min(300, Math.round(next))) : 20;
                     setSnapshotInterval(clamped);
                   }}
                   className="w-20 rounded bg-white/10 px-2 py-1 text-right font-mono text-white/90 outline-none"
@@ -169,15 +177,20 @@ export default function SetupLayout() {
           <div className="space-y-2 text-xs">
             {transactions.length === 0 ? (
               <p className="text-white/45">{locale === "zh" ? "暂无资金流水" : "No transactions yet"}</p>
-            ) : transactions.map((item) => (
+            ) : transactions.map((item) => {
+              const signedAmount = getSignedAmount(item);
+              return (
               <div key={item.id} className="flex items-center justify-between rounded-lg bg-black/20 px-2 py-1.5 text-white/70">
                 <div>
                   <p>{item.reason}</p>
                   <p className="text-[11px] text-white/40">{new Date(item.created_at).toLocaleDateString()} · {item.tx_type}</p>
                 </div>
-                <span className={`font-mono ${item.amount > 0 ? "text-success" : "text-danger"}`}>{item.amount > 0 ? `+${item.amount}` : item.amount}</span>
+                <span className={`font-mono ${signedAmount >= 0 ? "text-success" : "text-danger"}`}>
+                  {formatSignedRmbFromCents(signedAmount)}
+                </span>
               </div>
-            ))}
+              );
+            })}
           </div>
         </section>
 

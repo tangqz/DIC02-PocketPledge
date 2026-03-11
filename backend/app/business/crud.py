@@ -1,5 +1,6 @@
 import json
 import uuid
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime
 from typing import Any
 
@@ -16,10 +17,19 @@ from .models import (
     Wallet,
 )
 
-SERVICE_FEE_PER_MINUTE = 15  # 单位：分，15分=0.15元/分钟
-PENALTY_PER_DISTRACTION = 50  # 单位：分，每走神一次扣50分=0.5元
+FEN_PER_RMB = Decimal("100")
+SERVICE_FEE_PER_HOUR_RMB = Decimal("8.00")
+PENALTY_PER_DISTRACTION = 300  # 单位：分，每走神一次扣3元
 PROFILE_DOC_MAX_CHARS = 4000
 CHAT_MESSAGE_MAX_CHARS = 2000
+
+
+def _focus_fee_cents(planned_focus_minutes: int) -> int:
+    """Calculate focus fee in cents from RMB 8/hour, rounded to 2 decimals RMB."""
+    fee_rmb = (Decimal(planned_focus_minutes) * SERVICE_FEE_PER_HOUR_RMB / Decimal("60")).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+    return int((fee_rmb * FEN_PER_RMB).to_integral_value(rounding=ROUND_HALF_UP))
 
 
 def _now_iso() -> str:
@@ -64,7 +74,7 @@ def start_focus_session(db: Session, user_id: int, planned_focus_minutes: int) -
     _, user_wallet = _get_or_create_user_with_wallet(db, user_id)
     pool_wallet = _require_wallet(db, 1)
 
-    upfront_cost = planned_focus_minutes * SERVICE_FEE_PER_MINUTE
+    upfront_cost = _focus_fee_cents(planned_focus_minutes)
     if user_wallet.balance < upfront_cost:
         raise ValueError(f"insufficient balance: need {upfront_cost}, have {user_wallet.balance}")
 
@@ -86,7 +96,7 @@ def start_focus_session(db: Session, user_id: int, planned_focus_minutes: int) -
             meta_json=json.dumps(
                 {
                     "planned_focus_minutes": planned_focus_minutes,
-                    "service_fee_per_minute": SERVICE_FEE_PER_MINUTE,
+                    "service_fee_per_hour_rmb": str(SERVICE_FEE_PER_HOUR_RMB),
                     "created_at": _now_iso(),
                 },
                 ensure_ascii=False,

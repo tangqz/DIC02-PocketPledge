@@ -103,7 +103,7 @@ interface SessionState {
 
 export const useSessionStore = create<SessionState>((set, get) => ({
   supervisionState: "setup",
-  balance: 100,
+  balance: 3000,
   degradedMode: false,
   timerSeconds: 0,
   totalDuration: 0,
@@ -210,7 +210,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   reset: () =>
     set({
       supervisionState: "setup",
-      balance: 100,
+      balance: 3000,
       degradedMode: false,
       timerSeconds: 0,
       totalDuration: 0,

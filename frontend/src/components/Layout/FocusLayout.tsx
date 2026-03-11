@@ -79,7 +79,7 @@ export default function FocusLayout() {
         </div>
 
         {!degradedMode ? (
-          <div className="absolute bottom-[35%] left-1/2 z-20 -translate-x-1/2">
+          <div className="absolute bottom-[26%] left-1/2 z-20 -translate-x-1/2">
             <VoiceInput />
           </div>
         ) : null}

@@ -14,7 +14,7 @@ import {
   useMemo,
   useCallback,
 } from "react";
-import { DEFAULT_MODEL_CONFIG, MAO_PRO_CONFIG } from "@/lib/modelConfig";
+import { DEFAULT_MODEL_CONFIG, type ModelConfig } from "@/lib/modelConfig";
 import { useI18n } from "@/lib/i18n";
 import { useAudioQueue } from "@/components/AudioPlayer/useAudioQueue";
 import { useAvatarStore } from "@/stores/avatarStore";
@@ -75,14 +75,15 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
   const [debugText, setDebugText] = useState("init");
   const [isLoaded, setIsLoaded] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const [lastGoodConfig, setLastGoodConfig] = useState<ModelConfig | null>(null);
   const [fallbackToDefault, setFallbackToDefault] = useState(false);
 
   const activeConfig = useMemo(() => {
-    if (!fallbackToDefault) {
+    if (!fallbackToDefault || !lastGoodConfig) {
       return config;
     }
-    return MAO_PRO_CONFIG;
-  }, [config, fallbackToDefault]);
+    return lastGoodConfig;
+  }, [config, fallbackToDefault, lastGoodConfig]);
 
   useEffect(() => {
     setFallbackToDefault(false);
@@ -301,13 +302,16 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
 
         if (!disposed) {
           setIsLoaded(true);
+          if (!fallbackToDefault) {
+            setLastGoodConfig(config);
+          }
         }
       } catch (e) {
         if (!disposed) {
           const err = e as Error;
-          // Auto-fallback when custom model fails due to SDK compatibility.
-          if (!fallbackToDefault && config.url !== DEFAULT_MODEL_CONFIG.url) {
-            console.warn("[Live2DCanvas] model load failed, fallback to default model", err);
+          // Auto-fallback only to last known good config; avoid first-login cross-character flip.
+          if (!fallbackToDefault && lastGoodConfig && config.url !== lastGoodConfig.url) {
+            console.warn("[Live2DCanvas] model load failed, fallback to last good model", err);
             setFallbackToDefault(true);
             return;
           }
@@ -327,7 +331,7 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
       }
       stopAudio();
     };
-  }, [activeConfig.url, activeConfig.kScale, config.url, fallbackToDefault, stopAudio]);
+  }, [activeConfig.url, activeConfig.kScale, config, lastGoodConfig, fallbackToDefault, stopAudio]);
 
   return (
     <div id="live2d" className="relative h-full w-full">

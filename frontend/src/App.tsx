@@ -8,7 +8,7 @@
  *   • Provide `send` function via React context so any layout
  *     can send TxMessages without prop-drilling
  * ──────────────────────────────────────────────── */
-import { createContext, useContext, useCallback, useMemo, useEffect, useState } from "react";
+import { createContext, useContext, useCallback, useMemo, useEffect, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useMediaStore } from "@/stores/mediaStore";
 import { useAuthStore } from "@/stores/authStore";
@@ -57,6 +57,7 @@ function AuthenticatedApp() {
   const selectedCharacterId = useCharacterStore((s) => s.selectedCharacterId);
   const setSelectedCharacterId = useCharacterStore((s) => s.setSelectedCharacterId);
   const { locale } = useI18n();
+  const lastSentCharacterRef = useRef<string>("");
 
   // ── WebSocket (global, persistent) ──
   const captureVisualContext = useCallback(async (
@@ -102,7 +103,7 @@ function AuthenticatedApp() {
 
       if (msg.type === "model-info") {
         useAvatarStore.getState().setModelInfo(msg.model_info);
-        if (msg.character_id) {
+        if (msg.character_id && msg.character_id !== useCharacterStore.getState().selectedCharacterId) {
           setSelectedCharacterId(msg.character_id);
         }
         return;
@@ -145,6 +146,10 @@ function AuthenticatedApp() {
   }, [locale, send]);
 
   useEffect(() => {
+    if (!selectedCharacterId || selectedCharacterId === lastSentCharacterRef.current) {
+      return;
+    }
+    lastSentCharacterRef.current = selectedCharacterId;
     send({ type: "set-character", characterId: selectedCharacterId });
   }, [selectedCharacterId, send]);
 
