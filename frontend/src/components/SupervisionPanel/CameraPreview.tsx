@@ -35,7 +35,7 @@ export default function CameraPreview() {
 
   if (error) {
     return (
-      <div className="flex h-48 items-center justify-center bg-surface text-sm text-white/40">
+      <div className="flex h-48 items-center justify-center bg-slate-50 text-sm text-slate-400">
         {error}
       </div>
     );

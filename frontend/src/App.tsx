@@ -210,11 +210,11 @@ function AuthenticatedApp() {
 
   return (
     <SendContext.Provider value={sendValue}>
-      <div className="h-full w-full bg-surface">
+      <div className="h-full w-full bg-slate-50">
         {/* Logout button */}
         <button
           onClick={logout}
-          className="fixed right-4 top-4 z-50 rounded-lg bg-white/10 px-3 py-1 text-sm text-white/70 backdrop-blur-sm hover:bg-white/20"
+          className="fixed right-4 top-4 z-50 rounded-lg bg-slate-100 px-3 py-1 text-sm text-slate-600 backdrop-blur-sm hover:bg-slate-200"
         >
           退出
         </button>
@@ -255,8 +255,8 @@ export default function App() {
 
   if (!ready) {
     return (
-      <div className="flex h-screen items-center justify-center bg-slate-900">
-        <p className="text-white/50">加载中…</p>
+      <div className="flex h-screen items-center justify-center bg-slate-50">
+        <p className="text-slate-500">加载中…</p>
       </div>
     );
   }

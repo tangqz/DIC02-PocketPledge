@@ -93,11 +93,11 @@ export default function SetupLayout() {
 
   return (
     <div className="flex h-full min-h-0 animate-fade-in">
-      <aside className="flex w-[48%] min-w-[360px] flex-col gap-3 overflow-y-auto border-r border-white/10 bg-surface/55 p-4">
-        <div className="flex items-start justify-between gap-3 rounded-2xl border border-white/10 bg-surface-elevated/70 p-4">
+      <aside className="flex w-[48%] min-w-[360px] flex-col gap-3 overflow-y-auto border-r border-slate-200 bg-slate-50/55 p-4">
+        <div className="flex items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-surface-elevated/70 p-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-white/90">{t("app.title")}</h1>
-            <p className="mt-1 text-sm text-white/55">{t("setup.chatHint")}</p>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-800">{t("app.title")}</h1>
+            <p className="mt-1 text-sm text-slate-500">{t("setup.chatHint")}</p>
           </div>
           <button
             onClick={() => {
@@ -105,7 +105,7 @@ export default function SetupLayout() {
               setLocale(nextLocale);
               send({ type: "set-locale", locale: nextLocale });
             }}
-            className="rounded-lg bg-white/10 px-2.5 py-1 text-xs font-medium text-white/75 hover:bg-white/20"
+            className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200"
           >
             {locale === "zh" ? "EN" : "中"}
           </button>
@@ -113,21 +113,21 @@ export default function SetupLayout() {
 
         <DailyPlanCalendar plan={plan} />
 
-        <section className="rounded-2xl border border-white/10 bg-surface-elevated/70 p-4 backdrop-blur-sm">
-          <h3 className="mb-3 text-sm font-semibold text-white/85">
+        <section className="rounded-2xl border border-slate-200 bg-surface-elevated/70 p-4 backdrop-blur-sm">
+          <h3 className="mb-3 text-sm font-semibold text-slate-700">
             {locale === "zh" ? "监督准备" : "Supervision Setup"}
           </h3>
           <div className="space-y-2 text-sm">
             <PermissionRow label={locale === "zh" ? "麦克风" : "Microphone"} granted={micGranted} onRequest={requestMicrophone} />
             <PermissionRow label={locale === "zh" ? "摄像头" : "Camera"} granted={cameraGranted} onRequest={requestCamera} />
             <PermissionRow label={locale === "zh" ? "屏幕共享" : "Screen Share"} granted={screenGranted} onRequest={requestScreenShare} />
-            <div className="mt-3 flex items-center justify-between rounded-lg bg-black/20 px-3 py-2">
-              <span className="text-white/65">{t("status.balance")}</span>
+            <div className="mt-3 flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+              <span className="text-slate-600">{t("status.balance")}</span>
               <span className="font-mono text-success">{formatRmbFromCents(balance)}</span>
             </div>
-            <div className="mt-2 rounded-lg bg-black/20 px-3 py-2">
+            <div className="mt-2 rounded-lg bg-slate-50 px-3 py-2">
               <div className="flex items-center justify-between gap-3">
-                <span className="text-white/65">
+                <span className="text-slate-600">
                   {locale === "zh" ? "监督流请求频率(秒)" : "Supervision Stream Interval (s)"}
                 </span>
                 <input
@@ -140,10 +140,10 @@ export default function SetupLayout() {
                     const clamped = Number.isFinite(next) ? Math.max(5, Math.min(300, Math.round(next))) : 20;
                     setSnapshotInterval(clamped);
                   }}
-                  className="w-20 rounded bg-white/10 px-2 py-1 text-right font-mono text-white/90 outline-none"
+                  className="w-20 rounded bg-slate-100 px-2 py-1 text-right font-mono text-slate-800 outline-none"
                 />
               </div>
-              <p className="mt-1 text-[11px] text-white/40">
+              <p className="mt-1 text-[11px] text-slate-400">
                 {locale === "zh"
                   ? "仅在非专注模式可调整，用于临时演示调试。"
                   : "Editable in non-focus mode for temporary demo tuning."}
@@ -154,36 +154,36 @@ export default function SetupLayout() {
 
         <CharacterMarket onSwitch={handleSwitchCharacter} />
 
-        <section className="rounded-2xl border border-white/10 bg-surface-elevated/70 p-4 backdrop-blur-sm">
-          <h3 className="mb-3 text-sm font-semibold text-white/85">
+        <section className="rounded-2xl border border-slate-200 bg-surface-elevated/70 p-4 backdrop-blur-sm">
+          <h3 className="mb-3 text-sm font-semibold text-slate-700">
             {locale === "zh" ? "过去专注记录" : "Past Focus Records"}
           </h3>
           <div className="space-y-2 text-xs">
             {sessionSummaries.length === 0 ? (
-              <p className="text-white/45">{locale === "zh" ? "暂无历史记录" : "No records yet"}</p>
+              <p className="text-slate-500">{locale === "zh" ? "暂无历史记录" : "No records yet"}</p>
             ) : sessionSummaries.map((item) => (
-              <div key={item.id} className="rounded-lg bg-black/20 p-2 text-white/70">
+              <div key={item.id} className="rounded-lg bg-slate-50 p-2 text-slate-600">
                 <p>{item.summary_text}</p>
-                <p className="mt-1 text-[11px] text-white/40">{new Date(item.created_at).toLocaleString()}</p>
+                <p className="mt-1 text-[11px] text-slate-400">{new Date(item.created_at).toLocaleString()}</p>
               </div>
             ))}
           </div>
         </section>
 
-        <section className="rounded-2xl border border-white/10 bg-surface-elevated/70 p-4 backdrop-blur-sm">
-          <h3 className="mb-3 text-sm font-semibold text-white/85">
+        <section className="rounded-2xl border border-slate-200 bg-surface-elevated/70 p-4 backdrop-blur-sm">
+          <h3 className="mb-3 text-sm font-semibold text-slate-700">
             {locale === "zh" ? "资金记录" : "Fund Records"}
           </h3>
           <div className="space-y-2 text-xs">
             {transactions.length === 0 ? (
-              <p className="text-white/45">{locale === "zh" ? "暂无资金流水" : "No transactions yet"}</p>
+              <p className="text-slate-500">{locale === "zh" ? "暂无资金流水" : "No transactions yet"}</p>
             ) : transactions.map((item) => {
               const signedAmount = getSignedAmount(item);
               return (
-              <div key={item.id} className="flex items-center justify-between rounded-lg bg-black/20 px-2 py-1.5 text-white/70">
+              <div key={item.id} className="flex items-center justify-between rounded-lg bg-slate-50 px-2 py-1.5 text-slate-600">
                 <div>
                   <p>{item.reason}</p>
-                  <p className="text-[11px] text-white/40">{new Date(item.created_at).toLocaleDateString()} · {item.tx_type}</p>
+                  <p className="text-[11px] text-slate-400">{new Date(item.created_at).toLocaleDateString()} · {item.tx_type}</p>
                 </div>
                 <span className={`font-mono ${signedAmount >= 0 ? "text-success" : "text-danger"}`}>
                   {formatSignedRmbFromCents(signedAmount)}
@@ -194,7 +194,7 @@ export default function SetupLayout() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-white/10 bg-surface-elevated/70 p-4 text-xs text-white/55 backdrop-blur-sm">
+        <section className="rounded-2xl border border-slate-200 bg-surface-elevated/70 p-4 text-xs text-slate-500 backdrop-blur-sm">
           {locale === "zh"
             ? "提示：切换角色会立即热切换模型，并清空聊天记录以保证人设一致性。"
             : "Tip: Switching character hot-loads the model and clears chat history to keep persona consistency."}
@@ -220,7 +220,7 @@ export default function SetupLayout() {
           ) : null}
         </div>
 
-        <div className="h-[36%] min-h-[220px] border-t border-white/10 bg-surface-elevated/55 backdrop-blur-lg">
+        <div className="h-[36%] min-h-[220px] border-t border-slate-200 bg-surface-elevated/55 backdrop-blur-lg">
           <ChatPanel expanded onSendText={handleSendText} />
         </div>
       </main>
@@ -238,8 +238,8 @@ function PermissionRow({
   onRequest: () => Promise<boolean>;
 }) {
   return (
-    <div className="flex items-center justify-between rounded-lg bg-black/20 px-3 py-2">
-      <span className="text-white/70">{label}</span>
+    <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+      <span className="text-slate-600">{label}</span>
       {granted ? (
         <span className="text-success">Ready</span>
       ) : (
@@ -253,10 +253,10 @@ function PermissionRow({
 
 function DowngradePanel({ locale }: { locale: "zh" | "en" }) {
   return (
-    <div className="flex h-full items-center justify-center bg-black/35 backdrop-blur-sm">
-      <div className="rounded-2xl border border-white/10 bg-surface-elevated/80 px-6 py-5 text-center shadow-lg">
-        <p className="text-sm uppercase tracking-[0.3em] text-white/30">Fallback Mode</p>
-        <p className="mt-3 text-lg font-semibold text-white/80">
+    <div className="flex h-full items-center justify-center bg-slate-200/50 backdrop-blur-sm">
+      <div className="rounded-2xl border border-slate-200 bg-surface-elevated/80 px-6 py-5 text-center shadow-lg">
+        <p className="text-sm uppercase tracking-[0.3em] text-slate-400">Fallback Mode</p>
+        <p className="mt-3 text-lg font-semibold text-slate-700">
           {locale === "zh" ? "余额不足，陪伴模式已停用" : "Balance exhausted. Companion mode is disabled."}
         </p>
       </div>

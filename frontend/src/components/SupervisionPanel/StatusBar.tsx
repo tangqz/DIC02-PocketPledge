@@ -83,11 +83,11 @@ export default function StatusBar() {
       </div>
 
       {/* Divider */}
-      <div className="h-6 w-px bg-white/10" />
+      <div className="h-6 w-px bg-slate-100" />
 
       {/* Balance */}
       <div className="flex items-center gap-2">
-        <span className="text-sm text-white/50">{t("status.balance")}</span>
+        <span className="text-sm text-slate-500">{t("status.balance")}</span>
         <span
           ref={balanceRef}
           className={`font-mono text-lg font-bold tabular-nums ${
@@ -110,11 +110,11 @@ export default function StatusBar() {
       </div>
 
       {/* Divider */}
-      <div className="h-6 w-px bg-white/10" />
+      <div className="h-6 w-px bg-slate-100" />
 
       {/* Task */}
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm text-white/70">
+        <p className="truncate text-sm text-slate-600">
           {currentTask || (t("status.state.setup"))}
         </p>
       </div>
@@ -127,7 +127,7 @@ export default function StatusBar() {
             : supervisionState === "paused"
               ? "bg-warning/20 text-warning"
               : supervisionState === "completed"
-                ? "bg-white/10 text-white/50"
+                ? "bg-slate-100 text-slate-500"
                 : "bg-accent-soft text-accent"
         }`}
       >

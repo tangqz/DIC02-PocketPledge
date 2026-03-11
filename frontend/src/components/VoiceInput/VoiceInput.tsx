@@ -82,19 +82,19 @@ export default function VoiceInput() {
 
         {/* Breathing ring — idle/standby */}
         {state === "idle" && (
-          <span className="absolute h-12 w-12 animate-breathing rounded-full bg-white/10" />
+          <span className="absolute h-12 w-12 animate-breathing rounded-full bg-slate-100" />
         )}
 
         {/* Mic icon circle */}
         <div
           className={`relative z-10 flex h-11 w-11 items-center justify-center rounded-full transition-all duration-200 ${
             state === "listening"
-              ? "bg-accent text-white shadow-lg shadow-accent/30"
+              ? "bg-accent text-slate-800 shadow-lg shadow-accent/30"
               : state === "muted"
-                ? "bg-white/5 text-white/20"
+                ? "bg-slate-200/50 text-slate-400"
                 : state === "idle"
-                  ? "bg-surface-elevated text-white/60 group-hover:text-white/80"
-                  : "bg-surface-elevated text-white/20"
+                  ? "bg-surface-elevated text-slate-500 group-hover:text-slate-700"
+                  : "bg-surface-elevated text-slate-300"
           }`}
         >
           <svg
@@ -150,8 +150,8 @@ export default function VoiceInput() {
           state === "listening"
             ? "font-medium text-accent"
             : state === "muted"
-              ? "text-white/25"
-              : "text-white/40"
+              ? "text-slate-300"
+              : "text-slate-400"
         }`}
       >
         {label}
