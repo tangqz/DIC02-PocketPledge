@@ -94,19 +94,39 @@
 
 说明:
 - 当前为内部接口，保留给 Dify/tool callback 使用
-- 目前未加管理员鉴权
+- 需要固定 Bearer Token，来自后端环境变量 `DIFY_TOOL_BEARER_TOKEN`
 
 ## 已缺失能力
 
-以下能力尚无对应 REST 工具接口，系统 Agent 目前无法通过标准工具调用完成：
+以下能力现已具备最小后端接口，可供系统 Agent 或 Dify 工具调用：
 
-- 用户画像文档读取/更新
-- RAG 检索与记忆写回
-- 暂停申请历史查询
-- 暂停审批结果持久化
-- 学习计划创建、调整、查询、删除
-- 日历型计划展示数据接口
+- `GET /api/business/me/plan`：读取当前有效学习计划
+- `PUT /api/business/me/plan`：创建或更新当前学习计划
+- `GET /api/business/me/profile`：读取有限长度用户画像文档
+- `PUT /api/business/me/profile`：更新用户画像文档
+- `GET /api/business/me/pause-requests`：查询暂停申请历史
+- `POST /api/business/me/pause-requests`：写入一次暂停审批结果
+- `GET /api/business/me/session-summaries`：查询历史会话总结
+- `POST /api/business/me/session-summaries`：写入一条会话总结
+- `GET /api/business/me/transactions`：查询当前用户相关流水
+
+以下能力现已具备固定 Bearer + `user_id` 显式传参的内部接口，更适合 Dify 工具调用：
+
+- `GET /api/business/users/{user_id}/status`
+- `GET /api/business/internal/users/{user_id}/plan`
+- `PUT /api/business/internal/users/{user_id}/plan`
+- `GET /api/business/internal/users/{user_id}/profile`
+- `PUT /api/business/internal/users/{user_id}/profile`
+- `GET /api/business/internal/users/{user_id}/pause-requests`
+- `POST /api/business/internal/users/{user_id}/pause-requests`
+- `GET /api/business/internal/users/{user_id}/session-summaries`
+- `POST /api/business/internal/users/{user_id}/session-summaries`
+- `GET /api/business/internal/users/{user_id}/transactions`
+
+以下能力仍未实现完整产品闭环：
+
+- RAG 检索与记忆写回的自动编排
+- 日历型计划展示与周期性计划规则引擎
 - 奖励任务创建、完成确认、奖励发放
-- 会话总结持久化
 - Reward Pool 向用户返奖的正式接口
-- Charity / Pool / 用户流水查询接口
+- Charity / Pool 的独立管理接口

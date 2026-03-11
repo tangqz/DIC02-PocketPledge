@@ -7,7 +7,7 @@
 - 协议：WebSocket
 - 默认地址：`ws://localhost:12393/ws`
 - 传输格式：UTF-8 JSON 文本
-- 鉴权：当前版本未内置（如需鉴权，建议通过 query/header + 首包鉴权扩展）
+- 鉴权：当前版本使用 WebSocket query 参数 `token=<JWT>`
 
 ---
 

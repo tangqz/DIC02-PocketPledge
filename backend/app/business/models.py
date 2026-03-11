@@ -61,6 +61,52 @@ class Transaction(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class StudyPlan(Base):
+    __tablename__ = "study_plans"
+
+    id = Column(String(64), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    status = Column(String(32), nullable=False, default="active")
+    plan_json = Column(Text, nullable=False, default="{}")
+    source = Column(String(50), nullable=False, default="system_agent")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class PauseRequest(Base):
+    __tablename__ = "pause_requests"
+
+    id = Column(String(64), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    session_ref = Column(String(100), nullable=True)
+    requested_text = Column(Text, nullable=False)
+    approved = Column(Boolean, nullable=False, default=False)
+    pause_seconds = Column(Integer, nullable=True)
+    decision_reason = Column(String(255), nullable=False, default="")
+    meta_json = Column(Text, nullable=False, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class UserProfileDocument(Base):
+    __tablename__ = "user_profile_documents"
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    content = Column(Text, nullable=False, default="")
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class SessionSummary(Base):
+    __tablename__ = "session_summaries"
+
+    id = Column(String(64), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    session_ref = Column(String(100), nullable=True)
+    summary_text = Column(Text, nullable=False)
+    meta_json = Column(Text, nullable=False, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:

@@ -12,6 +12,7 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useChatStore } from "@/stores/chatStore";
+import { useAvatarStore } from "@/stores/avatarStore";
 import { useSend } from "@/App";
 import StatusBar from "@/components/SupervisionPanel/StatusBar";
 import ChatPanel from "@/components/ChatPanel/ChatPanel";
@@ -30,6 +31,7 @@ export default function FocusLayout() {
     tickPause,
     lastAlert,
     degradedMode,
+    activeToolCall,
   } = useSessionStore();
   const isPaused = supervisionState === "paused";
   const live2dRef = useRef<Live2DCanvasHandle>(null);
@@ -38,6 +40,24 @@ export default function FocusLayout() {
 
   // Whether the chat panel is open (user can open it to talk to Agent)
   const [chatOpen, setChatOpen] = useState(false);
+
+  const interruptAgentOutput = useCallback(() => {
+    const chat = useChatStore.getState();
+    const avatar = useAvatarStore.getState();
+    const lastMessage = chat.messages.length > 0 ? chat.messages[chat.messages.length - 1] : null;
+    const shouldInterrupt = chat.isAgentSpeaking || avatar.pendingAudioMessages.length > 0 || Boolean(chat.streamingText);
+    if (!shouldInterrupt) {
+      return;
+    }
+    avatar.requestPlaybackInterrupt();
+    avatar.clearAudioMessages();
+    chat.clearStreaming();
+    chat.setAgentSpeaking(false);
+    send({
+      type: "interrupt-signal",
+      text: chat.streamingText || lastMessage?.text || "",
+    });
+  }, [send]);
 
   // ── Timer tick (active state only) ──
   const timerRef = useRef<ReturnType<typeof setInterval> | undefined>(
@@ -78,9 +98,10 @@ export default function FocusLayout() {
   }, [lastAlert]);
 
   const handleSendText = useCallback((text: string) => {
+    interruptAgentOutput();
     useChatStore.getState().addMessage("user", text);
     send({ type: "text-input", text });
-  }, [send]);
+  }, [interruptAgentOutput, send]);
 
   /**
    * Pause request: instead of directly toggling state, open the chat
@@ -90,6 +111,7 @@ export default function FocusLayout() {
    */
   const handlePauseRequest = () => {
     if (supervisionState === "active") {
+      interruptAgentOutput();
       setChatOpen(true);
       // Send an automatic intent message so the Agent knows what the user wants
       const pauseMsg =
@@ -99,6 +121,7 @@ export default function FocusLayout() {
       useChatStore.getState().addMessage("user", pauseMsg);
       send({ type: "text-input", text: pauseMsg });
     } else if (isPaused) {
+      interruptAgentOutput();
       // When paused, tapping the button sends a resume-intent message
       const resumeMsg =
         locale === "zh" ? "我准备好了，继续吧" : "I'm ready, let's continue";
@@ -108,11 +131,12 @@ export default function FocusLayout() {
   };
 
   const handleEndSession = useCallback(() => {
+    interruptAgentOutput();
     send({
       type: "text-input",
       text: locale === "zh" ? "结束本次监督" : "End this session",
     });
-  }, [locale, send]);
+  }, [interruptAgentOutput, locale, send]);
 
   return (
     <div className="relative flex h-full flex-col animate-fade-in">
@@ -187,6 +211,12 @@ export default function FocusLayout() {
               {locale === "zh" ? "暂停剩余: " : "Break: "}
               {Math.floor(pauseRemaining / 60)}:
               {String(pauseRemaining % 60).padStart(2, "0")}
+            </div>
+          )}
+
+          {activeToolCall && (
+            <div className="absolute top-16 left-1/2 -translate-x-1/2 rounded-full bg-accent/15 px-4 py-1.5 text-xs font-medium text-accent backdrop-blur-md">
+              {activeToolCall.tool}
             </div>
           )}
         </div>

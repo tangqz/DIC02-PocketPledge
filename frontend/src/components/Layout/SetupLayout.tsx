@@ -15,6 +15,7 @@
 import { useCallback, useRef } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useChatStore } from "@/stores/chatStore";
+import { useAvatarStore } from "@/stores/avatarStore";
 import { useMediaStore } from "@/stores/mediaStore";
 import { useSend } from "@/App";
 import CameraPreview from "@/components/SupervisionPanel/CameraPreview";
@@ -44,10 +45,29 @@ export default function SetupLayout() {
   const live2dRef = useRef<Live2DCanvasHandle>(null);
   const send = useSend();
 
+  const interruptAgentOutput = useCallback(() => {
+    const chat = useChatStore.getState();
+    const avatar = useAvatarStore.getState();
+    const lastMessage = chat.messages.length > 0 ? chat.messages[chat.messages.length - 1] : null;
+    const shouldInterrupt = chat.isAgentSpeaking || avatar.pendingAudioMessages.length > 0 || Boolean(chat.streamingText);
+    if (!shouldInterrupt) {
+      return;
+    }
+    avatar.requestPlaybackInterrupt();
+    avatar.clearAudioMessages();
+    chat.clearStreaming();
+    chat.setAgentSpeaking(false);
+    send({
+      type: "interrupt-signal",
+      text: chat.streamingText || lastMessage?.text || "",
+    });
+  }, [send]);
+
   const handleSendText = useCallback((text: string) => {
+    interruptAgentOutput();
     useChatStore.getState().addMessage("user", text);
     send({ type: "text-input", text });
-  }, [send]);
+  }, [interruptAgentOutput, send]);
 
   return (
     <div className="flex h-full animate-fade-in">

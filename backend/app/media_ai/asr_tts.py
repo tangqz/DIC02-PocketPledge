@@ -5,15 +5,31 @@ import io
 import logging
 import math
 import os
+from pathlib import Path
 import struct
 import tempfile
 import wave
-from typing import Protocol
+from typing import Any, Protocol, cast
+
+import numpy as np
 
 
 DEFAULT_SAMPLE_RATE = 16000
 logger = logging.getLogger(__name__)
 _WHISPER_MODELS: dict[tuple[str, str, str], object] = {}
+_SHERPA_RECOGNIZERS: dict[tuple[str, str, str, int, bool, str], object] = {}
+
+
+def _default_sherpa_model_dir() -> Path:
+	repo_root = Path(__file__).resolve().parents[3]
+	candidates = [
+		repo_root.parent / "Open-LLM-VTuber" / "models" / "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
+		repo_root / "Open-LLM-VTuber" / "models" / "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
+	]
+	for candidate in candidates:
+		if candidate.exists():
+			return candidate
+	return candidates[0]
 
 
 class ASRService(Protocol):
@@ -116,7 +132,7 @@ class FasterWhisperASRService:
 			temp_path = temp_file.name
 
 		try:
-			model = self._get_model()
+			model = cast(Any, self._get_model())
 			segments, _info = model.transcribe(
 				temp_path,
 				language=self.language,
@@ -147,6 +163,96 @@ class FasterWhisperASRService:
 		return ""
 
 
+class SherpaOnnxASRService:
+	"""Offline ASR backed by sherpa-onnx SenseVoice, aligned with Open-LLM-VTuber."""
+
+	def __init__(self) -> None:
+		default_model_dir = _default_sherpa_model_dir()
+		self.model_type = os.getenv("MEDIA_AI_SHERPA_MODEL_TYPE", "sense_voice")
+		self.model_path = Path(
+			os.getenv(
+				"MEDIA_AI_SHERPA_MODEL_PATH",
+				str(default_model_dir / "model.int8.onnx"),
+			)
+		)
+		self.tokens_path = Path(
+			os.getenv(
+				"MEDIA_AI_SHERPA_TOKENS_PATH",
+				str(default_model_dir / "tokens.txt"),
+			)
+		)
+		self.num_threads = max(1, int(os.getenv("MEDIA_AI_SHERPA_NUM_THREADS", "2")))
+		self.provider = os.getenv("MEDIA_AI_SHERPA_PROVIDER", "cpu").lower()
+		self.use_itn = os.getenv("MEDIA_AI_SHERPA_USE_ITN", "1").lower() not in {"0", "false", "no"}
+
+	def _get_recognizer(self):
+		cache_key = (
+			self.model_type,
+			str(self.model_path),
+			str(self.tokens_path),
+			self.num_threads,
+			self.use_itn,
+			self.provider,
+		)
+		recognizer = _SHERPA_RECOGNIZERS.get(cache_key)
+		if recognizer is not None:
+			return recognizer
+
+		if self.model_type != "sense_voice":
+			raise RuntimeError(f"Unsupported Sherpa model_type={self.model_type}; only sense_voice is wired in backend")
+		if not self.model_path.exists():
+			raise RuntimeError(
+				"Sherpa model not found. Set MEDIA_AI_SHERPA_MODEL_PATH or place the SenseVoice model under "
+				f"{self.model_path}"
+			)
+		if not self.tokens_path.exists():
+			raise RuntimeError(
+				"Sherpa tokens.txt not found. Set MEDIA_AI_SHERPA_TOKENS_PATH or place tokens under "
+				f"{self.tokens_path}"
+			)
+
+		import onnxruntime
+		import sherpa_onnx
+
+		provider = self.provider
+		if provider == "cuda" and "CUDAExecutionProvider" not in onnxruntime.get_available_providers():
+			logger.warning("Sherpa CUDA provider unavailable, falling back to CPU")
+			provider = "cpu"
+
+		logger.info(
+			"Loading sherpa-onnx ASR model_type=%s model=%s provider=%s",
+			self.model_type,
+			self.model_path,
+			provider,
+		)
+		recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
+			model=str(self.model_path),
+			tokens=str(self.tokens_path),
+			num_threads=self.num_threads,
+			use_itn=self.use_itn,
+			provider=provider,
+		)
+		_SHERPA_RECOGNIZERS[cache_key] = recognizer
+		return recognizer
+
+	def _transcribe_sync(self, audio_samples: list[float]) -> str:
+		recognizer = cast(Any, self._get_recognizer())
+		audio = np.asarray(audio_samples, dtype=np.float32)
+		stream = recognizer.create_stream()
+		stream.accept_waveform(DEFAULT_SAMPLE_RATE, audio)
+		recognizer.decode_streams([stream])
+		return stream.result.text.strip()
+
+	async def audio_samples_to_text(self, audio_samples: list[float]) -> str:
+		if not audio_samples:
+			return ""
+		try:
+			return await asyncio.to_thread(self._transcribe_sync, audio_samples)
+		except Exception:
+			logger.exception("sherpa-onnx transcription failed")
+			return ""
+
+
 class MockTTSService:
 	"""Return a synthetic WAV payload so frontend playback can be exercised locally."""
 
@@ -171,14 +277,18 @@ class EdgeTTSService:
 		audio_chunks: list[bytes] = []
 		async for chunk in communicate.stream():
 			if chunk.get("type") == "audio":
-				audio_chunks.append(chunk["data"])
+				data = chunk.get("data")
+				if isinstance(data, bytes):
+					audio_chunks.append(data)
 		if not audio_chunks:
 			return synthetic_wav_bytes(text=text, expression=expression)
 		return b"".join(audio_chunks)
 
 
 def get_asr_service() -> ASRService:
-	provider = os.getenv("MEDIA_AI_ASR_PROVIDER", "faster-whisper").lower()
+	provider = os.getenv("MEDIA_AI_ASR_PROVIDER", "sherpa-onnx").lower()
+	if provider in {"sherpa-onnx", "sherpa_onnx", "sherpa_onnx_asr"}:
+		return SherpaOnnxASRService()
 	if provider in {"faster-whisper", "whisper", "local"}:
 		return FasterWhisperASRService()
 	return MockASRService()

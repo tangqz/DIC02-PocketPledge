@@ -89,9 +89,12 @@ class MockDifyClient:
 				reply = "[encouraging]计划已经更新好了，按这个来吧！"
 			else:
 				reply = "[neutral]好的，我已经处理完了。"
-		elif any(keyword in user_text for keyword in ("开始", "暂停", "休息", "继续", "恢复", "结束", "停止", "计划", "安排", "看看", "帮我看")):
+		elif any(keyword in user_text for keyword in ("看看", "看下", "帮我看", "分析一下")):
+			# Phase 1: visual-context request → short transition + <<SYS>>
+			reply = "[neutral]让我看看。<<SYS>>"
+		elif any(keyword in user_text for keyword in ("开始", "暂停", "休息", "继续", "恢复", "结束", "停止", "计划", "安排")):
 			# Phase 1: action detected → short transition + <<SYS>>
-			reply = "[encouraging]好的稍等！\n<<SYS>>"
+			reply = "[encouraging]好的稍等！<<SYS>>"
 		else:
 			# Simple chat — no system agent needed
 			reply = "[encouraging]我在，继续专注当前任务。"
@@ -263,6 +266,7 @@ class DifyClient:
 		self.vision_api_key = os.getenv("DIFY_VISION_API_KEY", self.chat_api_key)
 		self.system_agent_api_key = os.getenv("DIFY_SYSTEM_AGENT_API_KEY", self.chat_api_key)
 		self.timeout = float(os.getenv("MEDIA_AI_HTTP_TIMEOUT", "20"))
+		self.system_agent_timeout = float(os.getenv("DIFY_SYSTEM_AGENT_TIMEOUT", "60"))
 		self.retry_attempts = max(1, int(os.getenv("DIFY_HTTP_RETRY_ATTEMPTS", "2")))
 		self.retry_backoff_seconds = float(os.getenv("DIFY_HTTP_RETRY_BACKOFF_SECONDS", "0.8"))
 
@@ -484,7 +488,8 @@ class DifyClient:
 			"Content-Type": "application/json",
 		}
 
-		async with httpx.AsyncClient(timeout=self.timeout) as client:
+		logger.info("calling Dify system workflow url=%s%s session_id=%s", self.base_url, self.system_agent_endpoint, session_id)
+		async with httpx.AsyncClient(timeout=self.system_agent_timeout) as client:
 			last_error: Exception | None = None
 			for attempt in range(1, self.retry_attempts + 1):
 				try:
@@ -494,6 +499,7 @@ class DifyClient:
 						headers=headers,
 					)
 					response.raise_for_status()
+					logger.info("Dify system workflow response received, session_id=%s status=%s", session_id, response.status_code)
 					return _pick_outputs_payload(response.json())
 				except Exception as exc:
 					last_error = exc

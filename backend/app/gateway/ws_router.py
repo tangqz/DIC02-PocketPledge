@@ -11,9 +11,14 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from app.auth.security import decode_access_token
 from app.business.models import SessionLocal
 from app.business.crud import (
+    PENALTY_PER_DISTRACTION,
+    create_session_summary as db_create_session_summary,
     execute_penalty as db_execute_penalty,
+    get_active_plan as db_get_active_plan,
     get_user_status as db_get_user_status,
+    record_pause_request as db_record_pause_request,
     start_focus_session as db_start_focus_session,
+    upsert_study_plan as db_upsert_study_plan,
 )
 from app.gateway.session import SessionState
 from app.media_ai import evaluate_vision, process_text_chat, transcribe_audio
@@ -97,7 +102,7 @@ MODEL_INFO = {
 
 DEFAULT_TOTAL_SECONDS = 1500
 DISTRACTION_THRESHOLD = 3
-PENALTY_AMOUNT = 5
+PENALTY_AMOUNT = PENALTY_PER_DISTRACTION
 BOT_NAME = "Study Buddy"
 DEFAULT_BALANCE = 100
 SYS_MARKER = "<<SYS>>"
@@ -105,6 +110,167 @@ SYS_MARKER = "<<SYS>>"
 watchdog_tasks: dict[str, asyncio.Task] = {}
 audio_buffers: dict[str, list[float]] = {}
 system_agent = SystemAgentService()
+
+
+def _duration_to_minutes(duration_seconds: int | None) -> int | None:
+    if duration_seconds is None:
+        return None
+    return max(1, duration_seconds // 60)
+
+
+def _build_fallback_system_events(
+    directive: Any,
+    session: SessionState,
+    extra: dict[str, Any] | None = None,
+) -> list[str]:
+    if directive.system_events:
+        return [str(event) for event in directive.system_events if str(event).strip()]
+
+    details = extra or {}
+    if directive.action == "start":
+        minutes = details.get("minutes") or _duration_to_minutes(directive.duration_seconds)
+        cost = details.get("cost")
+        if cost is not None:
+            return [f"[SYSTEM_RESULT: SESSION_STARTED, MINUTES: {minutes}, COST: {cost}]"]
+        return [f"[SYSTEM_RESULT: SESSION_STARTED, MINUTES: {minutes}]"]
+    if directive.action == "pause":
+        if directive.approved:
+            minutes = details.get("minutes") or _duration_to_minutes(directive.pause_seconds)
+            return [f"[SYSTEM_RESULT: PAUSE_APPROVED, MINUTES: {minutes}]"]
+        reason = details.get("reason") or "此次暂停审核未通过"
+        return [f"[SYSTEM_RESULT: PAUSE_REJECTED, REASON: {reason}]"]
+    if directive.action == "resume":
+        return ["[SYSTEM_RESULT: RESUME_APPROVED]"]
+    if directive.action == "complete":
+        return ["[SYSTEM_RESULT: SESSION_COMPLETED]"]
+    if directive.action == "plan" and session.current_plan_data:
+        total_minutes = session.current_plan_data.get("totalMinutes")
+        title = session.current_plan or "学习计划"
+        return [f"[SYSTEM_RESULT: PLAN_UPDATED, TITLE: {title}, TOTAL_MINUTES: {total_minutes}]"]
+    return []
+
+
+def _first_task_title(plan: dict[str, Any] | None) -> str | None:
+    if not plan:
+        return None
+    tasks = plan.get("tasks") or []
+    if not tasks:
+        return None
+    return str(tasks[0].get("title") or "").strip() or None
+
+
+def _build_completion_summary(session: SessionState) -> tuple[str, dict[str, Any]]:
+    total_seconds = session.total_focus_seconds or 0
+    remaining_seconds = session.focus_time_remaining or 0
+    focused_seconds = max(total_seconds - remaining_seconds, 0)
+    focused_minutes = focused_seconds // 60
+    summary_text = (
+        f"任务：{session.current_plan or '未命名任务'}；"
+        f"本次已专注约 {focused_minutes} 分钟；"
+        f"暂停申请 {session.pause_requests_count} 次；"
+        f"当前余额状态：{'已触发降级' if session.is_bankrupt else '正常'}。"
+    )
+    meta = {
+        "current_task": session.current_plan,
+        "focused_seconds": focused_seconds,
+        "total_focus_seconds": total_seconds,
+        "pause_requests_count": session.pause_requests_count,
+        "is_bankrupt": session.is_bankrupt,
+    }
+    return summary_text, meta
+
+
+async def _persist_active_plan(user_id: str, plan: dict[str, Any]) -> dict[str, Any] | None:
+    try:
+        uid = int(user_id)
+    except ValueError:
+        return None
+    db = SessionLocal()
+    try:
+        return db_upsert_study_plan(db=db, user_id=uid, plan=plan)
+    except Exception:
+        logger.exception("failed to persist study plan, user_id=%s", user_id)
+        return None
+    finally:
+        db.close()
+
+
+async def _hydrate_session_plan(user_id: str, session: SessionState) -> None:
+    if session.current_plan_data is not None:
+        return
+    try:
+        uid = int(user_id)
+    except ValueError:
+        return
+    db = SessionLocal()
+    try:
+        stored_plan = db_get_active_plan(db=db, user_id=uid)
+    except Exception:
+        logger.exception("failed to load active plan, user_id=%s", user_id)
+        return
+    finally:
+        db.close()
+
+    if stored_plan and stored_plan.get("plan"):
+        session.current_plan_data = stored_plan["plan"]
+        session.current_plan = _first_task_title(session.current_plan_data)
+        suggested_duration = session.current_plan_data.get("suggestedDuration")
+        if suggested_duration is not None:
+            session.suggested_focus_seconds = int(suggested_duration)
+
+
+async def _record_pause_request(
+    user_id: str,
+    session: SessionState,
+    requested_text: str,
+    approved: bool,
+    pause_seconds: int | None,
+    decision_reason: str,
+) -> None:
+    try:
+        uid = int(user_id)
+    except ValueError:
+        return
+    db = SessionLocal()
+    try:
+        db_record_pause_request(
+            db=db,
+            user_id=uid,
+            requested_text=requested_text,
+            approved=approved,
+            pause_seconds=pause_seconds,
+            decision_reason=decision_reason,
+            session_ref=session.session_ref,
+            meta={
+                "supervision_state": session.supervision_state,
+                "pause_requests_count": session.pause_requests_count,
+            },
+        )
+    except Exception:
+        logger.exception("failed to record pause request, user_id=%s", user_id)
+    finally:
+        db.close()
+
+
+async def _persist_session_summary(user_id: str, session: SessionState) -> None:
+    try:
+        uid = int(user_id)
+    except ValueError:
+        return
+    summary_text, meta = _build_completion_summary(session)
+    db = SessionLocal()
+    try:
+        db_create_session_summary(
+            db=db,
+            user_id=uid,
+            summary_text=summary_text,
+            session_ref=session.session_ref,
+            meta=meta,
+        )
+    except Exception:
+        logger.exception("failed to persist session summary, user_id=%s", user_id)
+    finally:
+        db.close()
 
 
 def _split_sys_marker_buffer(buffer: str) -> tuple[str, str, bool]:
@@ -204,6 +370,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         else session.total_focus_seconds
     )
     await apply_balance_gate(user_id, session)
+    await _hydrate_session_plan(user_id, session)
 
     task = watchdog_tasks.get(user_id)
     if task is None or task.done():
@@ -212,6 +379,8 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     await send_model_info(user_id)
     await send_supervision_state(user_id, session)
     await send_timer_sync(user_id, session)
+    if session.current_plan_data is not None:
+        await send_plan_update(user_id, session.current_plan_data)
     if session.is_bankrupt:
         await send_control(user_id, "downgrade")
 
@@ -252,6 +421,7 @@ async def dispatch_message(user_id: str, session: SessionState, msg: dict[str, A
 
     if msg_type == "interrupt-signal":
         logger.info("interrupt-signal received, user_id=%s text=%s", user_id, msg.get("text", ""))
+        audio_buffers.pop(user_id, None)
         return
 
     if msg_type == "frontend-playback-complete":
@@ -351,17 +521,28 @@ async def handle_text(user_id: str, session: SessionState, msg: dict[str, Any]) 
         return
 
     # <<SYS>> detected — invoke system agent for structured directive
+    await send_tool_call_status(user_id, "system.agent", "calling", "processing system request")
     directive = await system_agent.build_directive(user_id, text, session)
+    if directive.error_message:
+        await send_tool_call_status(user_id, "system.agent", "error", directive.error_message)
+        fallback_text = "我这边替你提交了，但系统处理超时了。你先别急，我再试一次。"
+        await send_agent_text_chunk(user_id, fallback_text)
+        await send_agent_text_end(user_id)
+        session.append_chat("assistant", fallback_text)
+        return
+    await send_tool_call_status(user_id, "system.agent", "success", f"action={directive.action}")
     system_events = list(directive.system_events)
 
     # Handle visual capture request
     if directive.requires_capture and not images and not is_tool_result:
+        request_id = uuid.uuid4().hex
+        session.set_pending_capture(request_id, text, directive.capture_sources)
         await send_tool_call_status(user_id, "visual.capture", "calling", "capturing visual context")
         await send_control(
             user_id,
             "request-visual-context",
             {
-                "requestId": uuid.uuid4().hex,
+                "requestId": request_id,
                 "prompt": text,
                 "sources": directive.capture_sources,
             },
@@ -374,37 +555,71 @@ async def handle_text(user_id: str, session: SessionState, msg: dict[str, Any]) 
 
     elif directive.action == "plan" and directive.plan is not None:
         await send_tool_call_status(user_id, "plan.update", "calling", "updating plan")
-        tasks = directive.plan.get("tasks") or []
-        if tasks:
-            session.current_plan = str(tasks[0].get("title", session.current_plan or "完成当前学习任务"))
-        session.suggested_focus_seconds = int(directive.plan.get("suggestedDuration") or DEFAULT_TOTAL_SECONDS)
-        await send_plan_update(user_id, directive.plan)
+        persisted_plan = await _persist_active_plan(user_id, directive.plan)
+        session.current_plan_data = (persisted_plan or {}).get("plan") or directive.plan
+        plan_title = _first_task_title(session.current_plan_data)
+        if plan_title:
+            session.current_plan = plan_title
+        session.suggested_focus_seconds = int(
+            (session.current_plan_data or {}).get("suggestedDuration") or DEFAULT_TOTAL_SECONDS
+        )
+        await send_plan_update(user_id, session.current_plan_data)
         await send_tool_call_status(user_id, "plan.update", "success", "plan updated")
 
     elif directive.action == "start" and session.supervision_state == "setup":
         duration_seconds = directive.duration_seconds or session.suggested_focus_seconds or DEFAULT_TOTAL_SECONDS
-        await handle_start(user_id, session, duration_seconds=duration_seconds)
+        start_result = await handle_start(user_id, session, duration_seconds=duration_seconds)
+        if start_result:
+            system_events = _build_fallback_system_events(
+                directive,
+                session,
+                {
+                    "minutes": max(duration_seconds // 60, 1),
+                    "cost": start_result.get("upfront_cost"),
+                },
+            )
 
     elif directive.action == "pause" and session.supervision_state == "active":
         session.pause_requests_count += 1
         if directive.approved:
             await handle_pause(user_id, session, pause_seconds=directive.pause_seconds or 300)
+            await _record_pause_request(
+                user_id,
+                session,
+                requested_text=text,
+                approved=True,
+                pause_seconds=directive.pause_seconds or 300,
+                decision_reason="approved by system agent",
+            )
         else:
             await send_tool_call_status(user_id, "supervision.pause", "error", "pause rejected")
+            await _record_pause_request(
+                user_id,
+                session,
+                requested_text=text,
+                approved=False,
+                pause_seconds=None,
+                decision_reason="pause rejected",
+            )
+            system_events = _build_fallback_system_events(
+                directive,
+                session,
+                {"reason": "此次暂停审核未通过"},
+            )
 
     elif directive.action == "resume" and session.supervision_state == "paused":
         await handle_resume(user_id, session)
+        system_events = _build_fallback_system_events(directive, session)
 
     if session.is_bankrupt and directive.action != "complete":
         await send_control(user_id, "downgrade")
         system_events.append("[SYSTEM_EVENT: DEGRADE_MODE_ACTIVE]")
 
+    if not system_events:
+        system_events = _build_fallback_system_events(directive, session)
+
     # Phase 2: call white brain again with system results
-    result_event = f"[SYSTEM_RESULT: action={directive.action}, approved={directive.approved}]"
-    if system_events:
-        result_context = "\n".join([result_event, *system_events])
-    else:
-        result_context = result_event
+    result_context = "\n".join(system_events) if system_events else f"[SYSTEM_RESULT: action={directive.action}, approved={directive.approved}]"
     enriched_text = f"{text}\n{result_context}"
 
     phase2_text = await stream_agent_reply(
@@ -425,7 +640,13 @@ async def handle_capture_context_result(
     """Resume one chat turn after frontend capture tool returns images."""
     images = msg.get("images", [])
     error = str(msg.get("error", "")).strip()
-    prompt = str(msg.get("prompt", "")).strip()
+    request_id = str(msg.get("requestId", "")).strip()
+    if not request_id or request_id != session.pending_capture_request_id:
+        await send_tool_call_status(user_id, "visual.capture", "error", "unknown or expired requestId")
+        return
+
+    prompt = str(msg.get("prompt", "")).strip() or (session.pending_capture_prompt or "")
+    session.clear_pending_capture()
     if error or not images:
         await send_tool_call_status(user_id, "visual.capture", "error", error or "no images captured")
         await stream_agent_reply(
@@ -556,9 +777,12 @@ async def handle_start(user_id: str, session: SessionState, duration_seconds: in
             change=-int(result["upfront_cost"]),
             reason="开始专注，已预扣服务费",
         )
+        session.session_ref = str(result.get("session_ref") or "") or None
         await send_tool_call_status(user_id, "supervision.start", "success", "supervision started")
+        return result
     except ValueError as exc:
         await send_tool_call_status(user_id, "supervision.start", "error", str(exc))
+        return None
 
 
 async def handle_pause(user_id: str, session: SessionState, pause_seconds: int) -> None:
@@ -587,10 +811,29 @@ async def handle_complete(user_id: str, session: SessionState) -> None:
     """Complete supervision when timer reaches zero."""
     await send_tool_call_status(user_id, "supervision.complete", "calling", "completing session")
     try:
+        summary_snapshot = SessionState(
+            supervision_state=session.supervision_state,
+            start_time=session.start_time,
+            focus_time_remaining=session.focus_time_remaining,
+            total_focus_seconds=session.total_focus_seconds,
+            distraction_streak=session.distraction_streak,
+            is_bankrupt=session.is_bankrupt,
+            current_plan=session.current_plan,
+            current_plan_data=session.current_plan_data,
+            session_ref=session.session_ref,
+            pause_remaining_seconds=session.pause_remaining_seconds,
+            suggested_focus_seconds=session.suggested_focus_seconds,
+            pause_requests_count=session.pause_requests_count,
+            pending_capture_request_id=session.pending_capture_request_id,
+            pending_capture_prompt=session.pending_capture_prompt,
+            pending_capture_sources=list(session.pending_capture_sources),
+            chat_history=list(session.chat_history),
+        )
         session.complete()
         await send_supervision_state(user_id, session, reason="time up")
         await send_timer_sync(user_id, session)
         await send_tool_call_status(user_id, "supervision.complete", "success", "session completed")
+        await _persist_session_summary(user_id, summary_snapshot)
     except ValueError as exc:
         await send_tool_call_status(user_id, "supervision.complete", "error", str(exc))
 

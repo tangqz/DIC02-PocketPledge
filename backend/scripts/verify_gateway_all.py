@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
+
+os.environ["MEDIA_AI_USE_REAL_DIFY"] = "0"
+os.environ["MEDIA_AI_ASR_PROVIDER"] = "mock"
+os.environ["MEDIA_AI_TTS_PROVIDER"] = "mock"
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -281,8 +286,15 @@ async def check_visual_capture_tool_flow() -> None:
     session = await manager.connect(user_id, ws)
 
     await dispatch_message(user_id, session, {"type": "text-input", "text": "你帮我看看桌面和摄像头现在是什么情况", "images": []})
+    request_control = next(
+        (
+            m for m in ws.sent
+            if m.get("type") == "control" and m.get("command") == "request-visual-context"
+        ),
+        None,
+    )
     assert_true(
-        any(m.get("type") == "control" and m.get("command") == "request-visual-context" for m in ws.sent),
+        request_control is not None,
         "Visual inspection request should emit request-visual-context control message.",
     )
     assert_true(
@@ -295,7 +307,7 @@ async def check_visual_capture_tool_flow() -> None:
         session,
         {
             "type": "capture-context-result",
-            "requestId": "r1",
+            "requestId": str((request_control or {}).get("payload", {}).get("requestId", "")),
             "prompt": "你帮我看看桌面和摄像头现在是什么情况",
             "images": [
                 {"source": "screen", "data": "abcd" * 100, "mime_type": "image/jpeg"},

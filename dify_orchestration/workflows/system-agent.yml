@@ -6,11 +6,11 @@ app:
   name: 系统编排-Agent
   use_icon_as_answer_icon: false
 dependencies:
-- current_identifier: null
-  type: marketplace
-  value:
-    marketplace_plugin_unique_identifier: langgenius/tongyi:0.1.31@638e473191f93192f670875b06edf0bcb89a3433aa736be89ed1749073b8a168
-    version: null
+  - current_identifier: null
+    type: marketplace
+    value:
+      marketplace_plugin_unique_identifier: langgenius/tongyi:0.1.31@638e473191f93192f670875b06edf0bcb89a3433aa736be89ed1749073b8a168
+      version: null
 kind: app
 version: 0.5.0
 workflow:
@@ -19,17 +19,17 @@ workflow:
   features:
     file_upload:
       allowed_file_extensions:
-      - .JPG
-      - .JPEG
-      - .PNG
-      - .GIF
-      - .WEBP
-      - .SVG
+        - .JPG
+        - .JPEG
+        - .PNG
+        - .GIF
+        - .WEBP
+        - .SVG
       allowed_file_types:
-      - image
+        - image
       allowed_file_upload_methods:
-      - local_file
-      - remote_url
+        - local_file
+        - remote_url
       enabled: false
       fileUploadConfig:
         audio_file_size_limit: 50
@@ -44,8 +44,8 @@ workflow:
         enabled: false
         number_limits: 3
         transfer_methods:
-        - local_file
-        - remote_url
+          - local_file
+          - remote_url
       number_limits: 3
     opening_statement: ''
     retriever_resource:
@@ -63,314 +63,354 @@ workflow:
       voice: ''
   graph:
     edges:
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: llm
-        targetType: end
-      id: llm-end
-      source: llm
-      sourceHandle: source
-      target: end
-      targetHandle: target
-      type: custom
-    - data:
-        isInLoop: false
-        sourceType: start
-        targetType: llm
-      id: start-source-llm-target
-      source: start
-      sourceHandle: source
-      target: llm
-      targetHandle: target
-      type: custom
-      zIndex: 0
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: start
+          targetType: knowledge-retrieval
+        id: start-knowledge
+        source: start
+        sourceHandle: source
+        target: knowledge
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: knowledge-retrieval
+          targetType: llm
+        id: knowledge-llm
+        source: knowledge
+        sourceHandle: source
+        target: llm
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: llm
+          targetType: end
+        id: llm-end
+        source: llm
+        sourceHandle: source
+        target: end
+        targetHandle: target
+        type: custom
     nodes:
-    - data:
+      - data:
+          selected: false
+          title: 开始
+          type: start
+          variables:
+            - label: user_text
+              max_length: 4000
+              options: []
+              required: true
+              type: paragraph
+              variable: user_text
+            - label: chat_history
+              max_length: 10000
+              options: []
+              required: false
+              type: paragraph
+              variable: chat_history
+            - label: supervision_state
+              max_length: 32
+              options: []
+              required: true
+              type: text-input
+              variable: supervision_state
+            - label: current_task
+              max_length: 500
+              options: []
+              required: false
+              type: text-input
+              variable: current_task
+            - label: total_focus_seconds
+              required: false
+              type: number
+              variable: total_focus_seconds
+            - label: focus_time_remaining
+              required: false
+              type: number
+              variable: focus_time_remaining
+            - label: suggested_focus_seconds
+              required: false
+              type: number
+              variable: suggested_focus_seconds
+            - label: pause_remaining_seconds
+              required: false
+              type: number
+              variable: pause_remaining_seconds
+            - label: pause_requests_count
+              required: false
+              type: number
+              variable: pause_requests_count
+            - label: is_bankrupt
+              max_length: 10
+              options: []
+              required: false
+              type: text-input
+              variable: is_bankrupt
+        height: 343
+        id: start
+        position:
+          x: 80
+          y: 250
+        positionAbsolute:
+          x: 80
+          y: 250
         selected: false
-        title: 开始
-        type: start
-        variables:
-        - label: user_text
-          max_length: 4000
-          options: []
-          required: true
-          type: text-input
-          variable: user_text
-        - label: chat_history
-          max_length: 10000
-          options: []
-          required: false
-          type: paragraph
-          variable: chat_history
-        - label: supervision_state
-          max_length: 32
-          options: []
-          required: true
-          type: text-input
-          variable: supervision_state
-        - label: current_task
-          max_length: 500
-          options: []
-          required: false
-          type: text-input
-          variable: current_task
-        - label: total_focus_seconds
-          required: false
-          type: number
-          variable: total_focus_seconds
-        - label: focus_time_remaining
-          required: false
-          type: number
-          variable: focus_time_remaining
-        - label: suggested_focus_seconds
-          required: false
-          type: number
-          variable: suggested_focus_seconds
-        - label: pause_remaining_seconds
-          required: false
-          type: number
-          variable: pause_remaining_seconds
-        - label: pause_requests_count
-          required: false
-          type: number
-          variable: pause_requests_count
-        - label: is_bankrupt
-          max_length: 10
-          options: []
-          required: false
-          type: text-input
-          variable: is_bankrupt
-      height: 343
-      id: start
-      position:
-        x: 80
-        y: 250
-      positionAbsolute:
-        x: 80
-        y: 250
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 242
-    - data:
-        context:
-          enabled: false
-          variable_selector: []
-        model:
-          completion_params:
-            enable_search: true
-            enable_thinking: true
-            temperature: 0.1
-          mode: chat
-          name: qwen3.5-plus
-          provider: langgenius/tongyi/tongyi
-        prompt_template:
-        - id: system-agent-system
-          role: system
-          text: "你是 Study Buddy 的系统 Agent。你的职责是把用户的请求翻译成结构化编排决策，而不是陪聊。\n\n═══ 输入上下文\
-            \ ═══\n- user_text: {{#start.user_text#}}\n- chat_history（近期对话记录）: {{#start.chat_history#}}\n\
-            - supervision_state: {{#start.supervision_state#}}（setup / active / paused\
-            \ / completed）\n- current_task: {{#start.current_task#}}\n- total_focus_seconds:\
-            \ {{#start.total_focus_seconds#}}\n- focus_time_remaining: {{#start.focus_time_remaining#}}\n\
-            - suggested_focus_seconds: {{#start.suggested_focus_seconds#}}\n- pause_remaining_seconds:\
-            \ {{#start.pause_remaining_seconds#}}\n- pause_requests_count: {{#start.pause_requests_count#}}\n\
-            - is_bankrupt: {{#start.is_bankrupt#}}\n\n知识检索结果中可能包含用户画像、历史行为数据等参考信息。请结合这些信息做出更合理的判定。\n\
-            \n═══ 输出规则 ═══\n你必须且只能输出一个 JSON 对象，不要输出任何解释文字。\n\nJSON 结构：\n{\n  \"action\"\
-            : \"none\" | \"plan\" | \"start\" | \"pause\" | \"resume\" | \"complete\"\
-            ,\n  \"approved\": true | false,\n  \"duration_seconds\": number | null,\n\
-            \  \"pause_seconds\": number | null,\n  \"requires_capture\": true | false,\n\
-            \  \"capture_sources\": [\"screen\"] 和/或 [\"camera\"] 的子集,\n  \"system_events\"\
-            : [string, ...],\n  \"plan\": null 或 {\n    \"tasks\": [{\"id\": \"t1\"\
-            , \"title\": string, \"completed\": false, \"estimatedMinutes\": number}],\n\
-            \    \"totalMinutes\": number,\n    \"suggestedDuration\": number\n  }\n\
-            }\n\n═══ 判定规则 ═══\n\n1. 识别意图：结合 user_text 和 chat_history 判断用户真正想做什么。\n\
-            \   chat_history 提供了对话上下文，帮你理解\"这件事\"具体指什么。\n\n2. 视觉请求：当用户说\"看看桌面/屏幕/摄像头/画面/帮我看看\"\
-            时：\n   - requires_capture = true\n   - 只看桌面 → [\"screen\"]；只看摄像头 → [\"\
-            camera\"]；不确定 → [\"screen\", \"camera\"]\n   - action = \"none\"（纯视觉请求不附带其他操作）\n\
-            \n3. 开始监督：当用户明确要开始学习/进入监督时：\n   - action = \"start\"\n   - 如文本提到时长，填 duration_seconds（秒）\n\
-            \   - 否则优先用 suggested_focus_seconds，没有则 1500\n\n4. 制定计划：当用户讨论计划或安排任务时：\n\
-            \   - action = \"plan\"\n   - 生成结构化 plan，标题简洁\n   - suggestedDuration\
-            \ 单位为秒\n\n5. 暂停请求：当用户要暂停时：\n   - action = \"pause\"\n   - 合理需求（厕所、喝水、身体不适）→\
-            \ approved = true，pause_seconds = 合理时长（180~600秒）\n   - 不合理（刚开始不到5分钟且已多次暂停）→\
-            \ approved = false\n   - 参考 pause_requests_count 和 focus_time_remaining\
-            \ 判断\n\n6. 恢复：用户说继续/恢复 → action = \"resume\"\n\n7. 结束：用户说结束/不学了 → action\
-            \ = \"complete\"\n\n8. 普通闲聊：无工具需求 → action = \"none\"，所有可选字段设为 null/空\n\
-            \n═══ system_events 格式 ═══\n给白脑的事件通知，格式如：\n- \"[SYSTEM_RESULT: PAUSE_APPROVED,\
-            \ MINUTES: 5]\"\n- \"[SYSTEM_RESULT: PAUSE_REJECTED, REASON: 才开始5分钟就要休息]\"\
-            \n- \"[SYSTEM_RESULT: SESSION_STARTED, MINUTES: 25, COST: 375]\"\n- \"\
-            [SYSTEM_RESULT: PLAN_UPDATED, TITLE: 数学, TOTAL_MINUTES: 30]\"\n- \"[SYSTEM_RESULT:\
-            \ SESSION_COMPLETED]\"\n- \"[SYSTEM_RESULT: VISUAL_CONTEXT_REQUESTED,\
-            \ SOURCES: screen,camera]\"\n- \"[SYSTEM_RESULT: RESUME_APPROVED]\"\n\n\
-            ═══ 额外约束 ═══\n- 不要为同一轮输出互相冲突的 action。\n- requires_capture 为 true 时，action\
-            \ 应为 \"none\"。\n- action = \"none\" 且 requires_capture = false 时，duration_seconds\
-            \ 和 pause_seconds 设为 null。\n- capture_sources 只能包含 \"screen\" 和 \"camera\"\
-            。\n"
-        reasoning_format: separated
-        selected: true
-        structured_output:
-          schema:
-            properties:
-              action:
-                enum:
-                - none
-                - plan
-                - start
-                - pause
-                - resume
-                - complete
-                type: string
-              approved:
-                type: boolean
-              capture_sources:
-                items:
-                  enum:
-                  - screen
-                  - camera
-                  type: string
-                type: array
-              duration_seconds:
-                nullable: true
-                type: number
-              pause_seconds:
-                nullable: true
-                type: number
-              plan:
-                nullable: true
-                properties:
-                  suggestedDuration:
-                    type: number
-                  tasks:
-                    items:
-                      properties:
-                        completed:
-                          type: boolean
-                        estimatedMinutes:
-                          type: number
-                        id:
-                          type: string
-                        title:
-                          type: string
-                      required:
-                      - id
-                      - title
-                      - completed
-                      - estimatedMinutes
-                      type: object
-                    type: array
-                  totalMinutes:
-                    type: number
-                required:
-                - tasks
-                - totalMinutes
-                - suggestedDuration
-                type: object
-              requires_capture:
-                type: boolean
-              system_events:
-                items:
-                  type: string
-                type: array
-            required:
-            - action
-            - approved
-            - duration_seconds
-            - pause_seconds
-            - requires_capture
-            - capture_sources
-            - system_events
-            - plan
-            type: object
-        structured_output_enabled: true
-        title: LLM
-        type: llm
-        vision:
-          configs:
-            detail: high
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 242
+      - data:
+          dataset_ids: []
+          multiple_retrieval_config:
+            reranking_enable: false
+            top_k: 8
+          query_attachment_selector: []
+          query_variable_selector:
+            - start
+            - user_text
+          retrieval_mode: multiple
+          selected: false
+          title: 知识检索
+          type: knowledge-retrieval
+        height: 52
+        id: knowledge
+        position:
+          x: 360
+          y: 250
+        positionAbsolute:
+          x: 360
+          y: 250
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 242
+      - data:
+          context:
+            enabled: true
             variable_selector:
-            - sys
-            - files
-          enabled: true
-      height: 88
-      id: llm
-      position:
-        x: 550
-        y: 250
-      positionAbsolute:
-        x: 550
-        y: 250
-      selected: true
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 242
-    - data:
-        outputs:
-        - value_selector:
-          - llm
-          - structured_output
-          - action
-          value_type: string
-          variable: action
-        - value_selector:
-          - llm
-          - structured_output
-          - approved
-          value_type: boolean
-          variable: approved
-        - value_selector:
-          - llm
-          - structured_output
-          - duration_seconds
-          value_type: number
-          variable: duration_seconds
-        - value_selector:
-          - llm
-          - structured_output
-          - pause_seconds
-          value_type: number
-          variable: pause_seconds
-        - value_selector:
-          - llm
-          - structured_output
-          - requires_capture
-          value_type: boolean
-          variable: requires_capture
-        - value_selector:
-          - llm
-          - structured_output
-          - capture_sources
-          value_type: array[string]
-          variable: capture_sources
-        - value_selector:
-          - llm
-          - structured_output
-          - system_events
-          value_type: array[string]
-          variable: system_events
-        - value_selector:
-          - llm
-          - structured_output
-          - plan
-          value_type: object
-          variable: plan
+              - knowledge
+              - result
+          model:
+            completion_params:
+              enable_search: false
+              enable_thinking: false
+              temperature: 0.05
+            mode: chat
+            name: qwen3.5-plus
+            provider: langgenius/tongyi/tongyi
+          prompt_template:
+            - id: system-agent-system
+              role: system
+              text: |
+                你是 Study Buddy 的系统 Agent。
+                你的职责不是陪聊，而是把用户当前请求翻译成稳定、保守、可执行的结构化决策。
+
+                你会收到：
+                - user_text
+                - chat_history
+                - supervision_state
+                - current_task
+                - total_focus_seconds
+                - focus_time_remaining
+                - suggested_focus_seconds
+                - pause_remaining_seconds
+                - pause_requests_count
+                - is_bankrupt
+                - knowledge retrieval 的结果
+
+                输出要求：
+                1. 你必须且只能输出一个 JSON 对象。
+                2. 不要输出解释文字，不要输出 markdown。
+                3. action 只能是 none / plan / start / pause / resume / complete。
+                4. 如果 requires_capture=true，则 action 必须是 none。
+                5. 如果 action=none 且 requires_capture=false，则 duration_seconds 和 pause_seconds 必须为 null。
+                6. capture_sources 只能包含 screen 和 camera。
+                7. plan 为空时必须返回 null，不要返回空对象。
+
+                判定规则：
+                - 开始监督：用户明确开始学习/进入监督 -> start
+                - 暂停审批：结合当前状态、暂停次数、检索出的画像/历史进行保守判定
+                - 恢复：用户说继续/恢复/回来了 -> resume
+                - 结束：用户说结束、今天不学了 -> complete
+                - 计划：用户要求制定/修改计划 -> plan
+                - 视觉请求：用户要求看桌面/看摄像头/看画面 -> requires_capture=true 且 action=none
+                - 闲聊：none
+
+                system_events 字符串要稳定、简短、可供白脑翻译，例如：
+                - [SYSTEM_RESULT: PAUSE_APPROVED, MINUTES: 5]
+                - [SYSTEM_RESULT: PAUSE_REJECTED, REASON: 刚开始没多久又想暂停]
+                - [SYSTEM_RESULT: SESSION_STARTED, MINUTES: 25]
+                - [SYSTEM_RESULT: PLAN_UPDATED, TITLE: 数学, TOTAL_MINUTES: 30]
+                - [SYSTEM_RESULT: SESSION_COMPLETED]
+                - [SYSTEM_RESULT: VISUAL_CONTEXT_REQUESTED, SOURCES: screen,camera]
+                - [SYSTEM_RESULT: RESUME_APPROVED]
+          reasoning_format: separated
+          selected: false
+          structured_output:
+            schema:
+              type: object
+              required:
+                - action
+                - approved
+                - duration_seconds
+                - pause_seconds
+                - requires_capture
+                - capture_sources
+                - system_events
+                - plan
+              properties:
+                action:
+                  type: string
+                  enum:
+                    - none
+                    - plan
+                    - start
+                    - pause
+                    - resume
+                    - complete
+                approved:
+                  type: boolean
+                duration_seconds:
+                  type: number
+                  nullable: true
+                pause_seconds:
+                  type: number
+                  nullable: true
+                requires_capture:
+                  type: boolean
+                capture_sources:
+                  type: array
+                  items:
+                    type: string
+                    enum:
+                      - screen
+                      - camera
+                system_events:
+                  type: array
+                  items:
+                    type: string
+                plan:
+                  type: object
+                  nullable: true
+                  required:
+                    - tasks
+                    - totalMinutes
+                    - suggestedDuration
+                  properties:
+                    tasks:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - id
+                          - title
+                          - completed
+                          - estimatedMinutes
+                        properties:
+                          id:
+                            type: string
+                          title:
+                            type: string
+                          completed:
+                            type: boolean
+                          estimatedMinutes:
+                            type: number
+                    totalMinutes:
+                      type: number
+                    suggestedDuration:
+                      type: number
+          structured_output_enabled: true
+          title: LLM
+          type: llm
+          vision:
+            enabled: false
+        height: 88
+        id: llm
+        position:
+          x: 650
+          y: 250
+        positionAbsolute:
+          x: 650
+          y: 250
         selected: false
-        title: 输出
-        type: end
-      height: 270
-      id: end
-      position:
-        x: 850
-        y: 250
-      positionAbsolute:
-        x: 850
-        y: 250
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 242
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 242
+      - data:
+          outputs:
+            - value_selector:
+                - llm
+                - structured_output
+                - action
+              value_type: string
+              variable: action
+            - value_selector:
+                - llm
+                - structured_output
+                - approved
+              value_type: boolean
+              variable: approved
+            - value_selector:
+                - llm
+                - structured_output
+                - duration_seconds
+              value_type: number
+              variable: duration_seconds
+            - value_selector:
+                - llm
+                - structured_output
+                - pause_seconds
+              value_type: number
+              variable: pause_seconds
+            - value_selector:
+                - llm
+                - structured_output
+                - requires_capture
+              value_type: boolean
+              variable: requires_capture
+            - value_selector:
+                - llm
+                - structured_output
+                - capture_sources
+              value_type: array[string]
+              variable: capture_sources
+            - value_selector:
+                - llm
+                - structured_output
+                - system_events
+              value_type: array[string]
+              variable: system_events
+            - value_selector:
+                - llm
+                - structured_output
+                - plan
+              value_type: object
+              variable: plan
+          selected: false
+          title: 输出
+          type: end
+        height: 270
+        id: end
+        position:
+          x: 960
+          y: 250
+        positionAbsolute:
+          x: 960
+          y: 250
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 242
     viewport:
       x: -14
       y: -10

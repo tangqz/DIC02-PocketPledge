@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 
 ALLOWED_TRANSITIONS = {
@@ -23,9 +24,14 @@ class SessionState:
     distraction_streak: int = 0
     is_bankrupt: bool = False
     current_plan: str | None = None
+    current_plan_data: dict[str, Any] | None = None
+    session_ref: str | None = None
     pause_remaining_seconds: int | None = None
     suggested_focus_seconds: int | None = None
     pause_requests_count: int = 0
+    pending_capture_request_id: str | None = None
+    pending_capture_prompt: str | None = None
+    pending_capture_sources: list[str] = field(default_factory=list)
     chat_history: list[dict[str, str]] = field(default_factory=list)
 
     MAX_HISTORY_TURNS: int = 30
@@ -100,6 +106,21 @@ class SessionState:
         self.transition("completed")
         self.pause_remaining_seconds = None
         self.pause_requests_count = 0
+
+    def set_pending_capture(
+        self,
+        request_id: str,
+        prompt: str,
+        sources: list[str],
+    ) -> None:
+        self.pending_capture_request_id = request_id
+        self.pending_capture_prompt = prompt
+        self.pending_capture_sources = list(sources)
+
+    def clear_pending_capture(self) -> None:
+        self.pending_capture_request_id = None
+        self.pending_capture_prompt = None
+        self.pending_capture_sources = []
 
     def tick(self) -> bool:
         """Advance one timer tick and return True when countdown reaches zero."""

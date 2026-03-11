@@ -119,6 +119,8 @@ python -m pip install -r requirements.txt
 - pydantic
 - httpx
 - edge-tts
+- sherpa-onnx
+- onnxruntime
 
 ### 3) 启动后端服务
 
@@ -171,11 +173,13 @@ uvicorn app.main:app --host 0.0.0.0 --port 12393 --reload
 | `AUTH_TOKEN_EXPIRE_MINUTES` | JWT 过期时间 | `1440` |
 | `AUTH_INITIAL_BALANCE` | 新用户初始余额 | `3000` |
 | `MEDIA_AI_USE_REAL_DIFY` | 是否启用真实 Dify | `0` |
-| `MEDIA_AI_ASR_PROVIDER` | 本地语音转写提供方 | `faster-whisper` |
-| `MEDIA_AI_ASR_MODEL` | 本地语音转写模型名 | `small` |
-| `MEDIA_AI_ASR_DEVICE` | 本地语音转写设备 | `cpu` |
-| `MEDIA_AI_ASR_COMPUTE_TYPE` | 本地语音转写计算精度 | `int8` |
-| `MEDIA_AI_ASR_LANGUAGE` | 本地语音转写语言 | `zh` |
+| `MEDIA_AI_ASR_PROVIDER` | 本地语音转写提供方 | `sherpa-onnx` |
+| `MEDIA_AI_SHERPA_MODEL_TYPE` | sherpa-onnx 模型类型 | `sense_voice` |
+| `MEDIA_AI_SHERPA_MODEL_PATH` | SenseVoice ONNX 模型路径 | `Open-LLM-VTuber/models/.../model.int8.onnx` |
+| `MEDIA_AI_SHERPA_TOKENS_PATH` | sherpa-onnx tokens.txt 路径 | `Open-LLM-VTuber/models/.../tokens.txt` |
+| `MEDIA_AI_SHERPA_NUM_THREADS` | sherpa-onnx 线程数 | `2` |
+| `MEDIA_AI_SHERPA_PROVIDER` | sherpa-onnx 推理设备 | `cpu` |
+| `MEDIA_AI_SHERPA_USE_ITN` | SenseVoice 是否开启 ITN | `1` |
 | `DIFY_API_BASE` | Dify API 基址 | 空 |
 | `DIFY_CHAT_ENDPOINT` | 聊天接口路径 | `/v1/chat-messages` |
 | `DIFY_FILE_UPLOAD_ENDPOINT` | Dify 文件上传路径 | `/v1/files/upload` |
@@ -184,8 +188,62 @@ uvicorn app.main:app --host 0.0.0.0 --port 12393 --reload
 | `DIFY_CHAT_API_KEY` | 聊天 Dify API Key | 空 |
 | `DIFY_VISION_API_KEY` | 视觉判定 Dify API Key | 默认继承聊天 Key |
 | `DIFY_SYSTEM_AGENT_API_KEY` | 系统代理 Dify API Key | 默认继承聊天 Key |
+| `DIFY_TOOL_BEARER_TOKEN` | Dify 自定义工具固定 Bearer Token | 空 |
 
 如果不配置真实 Dify，后端会回退到本地 Mock 行为，便于联调前端和网关逻辑。
+
+### Sherpa-ONNX ASR
+
+当前后端默认不再走 faster-whisper，而是切到与 Open-LLM-VTuber 同思路的 sherpa-onnx SenseVoice 方案。
+
+请区分两类模型目录：
+
+- ASR 模型：`sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17`
+- TTS 模型：例如 `kokoro-multi-lang-v1_1`
+
+你刚才提到的那份 TTS 模型不是 ASR。当前后端 ASR 只会读取 SenseVoice 目录，不会去读 kokoro 之类的 TTS 目录。
+
+你需要自行准备模型文件。默认建议放到：
+
+- `C:/Users/qizhi/Desktop/coding/Open-LLM-VTuber/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.onnx`
+- `C:/Users/qizhi/Desktop/coding/Open-LLM-VTuber/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/tokens.txt`
+
+我已经核对过这两个文件当前确实存在于上面这个外部项目目录中。后端默认也会优先尝试这个路径；只有找不到时，才会回退尝试仓库内的 `Open-LLM-VTuber` 子目录。
+
+如果你的模型不在这个位置，请通过环境变量覆盖：
+
+- `MEDIA_AI_SHERPA_MODEL_PATH`
+- `MEDIA_AI_SHERPA_TOKENS_PATH`
+
+如果模型文件不存在，后端不会改用 whisper，而是记录错误并让该次语音输入回落为空转写。
+
+## Dify 自定义工具
+
+给 Dify 导入的自定义工具 OpenAPI 文件已经放到：
+
+- [dify_orchestration/tools/study_buddy_custom_tools.openapi.yaml](dify_orchestration/tools/study_buddy_custom_tools.openapi.yaml)
+- [dify_orchestration/tools/README.md](dify_orchestration/tools/README.md)
+
+这份定义遵循 OpenAPI 3.1.1。根据 Swagger/OpenAPI 规范，根文档至少应该明确：
+
+- `openapi`
+- `info`
+- `servers`
+- `paths`
+- `components`
+
+同时，为了让 Dify 正确识别认证与结构化输入输出，这份工具定义里还显式声明了：
+
+- `components.securitySchemes.BearerAuth`
+- 每个操作唯一的 `operationId`
+- `requestBody` 的 `application/json` schema
+- 结构化 `responses`
+
+注意：这份工具定义现在面向 system agent 的内部工具调用，采用固定 Bearer + 显式 `user_id` 传参，不再依赖普通用户 JWT 的 `me` 语义。
+
+Swagger 规范入口文档：
+
+- https://swagger.io/specification/
 
 ### 真实 Dify 联调
 

@@ -22,6 +22,7 @@ class SystemDirective:
     approved: bool = True
     requires_capture: bool = False
     capture_sources: list[str] = field(default_factory=list)
+    error_message: str | None = None
 
 
 class SystemAgentService:
@@ -33,13 +34,18 @@ class SystemAgentService:
     ) -> SystemDirective:
         client = get_dify_client()
         try:
+            logger.info("system agent request started, session_id=%s text=%s", session_id, text)
             outputs = await client.run_system_agent(
                 session_id=session_id,
                 inputs=self._build_inputs(text, session),
             )
-        except Exception:
-            logger.exception("system agent workflow failed")
-            return SystemDirective()
+            logger.info("system agent request succeeded, session_id=%s outputs=%s", session_id, outputs)
+        except Exception as exc:
+            logger.exception("system agent workflow failed, session_id=%s", session_id)
+            return SystemDirective(
+                approved=False,
+                error_message=f"{type(exc).__name__}: {exc}",
+            )
         return self._parse_outputs(outputs)
 
     def _build_inputs(self, text: str, session: SessionState) -> dict[str, Any]:

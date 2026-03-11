@@ -50,6 +50,7 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
   } | null>(null);
   const modelInfo = useAvatarStore((s) => s.modelInfo);
   const pendingAudioMessages = useAvatarStore((s) => s.pendingAudioMessages);
+  const playbackInterruptVersion = useAvatarStore((s) => s.playbackInterruptVersion);
   const shiftAudioMessage = useAvatarStore((s) => s.shiftAudioMessage);
   const degradedMode = useSessionStore((s) => s.degradedMode);
   const config = useMemo(
@@ -232,6 +233,13 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
     }
     interrupt();
   }, [degradedMode, interrupt]);
+
+  useEffect(() => {
+    if (playbackInterruptVersion === 0) {
+      return;
+    }
+    interrupt();
+  }, [interrupt, playbackInterruptVersion]);
 
   useEffect(() => {
     let disposed = false;
