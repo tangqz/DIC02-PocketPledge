@@ -1,418 +1,346 @@
 app:
   description: ''
   icon: 🤖
-  icon_background: '#D9F4FF'
-  mode: workflow
-  name: 系统编排-Agent
+  icon_background: '#FFEAD5'
+  mode: agent-chat
+  name: 系统Agent
   use_icon_as_answer_icon: false
 dependencies:
-  - current_identifier: null
-    type: marketplace
-    value:
-      marketplace_plugin_unique_identifier: langgenius/tongyi:0.1.31@638e473191f93192f670875b06edf0bcb89a3433aa736be89ed1749073b8a168
-      version: null
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/tongyi:0.1.31@638e473191f93192f670875b06edf0bcb89a3433aa736be89ed1749073b8a168
+    version: null
 kind: app
-version: 0.5.0
-workflow:
-  conversation_variables: []
-  environment_variables: []
-  features:
-    file_upload:
-      allowed_file_extensions:
-        - .JPG
-        - .JPEG
-        - .PNG
-        - .GIF
-        - .WEBP
-        - .SVG
-      allowed_file_types:
-        - image
-      allowed_file_upload_methods:
-        - local_file
-        - remote_url
-      enabled: false
-      fileUploadConfig:
-        audio_file_size_limit: 50
-        batch_count_limit: 5
-        file_size_limit: 15
-        image_file_batch_limit: 10
-        image_file_size_limit: 10
-        single_chunk_attachment_limit: 10
-        video_file_size_limit: 100
-        workflow_file_upload_limit: 10
-      image:
-        enabled: false
-        number_limits: 3
-        transfer_methods:
-          - local_file
-          - remote_url
-      number_limits: 3
-    opening_statement: ''
-    retriever_resource:
+model_config:
+  agent_mode:
+    enabled: true
+    max_iteration: 10
+    prompt: null
+    strategy: function_call
+    tools:
+    - enabled: true
+      notAuthor: false
+      provider_id: ed5d9718-f570-4477-81d1-2cccfeb52e10
+      provider_name: system-tools-test
+      provider_type: api
+      tool_label: getUserStatus
+      tool_name: getUserStatus
+      tool_parameters:
+        user_id: null
+    - enabled: true
+      notAuthor: false
+      provider_id: ed5d9718-f570-4477-81d1-2cccfeb52e10
+      provider_name: system-tools-test
+      provider_type: api
+      tool_label: getUserPlan
+      tool_name: getUserPlan
+      tool_parameters:
+        user_id: null
+    - enabled: true
+      notAuthor: false
+      provider_id: ed5d9718-f570-4477-81d1-2cccfeb52e10
+      provider_name: system-tools-test
+      provider_type: api
+      tool_label: updateUserPlan
+      tool_name: updateUserPlan
+      tool_parameters:
+        suggestedDuration: null
+        tasks: null
+        totalMinutes: null
+        user_id: null
+    - enabled: true
+      notAuthor: false
+      provider_id: ed5d9718-f570-4477-81d1-2cccfeb52e10
+      provider_name: system-tools-test
+      provider_type: api
+      tool_label: getUserProfile
+      tool_name: getUserProfile
+      tool_parameters:
+        user_id: null
+    - enabled: true
+      notAuthor: false
+      provider_id: ed5d9718-f570-4477-81d1-2cccfeb52e10
+      provider_name: system-tools-test
+      provider_type: api
+      tool_label: updateUserProfile
+      tool_name: updateUserProfile
+      tool_parameters:
+        content: null
+        user_id: null
+    - enabled: true
+      notAuthor: false
+      provider_id: ed5d9718-f570-4477-81d1-2cccfeb52e10
+      provider_name: system-tools-test
+      provider_type: api
+      tool_label: listUserPauseRequests
+      tool_name: listUserPauseRequests
+      tool_parameters:
+        limit: 20
+        user_id: null
+    - enabled: true
+      notAuthor: false
+      provider_id: ed5d9718-f570-4477-81d1-2cccfeb52e10
+      provider_name: system-tools-test
+      provider_type: api
+      tool_label: recordUserPauseRequest
+      tool_name: recordUserPauseRequest
+      tool_parameters:
+        approved: null
+        decision_reason: ''
+        meta: null
+        pause_seconds: null
+        requested_text: null
+        session_ref: null
+        user_id: null
+    - enabled: true
+      notAuthor: false
+      provider_id: ed5d9718-f570-4477-81d1-2cccfeb52e10
+      provider_name: system-tools-test
+      provider_type: api
+      tool_label: listUserSessionSummaries
+      tool_name: listUserSessionSummaries
+      tool_parameters:
+        limit: 20
+        user_id: null
+    - enabled: true
+      notAuthor: false
+      provider_id: ed5d9718-f570-4477-81d1-2cccfeb52e10
+      provider_name: system-tools-test
+      provider_type: api
+      tool_label: createUserSessionSummary
+      tool_name: createUserSessionSummary
+      tool_parameters:
+        meta: null
+        session_ref: null
+        summary_text: null
+        user_id: null
+    - enabled: true
+      notAuthor: false
+      provider_id: ed5d9718-f570-4477-81d1-2cccfeb52e10
+      provider_name: system-tools-test
+      provider_type: api
+      tool_label: listUserTransactions
+      tool_name: listUserTransactions
+      tool_parameters:
+        limit: 20
+        user_id: null
+  annotation_reply:
+    enabled: false
+  chat_prompt_config:
+    prompt:
+    - role: system
+      text: ''
+  completion_prompt_config:
+    conversation_histories_role:
+      assistant_prefix: ''
+      user_prefix: ''
+    prompt:
+      text: ''
+  dataset_configs:
+    datasets:
+      datasets:
+      - dataset:
+          enabled: true
+          id: eac75774-40f7-4a53-a421-f84e01aec198
+    reranking_enable: true
+    reranking_mode: reranking_model
+    reranking_model:
+      reranking_model_name: gte-rerank
+      reranking_provider_name: langgenius/tongyi/tongyi
+    retrieval_model: multiple
+    top_k: 4
+  dataset_query_variable: ''
+  external_data_tools: []
+  file_upload:
+    allowed_file_extensions:
+    - .JPG
+    - .JPEG
+    - .PNG
+    - .GIF
+    - .WEBP
+    - .SVG
+    - .MP4
+    - .MOV
+    - .MPEG
+    - .WEBM
+    allowed_file_types:
+    - image
+    allowed_file_upload_methods:
+    - remote_url
+    - local_file
+    enabled: true
+    image:
+      detail: high
       enabled: true
-    sensitive_word_avoidance:
-      enabled: false
-    speech_to_text:
-      enabled: false
-    suggested_questions: []
-    suggested_questions_after_answer:
-      enabled: false
-    text_to_speech:
-      enabled: false
-      language: ''
-      voice: ''
-  graph:
-    edges:
-      - data:
-          isInIteration: false
-          isInLoop: false
-          sourceType: start
-          targetType: knowledge-retrieval
-        id: start-knowledge
-        source: start
-        sourceHandle: source
-        target: knowledge
-        targetHandle: target
-        type: custom
-        zIndex: 0
-      - data:
-          isInIteration: false
-          isInLoop: false
-          sourceType: knowledge-retrieval
-          targetType: llm
-        id: knowledge-llm
-        source: knowledge
-        sourceHandle: source
-        target: llm
-        targetHandle: target
-        type: custom
-        zIndex: 0
-      - data:
-          isInIteration: false
-          isInLoop: false
-          sourceType: llm
-          targetType: end
-        id: llm-end
-        source: llm
-        sourceHandle: source
-        target: end
-        targetHandle: target
-        type: custom
-    nodes:
-      - data:
-          selected: false
-          title: 开始
-          type: start
-          variables:
-            - label: user_text
-              max_length: 4000
-              options: []
-              required: true
-              type: paragraph
-              variable: user_text
-            - label: chat_history
-              max_length: 10000
-              options: []
-              required: false
-              type: paragraph
-              variable: chat_history
-            - label: supervision_state
-              max_length: 32
-              options: []
-              required: true
-              type: text-input
-              variable: supervision_state
-            - label: current_task
-              max_length: 500
-              options: []
-              required: false
-              type: text-input
-              variable: current_task
-            - label: total_focus_seconds
-              required: false
-              type: number
-              variable: total_focus_seconds
-            - label: focus_time_remaining
-              required: false
-              type: number
-              variable: focus_time_remaining
-            - label: suggested_focus_seconds
-              required: false
-              type: number
-              variable: suggested_focus_seconds
-            - label: pause_remaining_seconds
-              required: false
-              type: number
-              variable: pause_remaining_seconds
-            - label: pause_requests_count
-              required: false
-              type: number
-              variable: pause_requests_count
-            - label: is_bankrupt
-              max_length: 10
-              options: []
-              required: false
-              type: text-input
-              variable: is_bankrupt
-        height: 343
-        id: start
-        position:
-          x: 80
-          y: 250
-        positionAbsolute:
-          x: 80
-          y: 250
-        selected: false
-        sourcePosition: right
-        targetPosition: left
-        type: custom
-        width: 242
-      - data:
-          dataset_ids: []
-          multiple_retrieval_config:
-            reranking_enable: false
-            top_k: 8
-          query_attachment_selector: []
-          query_variable_selector:
-            - start
-            - user_text
-          retrieval_mode: multiple
-          selected: false
-          title: 知识检索
-          type: knowledge-retrieval
-        height: 52
-        id: knowledge
-        position:
-          x: 360
-          y: 250
-        positionAbsolute:
-          x: 360
-          y: 250
-        sourcePosition: right
-        targetPosition: left
-        type: custom
-        width: 242
-      - data:
-          context:
-            enabled: true
-            variable_selector:
-              - knowledge
-              - result
-          model:
-            completion_params:
-              enable_search: false
-              enable_thinking: false
-              temperature: 0.05
-            mode: chat
-            name: qwen3.5-plus
-            provider: langgenius/tongyi/tongyi
-          prompt_template:
-            - id: system-agent-system
-              role: system
-              text: |
-                你是 Study Buddy 的系统 Agent。
-                你的职责不是陪聊，而是把用户当前请求翻译成稳定、保守、可执行的结构化决策。
+      number_limits: 6
+      transfer_methods:
+      - remote_url
+      - local_file
+    number_limits: 6
+  model:
+    completion_params:
+      enable_search: true
+      enable_thinking: true
+      stop: []
+      temperature: 0
+      thinking_budget: 2048
+    mode: chat
+    name: qwen3.5-plus
+    provider: langgenius/tongyi/tongyi
+  more_like_this:
+    enabled: false
+  opening_statement: ''
+  pre_prompt: '你是 Study Buddy 的系统 Agent。
 
-                你会收到：
-                - user_text
-                - chat_history
-                - supervision_state
-                - current_task
-                - total_focus_seconds
-                - focus_time_remaining
-                - suggested_focus_seconds
-                - pause_remaining_seconds
-                - pause_requests_count
-                - is_bankrupt
-                - knowledge retrieval 的结果
+    你的职责不是陪聊，而是把用户当前请求翻译成稳定、保守、可执行的结构化决策。
 
-                输出要求：
-                1. 你必须且只能输出一个 JSON 对象。
-                2. 不要输出解释文字，不要输出 markdown。
-                3. action 只能是 none / plan / start / pause / resume / complete。
-                4. 如果 requires_capture=true，则 action 必须是 none。
-                5. 如果 action=none 且 requires_capture=false，则 duration_seconds 和 pause_seconds 必须为 null。
-                6. capture_sources 只能包含 screen 和 camera。
-                7. plan 为空时必须返回 null，不要返回空对象。
 
-                判定规则：
-                - 开始监督：用户明确开始学习/进入监督 -> start
-                - 暂停审批：结合当前状态、暂停次数、检索出的画像/历史进行保守判定
-                - 恢复：用户说继续/恢复/回来了 -> resume
-                - 结束：用户说结束、今天不学了 -> complete
-                - 计划：用户要求制定/修改计划 -> plan
-                - 视觉请求：用户要求看桌面/看摄像头/看画面 -> requires_capture=true 且 action=none
-                - 闲聊：none
+    你会收到：
 
-                system_events 字符串要稳定、简短、可供白脑翻译，例如：
-                - [SYSTEM_RESULT: PAUSE_APPROVED, MINUTES: 5]
-                - [SYSTEM_RESULT: PAUSE_REJECTED, REASON: 刚开始没多久又想暂停]
-                - [SYSTEM_RESULT: SESSION_STARTED, MINUTES: 25]
-                - [SYSTEM_RESULT: PLAN_UPDATED, TITLE: 数学, TOTAL_MINUTES: 30]
-                - [SYSTEM_RESULT: SESSION_COMPLETED]
-                - [SYSTEM_RESULT: VISUAL_CONTEXT_REQUESTED, SOURCES: screen,camera]
-                - [SYSTEM_RESULT: RESUME_APPROVED]
-          reasoning_format: separated
-          selected: false
-          structured_output:
-            schema:
-              type: object
-              required:
-                - action
-                - approved
-                - duration_seconds
-                - pause_seconds
-                - requires_capture
-                - capture_sources
-                - system_events
-                - plan
-              properties:
-                action:
-                  type: string
-                  enum:
-                    - none
-                    - plan
-                    - start
-                    - pause
-                    - resume
-                    - complete
-                approved:
-                  type: boolean
-                duration_seconds:
-                  type: number
-                  nullable: true
-                pause_seconds:
-                  type: number
-                  nullable: true
-                requires_capture:
-                  type: boolean
-                capture_sources:
-                  type: array
-                  items:
-                    type: string
-                    enum:
-                      - screen
-                      - camera
-                system_events:
-                  type: array
-                  items:
-                    type: string
-                plan:
-                  type: object
-                  nullable: true
-                  required:
-                    - tasks
-                    - totalMinutes
-                    - suggestedDuration
-                  properties:
-                    tasks:
-                      type: array
-                      items:
-                        type: object
-                        required:
-                          - id
-                          - title
-                          - completed
-                          - estimatedMinutes
-                        properties:
-                          id:
-                            type: string
-                          title:
-                            type: string
-                          completed:
-                            type: boolean
-                          estimatedMinutes:
-                            type: number
-                    totalMinutes:
-                      type: number
-                    suggestedDuration:
-                      type: number
-          structured_output_enabled: true
-          title: LLM
-          type: llm
-          vision:
-            enabled: false
-        height: 88
-        id: llm
-        position:
-          x: 650
-          y: 250
-        positionAbsolute:
-          x: 650
-          y: 250
-        selected: false
-        sourcePosition: right
-        targetPosition: left
-        type: custom
-        width: 242
-      - data:
-          outputs:
-            - value_selector:
-                - llm
-                - structured_output
-                - action
-              value_type: string
-              variable: action
-            - value_selector:
-                - llm
-                - structured_output
-                - approved
-              value_type: boolean
-              variable: approved
-            - value_selector:
-                - llm
-                - structured_output
-                - duration_seconds
-              value_type: number
-              variable: duration_seconds
-            - value_selector:
-                - llm
-                - structured_output
-                - pause_seconds
-              value_type: number
-              variable: pause_seconds
-            - value_selector:
-                - llm
-                - structured_output
-                - requires_capture
-              value_type: boolean
-              variable: requires_capture
-            - value_selector:
-                - llm
-                - structured_output
-                - capture_sources
-              value_type: array[string]
-              variable: capture_sources
-            - value_selector:
-                - llm
-                - structured_output
-                - system_events
-              value_type: array[string]
-              variable: system_events
-            - value_selector:
-                - llm
-                - structured_output
-                - plan
-              value_type: object
-              variable: plan
-          selected: false
-          title: 输出
-          type: end
-        height: 270
-        id: end
-        position:
-          x: 960
-          y: 250
-        positionAbsolute:
-          x: 960
-          y: 250
-        selected: false
-        sourcePosition: right
-        targetPosition: left
-        type: custom
-        width: 242
-    viewport:
-      x: -14
-      y: -10
-      zoom: 0.82
-  rag_pipeline_variables: []
+    - user_text {{user_text}}
+
+    - chat_history {{chat_history}}
+
+    - supervision_state {{supervision_state}}
+
+    - current_task {{current_task}}
+
+    - total_focus_seconds {{total_focus_seconds}}
+
+    - focus_time_remaining {{focus_time_remaining}}
+
+    - suggested_focus_seconds {{suggested_focus_seconds}}
+
+    - pause_remaining_seconds {{pause_remaining_seconds}}
+
+    - pause_requests_count {{pause_requests_count}}
+
+    - is_bankrupt {{is_bankrupt}}
+
+    - knowledge retrieval 的结果 {{sys.files}}
+
+
+    输出要求：
+
+    1. 你必须且只能输出一个 JSON 对象。
+
+    2. 不要输出解释文字，不要输出 markdown。
+
+    3. action 只能是 none / plan / start / pause / resume / complete。
+
+    4. 如果 requires_capture=true，则 action 必须是 none。
+
+    5. 如果 action=none 且 requires_capture=false，则 duration_seconds 和 pause_seconds
+    必须为 null。
+
+    6. capture_sources 只能包含 screen 和 camera。
+
+    7. plan 为空时必须返回 null，不要返回空对象。
+
+
+    判定规则：
+
+    - 开始监督：用户明确开始学习/进入监督 -> start
+
+    - 暂停审批：结合当前状态、暂停次数、检索出的画像/历史进行保守判定
+
+    - 恢复：用户说继续/恢复/回来了 -> resume
+
+    - 结束：用户说结束、今天不学了 -> complete
+
+    - 计划：用户要求制定/修改计划 -> plan
+
+    - 视觉请求：用户要求看桌面/看摄像头/看画面 -> requires_capture=true 且 action=none
+
+    - 闲聊：none
+
+
+    system_events 字符串要稳定、简短、可供白脑翻译，例如：
+
+    - [SYSTEM_RESULT: PAUSE_APPROVED, MINUTES: 5]
+
+    - [SYSTEM_RESULT: PAUSE_REJECTED, REASON: 刚开始没多久又想暂停]
+
+    - [SYSTEM_RESULT: SESSION_STARTED, MINUTES: 25]
+
+    - [SYSTEM_RESULT: PLAN_UPDATED, TITLE: 数学, TOTAL_MINUTES: 30]
+
+    - [SYSTEM_RESULT: SESSION_COMPLETED]
+
+    - [SYSTEM_RESULT: VISUAL_CONTEXT_REQUESTED, SOURCES: screen,camera]
+
+    - [SYSTEM_RESULT: RESUME_APPROVED]'
+  prompt_type: simple
+  retriever_resource:
+    enabled: true
+  sensitive_word_avoidance:
+    configs: []
+    enabled: false
+    type: ''
+  speech_to_text:
+    enabled: false
+  suggested_questions: []
+  suggested_questions_after_answer:
+    enabled: false
+  text_to_speech:
+    enabled: false
+    language: ''
+    voice: ''
+  user_input_form:
+  - paragraph:
+      default: ''
+      label: user_text
+      max_length: 4000
+      required: true
+      variable: user_text
+  - paragraph:
+      default: ''
+      label: chat_history
+      max_length: 40000
+      required: false
+      variable: chat_history
+  - text-input:
+      default: ''
+      label: supervision_state
+      max_length: 32
+      required: true
+      variable: supervision_state
+  - text-input:
+      default: ''
+      label: current_task
+      max_length: 256
+      required: false
+      variable: current_task
+  - number:
+      default: ''
+      label: total_focus_seconds
+      required: false
+      variable: total_focus_seconds
+  - number:
+      default: ''
+      label: focus_time_remaining
+      required: false
+      variable: focus_time_remaining
+  - number:
+      default: ''
+      label: suggested_focus_seconds
+      required: false
+      variable: suggested_focus_seconds
+  - number:
+      default: ''
+      label: pause_remaining_seconds
+      required: false
+      variable: pause_remaining_seconds
+  - number:
+      default: ''
+      label: pause_requests_count
+      required: false
+      variable: pause_requests_count
+  - text-input:
+      default: ''
+      label: is_bankrupt
+      max_length: 10
+      required: false
+      variable: is_bankrupt
+version: 0.5.0

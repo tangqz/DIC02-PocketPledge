@@ -5,7 +5,7 @@
 文件说明：
 - chatbot.yml: 白脑聊天应用，负责口语化陪伴与系统事件转译
 - visual-judgement.yml: 黑脑视觉判定 Workflow，负责输出结构化走神判定
-- system-agent.yml: 系统 Agent Workflow，负责把用户意图翻译成结构化决策
+- system-agent.yml: 系统 Agent 提示词与输入输出归档，当前更推荐在 Dify 中以 Agent 模式配置，用于自由调用工具
 - ../personas/default_study_buddy.yaml: 默认角色资料卡，结构参考 Open-LLM-VTuber 的 character_config
 - ../schemas/persona_card.schema.json: 人设资料卡 schema
 
@@ -17,15 +17,15 @@
 工作流类型建议：
 - 白脑使用对话应用。当前归档里的 `mode: advanced-chat` 对应 Dify 的多轮对话应用，后端通过 `/chat-messages` 调用。
 - 黑脑使用 Workflow。当前归档通过 `/workflows/run` 阻塞调用，输入为 `current_task + images`，输出结构化 JSON。
-- 系统 Agent 使用 Workflow。它需要结构化输出，后端通过 `/workflows/run` 阻塞调用。
+- 系统 Agent 如果需要自主决定调用哪些工具、以及按结果继续迭代，优先使用 Agent 模式而不是纯 Workflow。
+- 如果你只需要稳定的结构化判定且工具链固定，才考虑 Workflow。
 
 系统 Agent 的可视化编排建议：
-- 推荐在可视化界面里增加一个 Question Classifier，把请求分为 `pause`、`plan`、`session-control`、`visual-context`、`other` 五类。
-- `pause` 分支挂工具：`getUserStatus`、`getUserProfile`、`listUserPauseRequests`、可选 `listUserSessionSummaries`，然后进入带 JSON Schema 的 LLM 节点。
-- `plan` 分支挂工具：`getUserPlan`、`getUserProfile`、可选 `listUserSessionSummaries`，然后进入带 JSON Schema 的 LLM 节点。
-- `session-control` 分支通常不需要工具，直接进入结构化 LLM 节点即可。
-- `visual-context` 分支不需要工具，直接让 LLM 输出 `requires_capture=true` 与 `capture_sources`。
-- 如果你想让系统 Agent 自己维护画像文档或写回总结，请在可视化界面单独加 Tools 节点调用 `updateUserProfile`、`createUserSessionSummary`，不要手写 YAML 猜字段。
+- 当前更推荐直接使用 Agent 模式，并为其挂载 `getUserStatus`、`getUserPlan`、`getUserProfile`、`listUserPauseRequests`、`listUserSessionSummaries`、`listUserTransactions` 等工具。
+- 选择支持函数调用的模型，并给每个工具写清楚“什么时候用、不要什么时候用”的描述。
+- 把 `user_id` 作为上游输入变量传给 Agent，让 Agent 在工具调用时自动填参。
+- 将最大迭代次数控制在 3 到 5，避免 pause/plan 这类轻任务过度循环。
+- 如果你仍需要严格结构化输出，可让 Agent 的最终回答产出 JSON，再由后端按 JSON 解析。
 
 手动上传到云端前后的注意事项：
 - 你修改本目录中的 yml 后，仍然需要手动在 Dify 云端重新导入或覆盖对应应用，仓库修改不会自动生效。

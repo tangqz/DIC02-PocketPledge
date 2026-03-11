@@ -1,4 +1,4 @@
-openapi: 3.1.1
+openapi: 3.0.3
 info:
   title: Study Buddy Internal Tools
   description: |
@@ -6,10 +6,10 @@ info:
 
     These endpoints are designed for the system-agent workflow, which authenticates
     with a fixed bearer token and passes the target user_id explicitly.
-  version: 1.1.0
+  version: 1.1.1
 servers:
-  - url: http://127.0.0.1:12393
-    description: Local backend server
+  - url: http://dify.qizhi7z.com
+    description: Current frp-exposed backend endpoint reachable from the remote Dify server
 security:
   - BearerAuth: []
 tags:
@@ -239,9 +239,8 @@ components:
       type: object
       properties:
         detail:
-          type:
-            - string
-            - 'null'
+          type: string
+          nullable: true
       additionalProperties: true
     UserStatusResponse:
       type: object
@@ -268,9 +267,8 @@ components:
         completed:
           type: boolean
         estimatedMinutes:
-          type:
-            - integer
-            - 'null'
+          type: integer
+          nullable: true
           minimum: 1
           maximum: 1440
     PlanPayload:
@@ -286,9 +284,8 @@ components:
           minimum: 0
           maximum: 10080
         suggestedDuration:
-          type:
-            - integer
-            - 'null'
+          type: integer
+          nullable: true
           minimum: 0
           maximum: 604800
     PlanDocumentResponse:
@@ -298,29 +295,24 @@ components:
         ok:
           type: boolean
         plan_id:
-          type:
-            - string
-            - 'null'
+          type: string
+          nullable: true
         title:
-          type:
-            - string
-            - 'null'
+          type: string
+          nullable: true
         status:
-          type:
-            - string
-            - 'null'
+          type: string
+          nullable: true
         source:
-          type:
-            - string
-            - 'null'
+          type: string
+          nullable: true
         plan:
-          anyOf:
+          allOf:
             - $ref: '#/components/schemas/PlanPayload'
-            - type: 'null'
+          nullable: true
         updated_at:
-          type:
-            - string
-            - 'null'
+          type: string
+          nullable: true
     ProfileDocumentRequest:
       type: object
       required: [content]
@@ -339,9 +331,8 @@ components:
         content:
           type: string
         updated_at:
-          type:
-            - string
-            - 'null'
+          type: string
+          nullable: true
         max_chars:
           type: integer
     PauseRequestCreate:
@@ -355,9 +346,8 @@ components:
         approved:
           type: boolean
         pause_seconds:
-          type:
-            - integer
-            - 'null'
+          type: integer
+          nullable: true
           minimum: 0
           maximum: 3600
         decision_reason:
@@ -365,15 +355,13 @@ components:
           default: ''
           maxLength: 255
         session_ref:
-          type:
-            - string
-            - 'null'
+          type: string
+          nullable: true
           maxLength: 100
         meta:
-          anyOf:
-            - type: object
-              additionalProperties: true
-            - type: 'null'
+          type: object
+          nullable: true
+          additionalProperties: true
     PauseRequestItem:
       type: object
       required: [id, requested_text, approved, decision_reason, created_at]
@@ -381,17 +369,15 @@ components:
         id:
           type: string
         session_ref:
-          type:
-            - string
-            - 'null'
+          type: string
+          nullable: true
         requested_text:
           type: string
         approved:
           type: boolean
         pause_seconds:
-          type:
-            - integer
-            - 'null'
+          type: integer
+          nullable: true
         decision_reason:
           type: string
         created_at:
@@ -417,15 +403,13 @@ components:
           minLength: 1
           maxLength: 4000
         session_ref:
-          type:
-            - string
-            - 'null'
+          type: string
+          nullable: true
           maxLength: 100
         meta:
-          anyOf:
-            - type: object
-              additionalProperties: true
-            - type: 'null'
+          type: object
+          nullable: true
+          additionalProperties: true
     SessionSummaryItem:
       type: object
       required: [id, summary_text, created_at]
@@ -433,9 +417,8 @@ components:
         id:
           type: string
         session_ref:
-          type:
-            - string
-            - 'null'
+          type: string
+          nullable: true
         summary_text:
           type: string
         created_at:
@@ -461,21 +444,18 @@ components:
         tx_type:
           type: string
         from_user_id:
-          type:
-            - integer
-            - 'null'
+          type: integer
+          nullable: true
         to_user_id:
-          type:
-            - integer
-            - 'null'
+          type: integer
+          nullable: true
         amount:
           type: integer
         reason:
           type: string
         session_ref:
-          type:
-            - string
-            - 'null'
+          type: string
+          nullable: true
         created_at:
           type: string
         meta:

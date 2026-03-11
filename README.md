@@ -224,7 +224,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 12393 --reload
 - [dify_orchestration/tools/study_buddy_custom_tools.openapi.yaml](dify_orchestration/tools/study_buddy_custom_tools.openapi.yaml)
 - [dify_orchestration/tools/README.md](dify_orchestration/tools/README.md)
 
-这份定义遵循 OpenAPI 3.1.1。根据 Swagger/OpenAPI 规范，根文档至少应该明确：
+这份定义遵循 OpenAPI 3.0.3 兼容写法。根据 Swagger/OpenAPI 规范，根文档至少应该明确：
 
 - `openapi`
 - `info`
