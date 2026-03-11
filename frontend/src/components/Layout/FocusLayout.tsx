@@ -85,7 +85,7 @@ export default function FocusLayout() {
         ) : null}
 
         {compactHint ? (
-          <div className="absolute right-3 top-3 z-20 rounded-lg bg-black/35 px-2 py-1 text-[11px] text-white/70">
+          <div className="absolute right-3 top-3 z-20 rounded-lg bg-slate-200 px-2 py-1 text-[11px] text-slate-600">
             {locale === "zh" ? "角落小窗已适配" : "Corner-window mode optimized"}
           </div>
         ) : null}
@@ -97,20 +97,20 @@ export default function FocusLayout() {
         ) : null}
       </div>
 
-      <div className="h-[34%] min-h-[210px] border-t border-white/10 bg-surface-elevated/60 backdrop-blur-lg">
+      <div className="h-[34%] min-h-[210px] border-t border-slate-200 bg-surface-elevated/60 backdrop-blur-lg">
         <ChatPanel expanded onSendText={handleSendText} />
       </div>
 
       {isPaused && pauseRemaining !== undefined ? (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/35 backdrop-blur-sm">
-          <div className="min-w-72 rounded-3xl border border-white/10 bg-surface-elevated/85 px-8 py-7 text-center">
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-200/50 backdrop-blur-sm">
+          <div className="min-w-72 rounded-3xl border border-slate-200 bg-surface-elevated/85 px-8 py-7 text-center">
             <p className="text-xs uppercase tracking-[0.35em] text-warning/70">{locale === "zh" ? "暂停中" : "Paused"}</p>
-            <p className="mt-4 font-mono text-6xl font-semibold text-white/92">
+            <p className="mt-4 font-mono text-6xl font-semibold text-slate-800">
               {Math.floor(pauseRemaining / 60)}:{String(pauseRemaining % 60).padStart(2, "0")}
             </p>
             <button
               onClick={() => send({ type: "resume-now" })}
-              className="mt-6 rounded-2xl bg-success/85 px-6 py-3 text-sm font-semibold text-white hover:bg-success"
+              className="mt-6 rounded-2xl bg-success/85 px-6 py-3 text-sm font-semibold text-slate-800 hover:bg-success"
             >
               {locale === "zh" ? "恢复专注" : "Resume Focus"}
             </button>
@@ -126,13 +126,13 @@ function DowngradeTimerCard({ timerSeconds, locale }: { timerSeconds: number; lo
   const seconds = String(timerSeconds % 60).padStart(2, "0");
 
   return (
-    <div className="flex h-full items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="min-w-72 rounded-3xl border border-white/10 bg-surface-elevated/85 px-10 py-8 text-center shadow-2xl">
-        <p className="text-xs uppercase tracking-[0.35em] text-white/30">Basic Timer</p>
-        <p className="mt-4 font-mono text-6xl font-semibold text-white/88">
+    <div className="flex h-full items-center justify-center bg-slate-200/50 backdrop-blur-sm">
+      <div className="min-w-72 rounded-3xl border border-slate-200 bg-surface-elevated/85 px-10 py-8 text-center shadow-2xl">
+        <p className="text-xs uppercase tracking-[0.35em] text-slate-400">Basic Timer</p>
+        <p className="mt-4 font-mono text-6xl font-semibold text-slate-800">
           {minutes}:{seconds}
         </p>
-        <p className="mt-4 text-sm text-white/45">
+        <p className="mt-4 text-sm text-slate-500">
           {locale === "zh" ? "当前处于降级专注模式" : "Focus mode without avatar"}
         </p>
       </div>

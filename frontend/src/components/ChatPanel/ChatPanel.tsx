@@ -43,9 +43,9 @@ export default function ChatPanel({
               系统正在处理您的请求
             </div>
           )}
-          <p className="text-center text-sm leading-relaxed text-white/90">
+          <p className="text-center text-sm leading-relaxed text-slate-800">
             {latestText || (
-              <span className="text-white/40">{t("focus.subtitle")}</span>
+              <span className="text-slate-400">{t("focus.subtitle")}</span>
             )}
             {isAgentSpeaking && (
               <span className="ml-1 inline-block h-3 w-3 animate-breathing rounded-full bg-accent" />
@@ -77,7 +77,7 @@ export default function ChatPanel({
         {streamingText && (
           <div className="mb-3 flex justify-start">
             <div className="max-w-[75%] rounded-2xl rounded-tl-sm bg-surface-elevated px-4 py-2.5">
-              <p className="text-sm leading-relaxed text-white/90">
+              <p className="text-sm leading-relaxed text-slate-800">
                 {streamingText}
                 <span className="ml-1 inline-block h-4 w-0.5 animate-pulse bg-accent" />
               </p>

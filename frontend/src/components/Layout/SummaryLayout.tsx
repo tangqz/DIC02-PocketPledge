@@ -52,7 +52,7 @@ export default function SummaryLayout() {
             <span className="text-3xl">🎯</span>
           </div>
           <h1 className="text-2xl font-bold">{t("summary.title")}</h1>
-          <p className="mt-1 text-white/50">
+          <p className="mt-1 text-slate-500">
             {t("summary.totalTime")}: {minutes} {t("setup.minutes")}
           </p>
         </div>
@@ -77,7 +77,7 @@ export default function SummaryLayout() {
         {/* Transaction log */}
         {balanceHistory.length > 0 && (
           <div className="space-y-2 rounded-2xl bg-surface-elevated/50 p-4">
-            <h3 className="mb-3 text-sm font-medium text-white/50">
+            <h3 className="mb-3 text-sm font-medium text-slate-500">
               {t("summary.transactionLog")}
             </h3>
             <div className="max-h-48 space-y-1.5 overflow-y-auto">
@@ -86,7 +86,7 @@ export default function SummaryLayout() {
                   key={i}
                   className="flex items-center justify-between text-sm"
                 >
-                  <span className="text-white/60">{event.reason}</span>
+                  <span className="text-slate-500">{event.reason}</span>
                   <span
                     className={`font-mono font-medium ${
                       event.change < 0 ? "text-danger" : "text-success"
@@ -103,7 +103,7 @@ export default function SummaryLayout() {
         {/* Action */}
         <button
           onClick={handleRestart}
-          className="w-full rounded-2xl bg-surface-elevated py-3 text-sm font-medium text-white/70 transition-all hover:bg-surface-elevated/80 hover:text-white"
+          className="w-full rounded-2xl bg-surface-elevated py-3 text-sm font-medium text-slate-600 transition-all hover:bg-surface-elevated/80 hover:text-slate-800"
         >
           {t("summary.restart")}
         </button>
@@ -125,10 +125,10 @@ function StatCard({
 }) {
   return (
     <div className="rounded-xl bg-surface-elevated/50 p-4 text-center">
-      <p className="text-xs text-white/40">{label}</p>
+      <p className="text-xs text-slate-400">{label}</p>
       <p className={`mt-1 font-mono text-xl font-bold ${color}`}>
         {value}
-        <span className="ml-0.5 text-xs font-normal text-white/30">
+        <span className="ml-0.5 text-xs font-normal text-slate-400">
           {suffix}
         </span>
       </p>
