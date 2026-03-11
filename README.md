@@ -42,10 +42,10 @@
 
 **环境要求**：Python 3.10+ (推荐使用 Conda)
 
-`bash
+```bash
 cd backend
 pip install -r requirements.txt
-`
+```
 
 **配置环境变量**：
 在 backend/.env 或项目根目录新建 .env 文件。提供大模型 API 密钥以及刚才准备的 ASR 模型路径：
@@ -82,11 +82,11 @@ uvicorn app.main:app --host 0.0.0.0 --port 12393 --reload
 
 **环境要求**：Node.js 20+, npm 10+
 
-`bash
+```bash
 cd frontend
 npm install
 npm run dev
-`
+```
 启动完毕后浏览器打开相应本地地址即可，前端默认会连接上 ws://localhost:12393/ws。
 
 ###  双端联合启动（Windows 推荐）
