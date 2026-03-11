@@ -1,13 +1,14 @@
 /* ────────────────────────────────────────────────
  *  MessageBubble  –  Individual chat message
  * ──────────────────────────────────────────────── */
+import { memo } from "react";
 import type { ChatMessage } from "@/stores/chatStore";
 
 interface Props {
   message: ChatMessage;
 }
 
-export default function MessageBubble({ message }: Props) {
+function MessageBubble({ message }: Props) {
   const isUser = message.role === "user";
 
   return (
@@ -34,3 +35,6 @@ export default function MessageBubble({ message }: Props) {
     </div>
   );
 }
+
+// ⚡ Bolt: memoize to prevent unnecessary re-renders when streamingText updates in parent ChatPanel
+export default memo(MessageBubble);
