@@ -56,7 +56,7 @@ function AuthenticatedApp() {
   const setDegradedMode = useSessionStore((s) => s.setDegradedMode);
   const selectedCharacterId = useCharacterStore((s) => s.selectedCharacterId);
   const setSelectedCharacterId = useCharacterStore((s) => s.setSelectedCharacterId);
-  const { locale } = useI18n();
+  const { locale, t } = useI18n();
   const lastSentCharacterRef = useRef<string>("");
 
   // ── WebSocket (global, persistent) ──
@@ -214,9 +214,9 @@ function AuthenticatedApp() {
         {/* Logout button */}
         <button
           onClick={logout}
-          className="fixed right-4 top-4 z-50 rounded-lg bg-slate-100 px-3 py-1 text-sm text-slate-600 backdrop-blur-sm hover:bg-slate-200"
+          className="fixed left-4 top-4 z-50 rounded-lg bg-slate-100/92 px-3 py-1 text-sm text-slate-600 backdrop-blur-sm hover:bg-slate-200"
         >
-          退出
+          {t("auth.logout")}
         </button>
 
         {supervisionState === "setup" && <SetupLayout />}
@@ -230,6 +230,7 @@ function AuthenticatedApp() {
 }
 
 export default function App() {
+  const { t } = useI18n();
   const token = useAuthStore((s) => s.token);
   const user = useAuthStore((s) => s.user);
   const hydrate = useAuthStore((s) => s.hydrate);
@@ -256,7 +257,7 @@ export default function App() {
   if (!ready) {
     return (
       <div className="flex h-screen items-center justify-center bg-slate-50">
-        <p className="text-slate-500">加载中…</p>
+        <p className="text-slate-500">{t("app.loading")}</p>
       </div>
     );
   }

@@ -8,6 +8,7 @@ import StatusBar from "@/components/SupervisionPanel/StatusBar";
 import ChatPanel from "@/components/ChatPanel/ChatPanel";
 import VoiceInput from "@/components/VoiceInput/VoiceInput";
 import Live2DCanvas, { type Live2DCanvasHandle } from "@/components/Live2DCanvas/Live2DCanvas";
+import MediaPreviewDock from "@/components/SupervisionPanel/MediaPreviewDock";
 
 export default function FocusLayout() {
   const live2dRef = useRef<Live2DCanvasHandle>(null);
@@ -79,9 +80,12 @@ export default function FocusLayout() {
         </div>
 
         {!degradedMode ? (
-          <div className="absolute bottom-[26%] left-1/2 z-20 -translate-x-1/2">
-            <VoiceInput />
-          </div>
+          <>
+            <div className="absolute bottom-[26%] left-1/2 z-20 -translate-x-1/2">
+              <VoiceInput />
+            </div>
+            <MediaPreviewDock className="absolute bottom-[26%] right-4 z-20" />
+          </>
         ) : null}
 
         {compactHint ? (

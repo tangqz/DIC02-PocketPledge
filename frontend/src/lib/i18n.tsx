@@ -16,6 +16,7 @@ type TranslationDict = Record<string, string>;
 const zh: TranslationDict = {
   // App
   "app.title": "Study Buddy",
+  "app.loading": "加载中…",
 
   // Setup
   "setup.title": "环境校准",
@@ -74,11 +75,41 @@ const zh: TranslationDict = {
   // Chat
   "chat.agent": "助手",
   "chat.user": "我",
+
+  // Auth
+  "auth.loginTitle": "登录 Study Buddy",
+  "auth.registerTitle": "创建账号",
+  "auth.username": "用户名",
+  "auth.emailOptional": "邮箱（可选）",
+  "auth.password": "密码",
+  "auth.login": "登录",
+  "auth.register": "注册",
+  "auth.pleaseWait": "请稍候…",
+  "auth.hasAccount": "已有账号？",
+  "auth.noAccount": "还没有账号？",
+  "auth.goLogin": "去登录",
+  "auth.goRegister": "去注册",
+  "auth.logout": "退出",
+  "auth.error.network": "网络错误",
+  "auth.error.loginFailed": "登录失败",
+  "auth.error.registerFailed": "注册失败",
+
+  // Media preview
+  "media.previewTitle": "实时监督画面",
+  "media.live": "实时",
+  "media.inactive": "未连接",
+  "media.camera": "摄像头",
+  "media.screen": "屏幕",
+  "media.ready": "已连接",
+  "media.offline": "未开启",
+  "media.cameraUnavailable": "摄像头未开启",
+  "media.screenUnavailable": "屏幕共享未开启",
 };
 
 // ── English translations ──
 const en: TranslationDict = {
   "app.title": "Study Buddy",
+  "app.loading": "Loading…",
 
   "setup.title": "Environment Calibration",
   "setup.cameraLabel": "Camera Preview",
@@ -130,6 +161,33 @@ const en: TranslationDict = {
 
   "chat.agent": "Agent",
   "chat.user": "Me",
+
+  "auth.loginTitle": "Sign In to Study Buddy",
+  "auth.registerTitle": "Create Account",
+  "auth.username": "Username",
+  "auth.emailOptional": "Email (optional)",
+  "auth.password": "Password",
+  "auth.login": "Sign In",
+  "auth.register": "Register",
+  "auth.pleaseWait": "Please wait…",
+  "auth.hasAccount": "Already have an account?",
+  "auth.noAccount": "Need an account?",
+  "auth.goLogin": "Sign in",
+  "auth.goRegister": "Register",
+  "auth.logout": "Log Out",
+  "auth.error.network": "Network error",
+  "auth.error.loginFailed": "Login failed",
+  "auth.error.registerFailed": "Registration failed",
+
+  "media.previewTitle": "Live Monitoring",
+  "media.live": "Live",
+  "media.inactive": "Offline",
+  "media.camera": "Camera",
+  "media.screen": "Screen",
+  "media.ready": "Connected",
+  "media.offline": "Off",
+  "media.cameraUnavailable": "Camera is not enabled",
+  "media.screenUnavailable": "Screen share is not enabled",
 };
 
 const dictionaries: Record<Locale, TranslationDict> = { zh, en };
