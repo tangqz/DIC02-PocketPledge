@@ -138,6 +138,12 @@ export default function FocusLayout() {
     });
   }, [interruptAgentOutput, locale, send]);
 
+  const handleImmediateResume = useCallback(() => {
+    interruptAgentOutput();
+    setChatOpen(false);
+    send({ type: "resume-now" });
+  }, [interruptAgentOutput, send]);
+
   return (
     <div className="relative flex h-full flex-col animate-fade-in">
       {/* Top bar */}
@@ -202,15 +208,6 @@ export default function FocusLayout() {
           {!degradedMode && (
             <div className="absolute bottom-24 left-1/2 -translate-x-1/2">
               <VoiceInput />
-            </div>
-          )}
-
-          {/* Pause remaining indicator */}
-          {isPaused && pauseRemaining !== undefined && (
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 rounded-full bg-warning/20 px-4 py-1.5 text-sm font-medium text-warning backdrop-blur-md">
-              {locale === "zh" ? "暂停剩余: " : "Break: "}
-              {Math.floor(pauseRemaining / 60)}:
-              {String(pauseRemaining % 60).padStart(2, "0")}
             </div>
           )}
 
@@ -279,8 +276,28 @@ export default function FocusLayout() {
       </div>
 
       {/* Pause overlay */}
-      {isPaused && (
-        <div className="pointer-events-none absolute inset-0 z-10 bg-black/30 backdrop-blur-sm" />
+      {isPaused && pauseRemaining !== undefined && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+          <div className="pointer-events-auto min-w-80 rounded-[28px] border border-white/12 bg-surface-elevated/80 px-8 py-7 text-center shadow-2xl backdrop-blur-xl">
+            <p className="text-xs uppercase tracking-[0.35em] text-warning/70">
+              {locale === "zh" ? "暂停中" : "Paused"}
+            </p>
+            <p className="mt-4 font-mono text-6xl font-semibold text-white/92">
+              {Math.floor(pauseRemaining / 60)}:{String(pauseRemaining % 60).padStart(2, "0")}
+            </p>
+            <p className="mt-3 text-sm text-white/55">
+              {locale === "zh"
+                ? "休息够了就立刻回来，我这边会马上续上计时。"
+                : "Come back when ready. The focus timer will resume immediately."}
+            </p>
+            <button
+              onClick={handleImmediateResume}
+              className="mt-6 inline-flex items-center justify-center rounded-2xl bg-success/85 px-6 py-3 text-sm font-semibold text-white transition hover:scale-[1.02] hover:bg-success active:scale-[0.98]"
+            >
+              {locale === "zh" ? "恢复专注" : "Resume Focus"}
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

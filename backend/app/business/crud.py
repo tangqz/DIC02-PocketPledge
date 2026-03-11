@@ -236,6 +236,23 @@ def get_user_status(db: Session, user_id: int) -> dict:
 
 
 def _normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    def _parse_int(value: object) -> int | None:
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+            try:
+                return int(stripped)
+            except ValueError:
+                return None
+        return None
+
     raw_tasks = plan.get("tasks") or []
     tasks: list[dict[str, Any]] = []
     for index, raw_task in enumerate(raw_tasks, start=1):
@@ -259,16 +276,25 @@ def _normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
         )
 
     total_minutes = plan.get("totalMinutes")
-    try:
-        normalized_total_minutes = int(total_minutes)
-    except (TypeError, ValueError):
+    normalized_total_minutes = _parse_int(total_minutes)
+    if normalized_total_minutes is None:
         normalized_total_minutes = sum(task.get("estimatedMinutes") or 0 for task in tasks)
 
     suggested_duration = plan.get("suggestedDuration")
-    try:
-        normalized_duration = int(suggested_duration)
-    except (TypeError, ValueError):
-        normalized_duration = max(normalized_total_minutes, 0) * 60
+    derived_duration = 0
+    first_task = tasks[0] if tasks else None
+    first_task_minutes = first_task.get("estimatedMinutes") if isinstance(first_task, dict) else None
+    if isinstance(first_task_minutes, int) and first_task_minutes > 0:
+        derived_duration = first_task_minutes * 60
+    elif normalized_total_minutes > 0 and len(tasks) <= 1:
+        derived_duration = normalized_total_minutes * 60
+
+    normalized_duration = _parse_int(suggested_duration)
+    if normalized_duration is None:
+        normalized_duration = derived_duration or max(normalized_total_minutes, 0) * 60
+
+    if derived_duration > 0 and normalized_duration > 0 and abs(normalized_duration - derived_duration) >= 60:
+        normalized_duration = derived_duration
 
     return {
         "tasks": tasks,

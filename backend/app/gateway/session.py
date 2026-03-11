@@ -34,6 +34,7 @@ class SessionState:
     pending_capture_sources: list[str] = field(default_factory=list)
     pending_capture_mode: str = "system-agent"
     chat_history: list[dict[str, str]] = field(default_factory=list)
+    image_timeline: list[tuple[float, list[dict[str, Any]]]] = field(default_factory=list)
 
     MAX_HISTORY_TURNS: int = 30
 

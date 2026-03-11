@@ -115,19 +115,61 @@ class MockDifyClient:
 		images: list[dict[str, Any]],
 		current_task: str | None = None,
 		session_id: str | None = None,
-	) -> bool:
+	) -> tuple[bool, str]:
 		_ = (current_task, session_id)
 		if not images:
-			return False
+			return False, ""
 
 		for image in images:
 			source = str(image.get("source", "")).lower()
 			hint = str(image.get("hint", "")).lower()
 			if any(keyword in hint for keyword in ("phone", "video", "game", "social")):
-				return True
+				return True, "mock: 发现违规关键字"
 			if source == "screen" and len(str(image.get("data", ""))) < 128:
-				return True
-		return False
+				return True, "mock: 屏幕数据异常"
+		return False, ""
+
+	async def evaluate_start_readiness(
+		self,
+		images: list[dict[str, Any]],
+		current_task: str | None = None,
+		session_id: str | None = None,
+	) -> dict[str, Any]:
+		_ = (current_task, session_id)
+		has_camera = False
+		has_screen = False
+		screen_full = False
+		for image in images:
+			source = str(image.get("source", "")).lower()
+			raw_metadata = image.get("metadata")
+			metadata: dict[str, Any] = raw_metadata if isinstance(raw_metadata, dict) else {}
+			if source == "camera":
+				has_camera = True
+			if source == "screen":
+				has_screen = True
+				if str(metadata.get("displaySurface", "")).lower() == "monitor":
+					screen_full = True
+
+		if not has_camera or not has_screen:
+			return {
+				"approved": False,
+				"camera_ok": has_camera,
+				"screen_ok": has_screen and screen_full,
+				"reason": "还没同时拿到摄像头和全屏共享画面",
+			}
+		if not screen_full:
+			return {
+				"approved": False,
+				"camera_ok": True,
+				"screen_ok": False,
+				"reason": "请改成整块屏幕的全屏共享",
+			}
+		return {
+			"approved": True,
+			"camera_ok": True,
+			"screen_ok": True,
+			"reason": "环境检查通过",
+		}
 
 	async def run_system_agent(
 		self,
@@ -431,8 +473,28 @@ class DifyClient:
 			)
 			response.raise_for_status()
 			data = response.json()
-			verdict = _pick_bool_payload(data)
-			return bool(verdict)
+			
+			verdict = False
+			reason = ""
+			try:
+				if "data" in data and isinstance(data["data"], dict) and "outputs" in data["data"]:
+					text = (data["data"]["outputs"].get("text") or "").strip()
+					# try to parse json from text
+					import json
+					# extract json
+					import re
+					match = re.search(r"\{.*\}", text, re.DOTALL)
+					if match:
+						parsed = json.loads(match.group(0))
+						verdict = bool(parsed.get("is_distracted", False))
+						reason = str(parsed.get("reason", ""))
+				else:
+					# Legacy fallback
+					verdict = bool(_pick_bool_payload(data))
+			except Exception as e:
+				logger.warning("Failed to parse dify vision response: %s", e)
+			
+			return verdict, reason
 
 	async def _upload_vision_images(
 		self,
@@ -509,6 +571,38 @@ class DifyClient:
 
 			if last_error is not None:
 				raise last_error
+		return {}
+
+	async def evaluate_start_readiness(
+		self,
+		images: list[dict[str, Any]],
+		current_task: str | None = None,
+		session_id: str | None = None,
+	) -> dict[str, Any]:
+		_ = current_task
+		has_camera = any(str(image.get("source", "")).lower() == "camera" for image in images)
+		screen_metadata = next(
+			(
+				image.get("metadata")
+				for image in images
+				if str(image.get("source", "")).lower() == "screen" and isinstance(image.get("metadata"), dict)
+			),
+			{},
+		)
+		screen_ok = str((screen_metadata or {}).get("displaySurface", "")).lower() == "monitor"
+		if not has_camera or not screen_ok:
+			return {
+				"approved": False,
+				"camera_ok": has_camera,
+				"screen_ok": screen_ok,
+				"reason": "请确保摄像头能拍到上半身，并且使用全屏共享后再开始",
+			}
+		return {
+			"approved": True,
+			"camera_ok": True,
+			"screen_ok": True,
+			"reason": "环境检查通过",
+		}
 
 
 def get_dify_client() -> MockDifyClient | DifyClient:

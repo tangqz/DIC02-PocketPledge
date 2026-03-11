@@ -25,6 +25,12 @@ export interface SnapshotImage {
   source: "camera" | "screen";
   data: string; // base64 JPEG
   mime_type: string;
+  metadata?: {
+    width?: number;
+    height?: number;
+    displaySurface?: string;
+    facingMode?: string;
+  };
 }
 
 /**
@@ -81,6 +87,10 @@ export interface CaptureContextResult {
   error?: string;
 }
 
+export interface ResumeNow {
+  type: "resume-now";
+}
+
 export type TxMessage =
   | MicAudioData
   | MicAudioEnd
@@ -88,7 +98,8 @@ export type TxMessage =
   | InterruptSignal
   | PeriodicScreenshot
   | FrontendPlaybackComplete
-  | CaptureContextResult;
+  | CaptureContextResult
+  | ResumeNow;
 
 // ── Downstream (Backend → Frontend)  Rx ──
 //

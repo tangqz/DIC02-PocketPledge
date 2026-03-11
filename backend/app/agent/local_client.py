@@ -15,7 +15,7 @@ from typing import Any, cast
 
 from openai import AsyncOpenAI
 
-from app.agent.prompts import CHAT_SYSTEM_PROMPT, SYSTEM_AGENT_PROMPT, VISION_EVALUATION_PROMPT
+from app.agent.prompts import CHAT_SYSTEM_PROMPT, START_READINESS_PROMPT, SYSTEM_AGENT_PROMPT, VISION_EVALUATION_PROMPT
 from app.agent.tools import TOOL_DEFINITIONS, execute_tool
 from app.business.models import SessionLocal
 from app.business.crud import get_user_profile_document
@@ -55,15 +55,26 @@ def _summarize_message_content(content: Any) -> str:
 
 
 def _serialize_tool_call(tool_call: Any) -> dict[str, Any]:
+    if isinstance(tool_call, dict):
+        serialized = dict(tool_call)
+    elif hasattr(tool_call, "model_dump"):
+        serialized = cast(dict[str, Any], tool_call.model_dump(exclude_none=True))
+    elif hasattr(tool_call, "to_dict"):
+        serialized = cast(dict[str, Any], tool_call.to_dict())
+    else:
+        serialized = {}
+
     function = getattr(tool_call, "function", None)
-    return {
-        "id": getattr(tool_call, "id", ""),
-        "type": getattr(tool_call, "type", "function") or "function",
-        "function": {
-            "name": getattr(function, "name", "") or "",
-            "arguments": getattr(function, "arguments", "{}") or "{}",
-        },
-    }
+    serialized["id"] = serialized.get("id") or getattr(tool_call, "id", "")
+    serialized["type"] = serialized.get("type") or getattr(tool_call, "type", "function") or "function"
+
+    function_payload = serialized.get("function")
+    if not isinstance(function_payload, dict):
+        function_payload = {}
+    function_payload["name"] = function_payload.get("name") or getattr(function, "name", "") or ""
+    function_payload["arguments"] = function_payload.get("arguments") or getattr(function, "arguments", "{}") or "{}"
+    serialized["function"] = function_payload
+    return serialized
 
 
 def _serialize_assistant_message(message: Any) -> dict[str, Any]:
@@ -89,9 +100,9 @@ def _get_chat_client() -> AsyncOpenAI:
 def _get_agent_client() -> AsyncOpenAI:
     """OpenAI-compatible client for the System Agent model."""
     return AsyncOpenAI(
-        api_key=os.getenv("LOCAL_AGENT_API_KEY", "sk-placeholder"),
-        base_url=os.getenv("LOCAL_AGENT_API_BASE", "https://api.openai.com/v1"),
-        timeout=float(os.getenv("LOCAL_AGENT_TIMEOUT", "60")),
+        api_key=os.getenv("LOCAL_AGENT_API_KEY") or os.getenv("LOCAL_CHAT_API_KEY", "sk-placeholder"),
+        base_url=os.getenv("LOCAL_AGENT_API_BASE") or os.getenv("LOCAL_CHAT_API_BASE", "https://api.openai.com/v1"),
+        timeout=float(os.getenv("LOCAL_AGENT_TIMEOUT") or os.getenv("LOCAL_CHAT_TIMEOUT", "60")),
     )
 
 
@@ -164,13 +175,28 @@ class LocalLLMClient:
         self._system_agent_model = os.getenv("LOCAL_AGENT_MODEL", self._chat_model)
         self._vision_model = os.getenv("LOCAL_VISION_MODEL", self._chat_model)
         self._temperature_chat = float(os.getenv("LOCAL_CHAT_TEMPERATURE", "0.55"))
-        self._temperature_agent = float(os.getenv("LOCAL_AGENT_TEMPERATURE", "0.1"))
+        self._temperature_agent = float(os.getenv("LOCAL_AGENT_TEMPERATURE", os.getenv("LOCAL_CHAT_TEMPERATURE", "0.1")))
         # Thinking config — chat (Gemini) deliberately left unconfigured = off
         self._agent_enable_thinking = os.getenv("LOCAL_AGENT_ENABLE_THINKING", "true").lower() in ("true", "1", "yes")
+        self._agent_reasoning_effort = os.getenv("LOCAL_AGENT_REASONING_EFFORT", "").strip().lower()
+        self._agent_thinking_budget = int(os.getenv("LOCAL_AGENT_THINKING_BUDGET", "0"))
         self._vision_enable_thinking = os.getenv("LOCAL_VISION_ENABLE_THINKING", "true").lower() in ("true", "1", "yes")
         self._vision_thinking_budget = int(os.getenv("LOCAL_VISION_THINKING_BUDGET", "1024"))
         # Per-session conversation history
         self._histories: dict[str, list[dict[str, Any]]] = {}
+
+    def _build_system_agent_request_options(self) -> dict[str, Any]:
+        options: dict[str, Any] = {}
+        if self._agent_reasoning_effort in {"low", "medium", "high"}:
+            options["reasoning_effort"] = self._agent_reasoning_effort
+            return options
+
+        if self._agent_enable_thinking:
+            extra_body: dict[str, Any] = {"enable_thinking": True}
+            if self._agent_thinking_budget > 0:
+                extra_body["thinking_budget"] = self._agent_thinking_budget
+            options["extra_body"] = extra_body
+        return options
 
     def _get_history(self, session_id: str) -> list[dict[str, Any]]:
         if session_id not in self._histories:
@@ -246,22 +272,59 @@ class LocalLLMClient:
         images: list[dict[str, Any]],
         current_task: str | None = None,
         session_id: str | None = None,
-    ) -> bool:
+    ) -> tuple[bool, str]:
         """Evaluate whether the user is distracted using a vision model."""
         if not images:
-            return False
+            return False, ""
 
         prompt = VISION_EVALUATION_PROMPT.format(current_task=current_task or "学习")
 
         content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+        
+        # Parse and concatenate multiple images if present
+        import io
+        from PIL import Image
+        import base64
+        
+        pil_images = []
         for img in images:
             base64_data = str(img.get("data", ""))
-            mime_type = str(img.get("mime_type", "image/jpeg"))
             if base64_data:
-                content.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{mime_type};base64,{base64_data}"},
-                })
+                try:
+                    img_data = base64.b64decode(base64_data)
+                    pil_img = Image.open(io.BytesIO(img_data)).convert("RGB")
+                    pil_images.append(pil_img)
+                except Exception as e:
+                    logger.warning("Failed to decode image: %s", e)
+                    
+        if pil_images:
+            # Concatenate horizontally
+            widths, heights = zip(*(i.size for i in pil_images))
+            total_width = sum(widths)
+            max_height = max(heights)
+            
+            new_im = Image.new('RGB', (total_width, max_height))
+            x_offset = 0
+            for im in pil_images:
+                new_im.paste(im, (x_offset, 0))
+                x_offset += im.size[0]
+                
+            # Save for debugging
+            debug_path = os.path.join(os.path.dirname(__file__), "..", "..", "latest_vision_input.jpg")
+            try:
+                new_im.save(debug_path)
+            except Exception as e:
+                logger.warning("Failed to save debug image: %s", e)
+                
+            # Compress and encode
+            buffered = io.BytesIO()
+            new_im.save(buffered, format="JPEG", quality=80)
+            final_b64 = base64.b64encode(buffered.getvalue()).decode()
+            
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{final_b64}"},
+            })
 
         vision_extra: dict[str, Any] = {"enable_thinking": self._vision_enable_thinking}
         if self._vision_enable_thinking:
@@ -284,17 +347,124 @@ class LocalLLMClient:
             )
             text = (response.choices[0].message.content or "").strip()
             text = _strip_code_fences(text)
-            data = json.loads(text)
+            
+            is_distracted = False
+            reason = ""
+            import re
+            match = re.search(r"\{.*\}", text, re.DOTALL)
+            if match:
+                try:
+                    data = json.loads(match.group(0))
+                    is_distracted = bool(data.get("is_distracted", False))
+                    reason = str(data.get("reason", ""))
+                except json.JSONDecodeError:
+                    logger.warning("Failed to parse vision response as JSON: %s", text)
+            else:
+                logger.warning("No JSON found in vision response: %s", text)
+                
             logger.info(
                 "local vision api response session_id=%s model=%s text=%s",
                 session_id,
                 self._vision_model,
                 _truncate_text(text),
             )
-            return bool(data.get("is_distracted", False))
+            return is_distracted, reason
         except Exception:
             logger.exception("local vision evaluation failed")
-            return False
+            return False, ""
+
+    async def evaluate_start_readiness(
+        self,
+        images: list[dict[str, Any]],
+        current_task: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        if not images:
+            return {
+                "approved": False,
+                "camera_ok": False,
+                "screen_ok": False,
+                "reason": "还没拿到摄像头和屏幕画面",
+            }
+
+        metadata_lines: list[str] = []
+        for img in images:
+            source = str(img.get("source", "image"))
+            raw_metadata = img.get("metadata")
+            metadata: dict[str, Any] = raw_metadata if isinstance(raw_metadata, dict) else {}
+            width = metadata.get("width")
+            height = metadata.get("height")
+            display_surface = metadata.get("displaySurface")
+            facing_mode = metadata.get("facingMode")
+            pieces = [f"source={source}"]
+            if width and height:
+                pieces.append(f"size={width}x{height}")
+            if display_surface:
+                pieces.append(f"displaySurface={display_surface}")
+            if facing_mode:
+                pieces.append(f"facingMode={facing_mode}")
+            metadata_lines.append(", ".join(pieces))
+
+        prompt = START_READINESS_PROMPT
+        if current_task:
+            prompt += f"\n当前任务：{current_task}"
+        if metadata_lines:
+            prompt += "\n画面元数据：\n" + "\n".join(metadata_lines)
+
+        content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+        for img in images:
+            base64_data = str(img.get("data", ""))
+            mime_type = str(img.get("mime_type", "image/jpeg"))
+            if base64_data:
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime_type};base64,{base64_data}"},
+                })
+
+        vision_extra: dict[str, Any] = {"enable_thinking": self._vision_enable_thinking}
+        if self._vision_enable_thinking:
+            vision_extra["thinking_budget"] = self._vision_thinking_budget
+
+        try:
+            logger.info(
+                "local start-readiness request session_id=%s model=%s current_task=%s images=%s",
+                session_id,
+                self._vision_model,
+                _truncate_text(current_task or ""),
+                len(images),
+            )
+            response = await _get_vision_client().chat.completions.create(
+                model=self._vision_model,
+                messages=cast(Any, [{"role": "user", "content": content}]),
+                temperature=0,
+                max_tokens=160,
+                extra_body=vision_extra,
+            )
+            text = _strip_code_fences((response.choices[0].message.content or "").strip())
+            data = json.loads(text)
+            if not isinstance(data, dict):
+                raise ValueError("start readiness response is not a JSON object")
+            result = {
+                "approved": bool(data.get("approved", False)),
+                "camera_ok": bool(data.get("camera_ok", False)),
+                "screen_ok": bool(data.get("screen_ok", False)),
+                "reason": str(data.get("reason", "环境检查未通过") or "环境检查未通过"),
+            }
+            logger.info(
+                "local start-readiness response session_id=%s model=%s text=%s",
+                session_id,
+                self._vision_model,
+                _truncate_text(text),
+            )
+            return result
+        except Exception:
+            logger.exception("local start readiness evaluation failed")
+            return {
+                "approved": False,
+                "camera_ok": False,
+                "screen_ok": False,
+                "reason": "环境检查失败，请重新共享画面后再试",
+            }
 
     async def run_system_agent(
         self,
@@ -322,6 +492,7 @@ class LocalLLMClient:
 
         for _round in range(MAX_TOOL_ROUNDS):
             try:
+                request_options = self._build_system_agent_request_options()
                 response = await _get_agent_client().chat.completions.create(
                     model=self._system_agent_model,
                     messages=cast(Any, messages),
@@ -329,7 +500,7 @@ class LocalLLMClient:
                     tools=cast(Any, TOOL_DEFINITIONS),
                     tool_choice="auto",
                     max_tokens=1024,
-                    extra_body={"enable_thinking": self._agent_enable_thinking},
+                    **request_options,
                 )
             except Exception:
                 logger.exception("local system agent LLM call failed, round=%d", _round)
@@ -353,6 +524,7 @@ class LocalLLMClient:
                     result_str = execute_tool(fn_name, fn_args, user_id)
                     messages.append({
                         "role": "tool",
+                        "name": fn_name,
                         "tool_call_id": tool_call.id,
                         "content": result_str,
                     })
@@ -398,10 +570,12 @@ class LocalLLMClient:
             pass
 
         # Try to extract JSON from within the text
-        match = re.search(r"\{[^{}]*\}", cleaned, re.DOTALL)
+        match = re.search(r"\{.*\}", cleaned, re.DOTALL)
         if match:
             try:
-                return json.loads(match.group(0))
+                data = json.loads(match.group(0))
+                if isinstance(data, dict):
+                    return data
             except json.JSONDecodeError:
                 pass
 

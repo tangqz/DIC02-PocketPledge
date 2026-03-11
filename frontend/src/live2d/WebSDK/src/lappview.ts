@@ -228,8 +228,8 @@ export class LAppView {
     if (dragDistance >= LAppDefine.ModelInteractionDragThreshold * window.devicePixelRatio) {
       this._modelDragging = true;
       LAppDelegate.getInstance().getAdapter()?.translateModel(
-        viewX - this._lastPointerViewX,
-        viewY - this._lastPointerViewY
+        (viewX - this._lastPointerViewX) * LAppDefine.ModelInteractionDragSensitivity,
+        (viewY - this._lastPointerViewY) * LAppDefine.ModelInteractionDragSensitivity
       );
     } else {
       live2DManager.onDrag(viewX, viewY);

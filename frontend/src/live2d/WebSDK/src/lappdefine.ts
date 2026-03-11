@@ -112,7 +112,8 @@ export const RenderTargetHeight = 1000;
 
 export const ENABLE_LIMITED_FRAME_RATE = true;
 export const LIMITED_FRAME_RATE = 60;
-export const ModelInteractionDragThreshold = 10;
-export const ModelInteractionWheelScaleStep = 0.1;
-export const ModelInteractionMinScale = 0.25;
-export const ModelInteractionMaxScale = 3.0;
+export const ModelInteractionDragThreshold = 14;
+export const ModelInteractionDragSensitivity = 0.3;
+export const ModelInteractionWheelScaleStep = 0.05;
+export const ModelInteractionMinScale = 0.15;
+export const ModelInteractionMaxScale = 4.5;

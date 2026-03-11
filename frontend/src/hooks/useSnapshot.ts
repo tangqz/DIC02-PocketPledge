@@ -111,16 +111,38 @@ export async function captureImagesFromStreams(options: {
 
   try {
     if (options.cameraEnabled && options.cameraStream) {
+      const cameraTrack = options.cameraStream.getVideoTracks()[0];
+      const cameraSettings = cameraTrack?.getSettings?.() ?? {};
       const data = await captureFrameFromStreamWithWait(options.cameraStream, canvas, videoCache);
       if (data) {
-        images.push({ source: "camera", data, mime_type: "image/jpeg" });
+        images.push({
+          source: "camera",
+          data,
+          mime_type: "image/jpeg",
+          metadata: {
+            width: Number(cameraSettings.width) || undefined,
+            height: Number(cameraSettings.height) || undefined,
+            facingMode: typeof cameraSettings.facingMode === "string" ? cameraSettings.facingMode : undefined,
+          },
+        });
       }
     }
 
     if (options.screenEnabled && options.screenStream) {
+      const screenTrack = options.screenStream.getVideoTracks()[0];
+      const screenSettings = screenTrack?.getSettings?.() ?? {};
       const data = await captureFrameFromStreamWithWait(options.screenStream, canvas, videoCache);
       if (data) {
-        images.push({ source: "screen", data, mime_type: "image/jpeg" });
+        images.push({
+          source: "screen",
+          data,
+          mime_type: "image/jpeg",
+          metadata: {
+            width: Number(screenSettings.width) || undefined,
+            height: Number(screenSettings.height) || undefined,
+            displaySurface: typeof screenSettings.displaySurface === "string" ? screenSettings.displaySurface : undefined,
+          },
+        });
       }
     }
   } finally {

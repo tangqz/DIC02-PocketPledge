@@ -29,7 +29,7 @@ async def process_text_chat(
 	session_id: str,
 	images: list[dict[str, Any]] | None = None,
 	current_task: str | None = None,
-) -> AsyncIterator[dict[str, str]]:
+) -> AsyncIterator[dict[str, Any]]:
 	"""Stream chat response chunks as text, expression, and base64 audio."""
 	dify_client = get_dify_client()
 	tts_service = get_tts_service()
@@ -43,12 +43,14 @@ async def process_text_chat(
 			current_task=current_task,
 		):
 			for sentence in buffer.push(token):
-				expression, clean_text = extract_expression_and_clean(sentence)
+				has_sys = "<<SYS>>" in sentence
+				expression, clean_text = extract_expression_and_clean(sentence.replace("<<SYS>>", ""))
 				if not clean_text:
 					continue
 				yield {
 					"text": clean_text,
 					"expression": expression,
+					"sys_triggered": has_sys,
 					"audio": await _build_audio_chunk_with_service(
 						clean_text,
 						expression,
@@ -58,11 +60,13 @@ async def process_text_chat(
 
 		remainder = buffer.flush()
 		if remainder:
-			expression, clean_text = extract_expression_and_clean(remainder)
+			has_sys = "<<SYS>>" in remainder
+			expression, clean_text = extract_expression_and_clean(remainder.replace("<<SYS>>", ""))
 			if clean_text:
 				yield {
 					"text": clean_text,
 					"expression": expression,
+					"sys_triggered": has_sys,
 					"audio": await _build_audio_chunk_with_service(
 						clean_text,
 						expression,
@@ -114,7 +118,7 @@ async def evaluate_vision(
 	images: list[dict[str, Any]],
 	current_task: str | None = None,
 	session_id: str = "anonymous",
-) -> bool:
+) -> tuple[bool, str]:
     """Evaluate distraction verdict through the configured vision provider."""
     dify_client = get_dify_client()
     try:
@@ -125,10 +129,34 @@ async def evaluate_vision(
         )
     except Exception:
         logger.exception("evaluate_vision failed, defaulting to focused")
-        return False
+        return False, ""
+
+
+async def evaluate_start_readiness(
+	images: list[dict[str, Any]],
+	current_task: str | None = None,
+	session_id: str = "anonymous",
+) -> dict[str, Any]:
+	"""Evaluate whether camera/screen setup is sufficient to start supervision."""
+	dify_client = get_dify_client()
+	try:
+		return await dify_client.evaluate_start_readiness(
+			images=images,
+			current_task=current_task,
+			session_id=session_id,
+		)
+	except Exception:
+		logger.exception("evaluate_start_readiness failed, defaulting to reject")
+		return {
+			"approved": False,
+			"camera_ok": False,
+			"screen_ok": False,
+			"reason": "环境检查失败，请重新共享摄像头和屏幕后再试",
+		}
 
 
 __all__ = [
+	"evaluate_start_readiness",
 	"evaluate_vision",
 	"process_text_chat",
 	"process_voice_chat",

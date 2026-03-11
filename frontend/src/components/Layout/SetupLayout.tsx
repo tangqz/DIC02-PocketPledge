@@ -40,6 +40,8 @@ export default function SetupLayout() {
     vadActive,
     micMuted,
     requestMicrophone,
+    snapshotInterval,
+    setSnapshotInterval,
   } = useMediaStore();
   const { t, locale, setLocale } = useI18n();
   const live2dRef = useRef<Live2DCanvasHandle>(null);
@@ -161,6 +163,19 @@ export default function SetupLayout() {
               <span className="text-white/70">{t("status.balance")}</span>
               <span className="font-mono font-medium text-success">{balance}</span>
             </div>
+            {!degradedMode && (
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-white/70">{locale === "zh" ? "监控间隔 (秒)" : "Snapshot Interval (s)"}</span>
+                <input
+                  type="number"
+                  min="5"
+                  max="300"
+                  value={snapshotInterval}
+                  onChange={(e) => setSnapshotInterval(Number(e.target.value) || 15)}
+                  className="w-16 rounded bg-surface/50 px-2 py-0.5 text-right font-mono text-white/90 outline-none focus:bg-surface"
+                />
+              </div>
+            )}
           </div>
         </div>
 
