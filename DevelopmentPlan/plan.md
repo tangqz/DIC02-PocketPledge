@@ -1,3 +1,59 @@
+# 此节为最新内容：
+Here is a comprehensive summary of the "Study Buddy" project, capturing its overall architecture, economic mechanics, and technical topology.
+
+You can think of this project as a highly sophisticated, real-time "Visual Novel" engine where the branching narrative is driven by the user's real-world study habits, powered by a robust data science and LLM backend.
+
+### I. The Core Philosophy: The Dual-Brain System
+
+At its heart, the system separates rule enforcement from emotional engagement to prevent the AI from experiencing "persona drift."
+
+* **The Black Brain (The Supervisor)**: A cold, stateless Vision LLM workflow. It silently analyzes periodic screenshots to determine if the user is distracted. It does not speak; it only outputs JSON decisions and triggers penalties.
+* **The White Brain (The Companion)**: An empathetic, state-aware LLM Chatbot. It provides verbal encouragement, reacts dynamically to the user's progress, and translates system penalty events into emotional responses (e.g., getting angry when the user looks at their phone).
+
+### II. The Gamified Economic Engine
+
+The project features a rigorous, ACID-compliant ledger that turns studying into an interactive, high-stakes game:
+
+* **Pre-paid Commitment**: Users pay a service fee upfront based on their intended focus time.
+* **The Penalty Split**: If the user is caught slacking (triggering the "distraction streak" threshold), the system deducts a penalty from their wallet. This deduction is atomically split into two system accounts: a **Charity Sink** and a **Reward Pool**.
+* **Goal Rewards**: The AI can issue extra challenges. Upon completion, users earn coins back from the Reward Pool.
+* **The "Bad Ending" (Graceful Downgrade)**: If a user's balance hits zero, the system executes a hard state change. The Live2D avatar disappears, the voice synthesis stops, and the UI downgrades to a cold, basic timer—a powerful psychological deterrent.
+
+### III. Technical Topology (The 5-Pillar Architecture)
+
+The system is built on a decoupled, modular monolith backend paired with a reactive frontend and a low-code AI orchestrator.
+
+* **Developer A (Frontend & Presentation)**: Builds the React/Vite web application. Manages the WebGL Live2D stage, pure browser-side Voice Activity Detection (VAD), and silent WebRTC screen/camera capturing.
+* **Developer B (Gateway & State Machine)**: Acts as the traffic controller using Python FastAPI. Manages WebSocket connections, in-memory timers, distraction streak counters, and routes the media/JSON payloads between the frontend and the AI.
+* **Developer C (The Ledger & Database)**: Handles the financial core using SQLAlchemy. Exposes strictly typed REST APIs for wallet deductions, transaction logs, and reward payouts, ensuring no "money" is ever created or destroyed by accident.
+* **Developer D (AI Orchestration)**: Configures the Dify workflows, designs the persona prompts, connects the Long-Term Memory (RAG) for session summaries, and registers Developer C's APIs as executable LLM tools.
+* **Developer E (Media & Translator)**: Builds the async audio/text pipeline. Converts speech to text (ASR), parses Dify's streaming text to extract `[expression]` tags, and synthesizes the clean text into streaming audio (TTS).
+
+### IV. The User Journey
+
+1. **Setup**: The user logs in, sets a study duration, and the system deducts the upfront fee. The Live2D avatar appears, greeting them based on yesterday's memory.
+2. **Focus Phase**: The user studies. The frontend silently captures images every few minutes, while the microphone listens for natural conversation.
+3. **Intervention**: If the user looks at their phone, the Vision LLM detects it. After 3 consecutive offenses, Developer B triggers Developer C to deduct coins. Developer D's Chatbot is notified, and Developer E generates an angry voice line. The Live2D avatar frowns and scolds the user in real-time.
+4. **Resolution**: The session ends. The AI summarizes the day's emotional trajectory and achievements, persisting it to the vector database for tomorrow.
+
+---
+对于和用户交互的vtuber，我正在制作一个带有长效记忆的聊天机器人。为了保证不爆context，我计划使用rag作为记忆库。但是，在我的理解中，rag需要llm去主动检索才能获得一些信息。我如何保证llm能在每条回复中都充分参考rag里保存的过去的聊天记录 来使其更加拟人化？换句话说，rag里提取的不仅是必要的事实性信息，还有有助于拟人化的联想性信息。
+
+为了解决这个问题，我计划让聊天机器人使用一个“用户画像文档”作为上下文。这个文档由系统Agent进行维护，它具有有限的长度。“创建或更新这个文档”成为了系统agent需要消化的事件之一。rag可以作为数据库供系统Agent在维护文档时调用。同时，聊天agent也有查询该rag的权限。
+
+聊天vtuber完全不进行工具调用，以保证回复的及时性和流畅性。它将通过提示词工程通过输出特定命令来执行相应动作。比如通过特殊命令来切换live2d表情（通过系统提示词给出支持的表情列表）、以及触发系统agent完成决策、工具调用。这个触发系统agent的关键词必须位于一段话的末尾。聊天agent的单次输出长度必须通过提示词严格限制，以完成拟人化。
+
+具体而言，当用户说“我上个厕所/我太累了，想暂停一下”时，聊天Agent会回复“我帮你申请一下”，然后在结尾触发系统Agent处理这个事件。系统agent将拿到此次会话的所有聊天记录，从而知晓需要处理的究竟是哪件事。它会1）调用工具查询过去的暂停频率，根据用户画像综合判定他的需求合不合理 2）给出一个合适的暂停时间，通过调用工具激活前端监督的暂停和倒计时。3）返回处理结果给聊天Agent。他将口语化地回答“帮你申请到了5分钟的暂停时间，快去快回/你怎么一开始专注就要休息了，此次审核未通过，还是认真完成你的任务吧，不认真就要被系统扣钱啦”
+
+用户将能随时与聊天vtuber闲聊，即使不在监督模式下。
+
+在一开始/一个计划周期结束后，用户将能够和聊天vtuber共同商量出一个自律计划。这个计划将由系统agent调用工具记录于数据库中，并且在前端上显示日历，体现出这个计划的内容，如“连续7天，每天30分钟”或“1个月至少15天完成30分钟专注”等。需要比较灵活。也支持后续与聊天Agent商量，来调整计划。
+
+用户每次开始/结束监督也是通过聊天Agent+系统agent来的。
+
+我觉得dify的体积过于庞大，同时跨平台调试过于麻烦。因此我在后端直接实现agent的功能。暂时弃用dify。但是不删去相关代码，而是通过一个环境变量来控制使用本地workflow还是dify。使用本地workflow时，不使用rag。  
+
+**最新内容结束**
 # 请注意，此文档已经过时。作为AI Agent，以下内容仅供参考，请以用户的实际需求提示为准。
 
 ---
