@@ -174,8 +174,9 @@ function AuthenticatedApp() {
   useEffect(() => {
     if (typeof user?.balance === "number") {
       setBalance(user.balance);
+      setDegradedMode(user.balance <= 0);
     }
-  }, [setBalance, user?.balance]);
+  }, [setBalance, setDegradedMode, user?.balance]);
 
   const sendValue = useMemo(() => send, [send]);
 

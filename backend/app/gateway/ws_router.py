@@ -508,7 +508,11 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 
     try:
         while True:
-            message = await ws.receive_json()
+            try:
+                message = await ws.receive_json()
+            except RuntimeError as exc:
+                logger.info("WebSocket receive ended, user_id=%s error=%s", user_id, exc)
+                break
             await dispatch_message(user_id, session, message)
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected, user_id=%s", user_id)
@@ -1048,14 +1052,14 @@ async def stream_agent_reply(
         images=images,
         current_task=current_task,
     ):
-        chunk_text = str(chunk.get("text", ""))
+        chunk_text = _sanitize_agent_text(str(chunk.get("text", "")))
         expression = str(chunk.get("expression", "neutral"))
         audio = str(chunk.get("audio", ""))
         if chunk_text:
             parts.append(chunk_text)
             sent_text = True
             await send_agent_text_chunk(user_id, chunk_text)
-        if include_audio and audio:
+        if include_audio and audio and chunk_text:
             await send_audio(
                 user_id,
                 audio=audio,

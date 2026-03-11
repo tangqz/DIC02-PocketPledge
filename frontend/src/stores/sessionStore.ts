@@ -128,6 +128,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     if (next === "active" && opts.duration !== undefined) {
       patch.timerSeconds = opts.duration;
       patch.totalDuration = opts.duration;
+      patch.degradedMode = false;
+    }
+    if (next === "setup") {
+      patch.degradedMode = false;
     }
     if (next === "active") {
       patch.pauseRemaining = undefined;
@@ -147,6 +151,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const event: BalanceEvent = { change, reason, timestamp: Date.now() };
     set({
       balance,
+      degradedMode: balance <= 0 ? get().degradedMode : false,
       balanceHistory: [...get().balanceHistory, event],
       lastBalanceChange: event,
     });
