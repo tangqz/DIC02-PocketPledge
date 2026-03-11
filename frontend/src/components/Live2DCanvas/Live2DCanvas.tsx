@@ -363,7 +363,7 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
 
       {/* Debug overlay (dev only) */}
       {IS_DEV && (
-        <div className="pointer-events-none absolute right-2 top-2 rounded bg-slate-800/55 px-2 py-1 font-mono text-[10px] leading-tight text-slate-700">
+        <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-slate-800/55 px-2 py-1 font-mono text-[10px] leading-tight text-slate-200">
           {debugText}
         </div>
       )}

@@ -12,6 +12,7 @@ import VoiceInput from "@/components/VoiceInput/VoiceInput";
 import Live2DCanvas, { type Live2DCanvasHandle } from "@/components/Live2DCanvas/Live2DCanvas";
 import DailyPlanCalendar from "@/components/Dashboard/DailyPlanCalendar";
 import CharacterMarket from "@/components/Dashboard/CharacterMarket";
+import MediaPreviewDock from "@/components/SupervisionPanel/MediaPreviewDock";
 
 export default function SetupLayout() {
   const live2dRef = useRef<Live2DCanvasHandle>(null);
@@ -208,9 +209,12 @@ export default function SetupLayout() {
           </div>
 
           {!degradedMode ? (
-            <div className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2">
-              <VoiceInput />
-            </div>
+            <>
+              <div className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2">
+                <VoiceInput />
+              </div>
+              <MediaPreviewDock className="absolute bottom-4 right-4 z-20" />
+            </>
           ) : null}
 
           {activeToolCall ? (
