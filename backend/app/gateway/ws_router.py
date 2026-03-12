@@ -1165,9 +1165,24 @@ def _build_temporal_stitched_image(session: SessionState, current_images: list[d
 
     now = time.time()
     session.image_timeline.append((now, current_images))
-    session.image_timeline = [item for item in session.image_timeline if now - item[0] < 400]
 
-    targets = [0, 5, 10, 30, 60, 120]
+    # Estimate base interval from recent history (default 15s)
+    intervals = []
+    for i in range(1, len(session.image_timeline)):
+        diff = session.image_timeline[i][0] - session.image_timeline[i-1][0]
+        if 0.5 <= diff <= 120:
+            intervals.append(diff)
+
+    base_interval = sum(intervals) / len(intervals) if intervals else 15.0
+
+    # Nonlinear sparse sampling: multipliers e.g. 0, 1, 3, 7, 15, 31, 63, 127
+    multipliers = [0, 1, 3, 7, 15, 31, 63, 127]
+    targets = [m * base_interval for m in multipliers]
+
+    # Keep timeline items up to the max target time + a buffer
+    max_history = max(targets) + base_interval * 2
+    session.image_timeline = [item for item in session.image_timeline if now - item[0] < max_history]
+
     selected = []
     seen_ids = set()
 
@@ -1175,10 +1190,17 @@ def _build_temporal_stitched_image(session: SessionState, current_images: list[d
         target_time = now - t_offset
         if not session.image_timeline:
             break
+
+        # Find closest item
         closest = min(session.image_timeline, key=lambda x: abs(x[0] - target_time))
-        # only include if not chosen before
+
+        # Avoid including images that are too far from the target (e.g. gap > base_interval * 1.5)
+        if abs(closest[0] - target_time) > base_interval * 1.5:
+            continue
+
+        # Only include if not chosen before, up to 8 images total
         item_id = id(closest[1])
-        if item_id not in seen_ids:
+        if item_id not in seen_ids and len(selected) < 8:
             seen_ids.add(item_id)
             selected.append(closest)
 
@@ -1187,9 +1209,9 @@ def _build_temporal_stitched_image(session: SessionState, current_images: list[d
     row_images = []
 
     try:
-        font = ImageFont.load_default()
+        font = ImageFont.load_default(size=36)
     except Exception:
-        font = None
+        font = ImageFont.load_default()
 
     for timestamp, imgs in selected:
         pil_imgs = []
@@ -1223,12 +1245,12 @@ def _build_temporal_stitched_image(session: SessionState, current_images: list[d
 
         dt = int(now - timestamp)
         label = "T" if dt <= 1 else f"T-{dt}s"
-        txt_height = 24
+        txt_height = 48
         
         row_final = Image.new('RGB', (group_img.width, group_img.height + txt_height), color=(30, 30, 30))
         row_final.paste(group_img, (0, txt_height))
         draw = ImageDraw.Draw(row_final)
-        draw.text((5, 2), label, fill=(255, 255, 0), font=font)
+        draw.text((5, 5), label, fill=(255, 255, 0), font=font)
         row_images.append(row_final)
 
     if not row_images:
