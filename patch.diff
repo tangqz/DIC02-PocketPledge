@@ -1,0 +1,17 @@
+--- frontend/src/components/Dashboard/CharacterMarket.tsx
++++ frontend/src/components/Dashboard/CharacterMarket.tsx
+@@ -29,12 +29,13 @@
+           return (
+             <button
+               key={item.id}
++              aria-pressed={isActive}
+               onClick={() => {
+                 if (item.id === selectedCharacterId) {
+                   return;
+                 }
+                 setSelectedCharacterId(item.id);
+                 onSwitch(item.id);
+               }}
+-              className={`rounded-xl border p-2 text-left transition ${
++              className={`rounded-xl border p-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                 isActive
