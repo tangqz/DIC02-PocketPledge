@@ -165,7 +165,9 @@ def internal_update_user_profile_api(
     )
 
 
-@router.get("/internal/users/{user_id}/pause-requests", response_model=PauseRequestListResponse)
+@router.get(
+    "/internal/users/{user_id}/pause-requests", response_model=PauseRequestListResponse
+)
 def internal_pause_requests_api(
     user_id: int,
     limit: int = 20,
@@ -175,7 +177,9 @@ def internal_pause_requests_api(
     return list_pause_requests(db=db, user_id=user_id, limit=limit)
 
 
-@router.post("/internal/users/{user_id}/pause-requests", response_model=PauseRequestListResponse)
+@router.post(
+    "/internal/users/{user_id}/pause-requests", response_model=PauseRequestListResponse
+)
 def internal_create_pause_request_api(
     user_id: int,
     payload: PauseRequestCreate,
@@ -195,7 +199,10 @@ def internal_create_pause_request_api(
     return list_pause_requests(db=db, user_id=user_id, limit=20)
 
 
-@router.get("/internal/users/{user_id}/session-summaries", response_model=SessionSummaryListResponse)
+@router.get(
+    "/internal/users/{user_id}/session-summaries",
+    response_model=SessionSummaryListResponse,
+)
 def internal_session_summaries_api(
     user_id: int,
     limit: int = 20,
@@ -205,7 +212,10 @@ def internal_session_summaries_api(
     return list_session_summaries(db=db, user_id=user_id, limit=limit)
 
 
-@router.post("/internal/users/{user_id}/session-summaries", response_model=SessionSummaryListResponse)
+@router.post(
+    "/internal/users/{user_id}/session-summaries",
+    response_model=SessionSummaryListResponse,
+)
 def internal_create_session_summary_api(
     user_id: int,
     payload: SessionSummaryCreate,
@@ -222,7 +232,9 @@ def internal_create_session_summary_api(
     return list_session_summaries(db=db, user_id=user_id, limit=20)
 
 
-@router.get("/internal/users/{user_id}/transactions", response_model=TransactionListResponse)
+@router.get(
+    "/internal/users/{user_id}/transactions", response_model=TransactionListResponse
+)
 def internal_transactions_api(
     user_id: int,
     limit: int = 50,
