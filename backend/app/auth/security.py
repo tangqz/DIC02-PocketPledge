@@ -13,7 +13,9 @@ import base64
 
 SECRET_KEY = os.getenv("AUTH_SECRET_KEY", secrets.token_hex(32))
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("AUTH_TOKEN_EXPIRE_MINUTES", "1440"))  # 24h default
+ACCESS_TOKEN_EXPIRE_MINUTES = int(
+    os.getenv("AUTH_TOKEN_EXPIRE_MINUTES", "1440")
+)  # 24h default
 INITIAL_BALANCE = int(os.getenv("AUTH_INITIAL_BALANCE", "3000"))
 
 
@@ -43,6 +45,7 @@ def verify_password(password: str, hashed: str) -> bool:
 
 # ── JWT (minimal implementation, stdlib only) ──
 
+
 def _b64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
@@ -58,14 +61,20 @@ def create_access_token(user_id: int, username: str) -> str:
     now = datetime.now(timezone.utc)
     expire = now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     header = _b64url_encode(json.dumps({"alg": ALGORITHM, "typ": "JWT"}).encode())
-    payload = _b64url_encode(json.dumps({
-        "sub": str(user_id),
-        "username": username,
-        "exp": int(expire.timestamp()),
-        "iat": int(now.timestamp()),
-    }).encode())
+    payload = _b64url_encode(
+        json.dumps(
+            {
+                "sub": str(user_id),
+                "username": username,
+                "exp": int(expire.timestamp()),
+                "iat": int(now.timestamp()),
+            }
+        ).encode()
+    )
     signing_input = f"{header}.{payload}"
-    signature = hmac.new(SECRET_KEY.encode(), signing_input.encode(), hashlib.sha256).digest()
+    signature = hmac.new(
+        SECRET_KEY.encode(), signing_input.encode(), hashlib.sha256
+    ).digest()
     return f"{signing_input}.{_b64url_encode(signature)}"
 
 
@@ -77,7 +86,9 @@ def decode_access_token(token: str) -> dict | None:
             return None
         header_b64, payload_b64, sig_b64 = parts
         signing_input = f"{header_b64}.{payload_b64}"
-        expected_sig = hmac.new(SECRET_KEY.encode(), signing_input.encode(), hashlib.sha256).digest()
+        expected_sig = hmac.new(
+            SECRET_KEY.encode(), signing_input.encode(), hashlib.sha256
+        ).digest()
         actual_sig = _b64url_decode(sig_b64)
         if not hmac.compare_digest(expected_sig, actual_sig):
             return None

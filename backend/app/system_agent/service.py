@@ -34,12 +34,18 @@ class SystemAgentService:
     ) -> SystemDirective:
         client = get_dify_client()
         try:
-            logger.info("system agent request started, session_id=%s text=%s", session_id, text)
+            logger.info(
+                "system agent request started, session_id=%s text=%s", session_id, text
+            )
             outputs = await client.run_system_agent(
                 session_id=session_id,
                 inputs=self._build_inputs(text, session),
             )
-            logger.info("system agent request succeeded, session_id=%s outputs=%s", session_id, outputs)
+            logger.info(
+                "system agent request succeeded, session_id=%s outputs=%s",
+                session_id,
+                outputs,
+            )
         except Exception as exc:
             logger.exception("system agent workflow failed, session_id=%s", session_id)
             return SystemDirective(
@@ -72,11 +78,17 @@ class SystemAgentService:
             plan=self._coerce_plan(outputs.get("plan")),
             system_events=self._coerce_string_list(outputs.get("system_events")),
             approved=self._coerce_bool(outputs.get("approved"), default=True),
-            requires_capture=self._coerce_bool(outputs.get("requires_capture"), default=False),
-            capture_sources=self._coerce_capture_sources(outputs.get("capture_sources")),
+            requires_capture=self._coerce_bool(
+                outputs.get("requires_capture"), default=False
+            ),
+            capture_sources=self._coerce_capture_sources(
+                outputs.get("capture_sources")
+            ),
         )
 
-    def _coerce_action(self, value: Any) -> Literal["none", "plan", "start", "pause", "resume", "complete"]:
+    def _coerce_action(
+        self, value: Any
+    ) -> Literal["none", "plan", "start", "pause", "resume", "complete"]:
         normalized = str(value or "none").strip().lower()
         if normalized in {"plan", "start", "pause", "resume", "complete"}:
             return normalized  # type: ignore[return-value]
@@ -117,7 +129,11 @@ class SystemAgentService:
         return []
 
     def _coerce_capture_sources(self, value: Any) -> list[str]:
-        sources = [source for source in self._coerce_string_list(value) if source in {"camera", "screen"}]
+        sources = [
+            source
+            for source in self._coerce_string_list(value)
+            if source in {"camera", "screen"}
+        ]
         return sources
 
     def _coerce_plan(self, value: Any) -> dict[str, Any] | None:

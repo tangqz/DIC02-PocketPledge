@@ -15,7 +15,12 @@ from typing import Any, cast
 
 from openai import AsyncOpenAI
 
-from app.agent.prompts import CHAT_SYSTEM_PROMPT, START_READINESS_PROMPT, SYSTEM_AGENT_PROMPT, VISION_EVALUATION_PROMPT
+from app.agent.prompts import (
+    CHAT_SYSTEM_PROMPT,
+    START_READINESS_PROMPT,
+    SYSTEM_AGENT_PROMPT,
+    VISION_EVALUATION_PROMPT,
+)
 from app.agent.tools import TOOL_DEFINITIONS, execute_tool
 from app.business.models import SessionLocal
 from app.business.crud import get_user_profile_document
@@ -66,13 +71,21 @@ def _serialize_tool_call(tool_call: Any) -> dict[str, Any]:
 
     function = getattr(tool_call, "function", None)
     serialized["id"] = serialized.get("id") or getattr(tool_call, "id", "")
-    serialized["type"] = serialized.get("type") or getattr(tool_call, "type", "function") or "function"
+    serialized["type"] = (
+        serialized.get("type") or getattr(tool_call, "type", "function") or "function"
+    )
 
     function_payload = serialized.get("function")
     if not isinstance(function_payload, dict):
         function_payload = {}
-    function_payload["name"] = function_payload.get("name") or getattr(function, "name", "") or ""
-    function_payload["arguments"] = function_payload.get("arguments") or getattr(function, "arguments", "{}") or "{}"
+    function_payload["name"] = (
+        function_payload.get("name") or getattr(function, "name", "") or ""
+    )
+    function_payload["arguments"] = (
+        function_payload.get("arguments")
+        or getattr(function, "arguments", "{}")
+        or "{}"
+    )
     serialized["function"] = function_payload
     return serialized
 
@@ -84,7 +97,9 @@ def _serialize_assistant_message(message: Any) -> dict[str, Any]:
     }
     tool_calls = getattr(message, "tool_calls", None) or []
     if tool_calls:
-        payload["tool_calls"] = [_serialize_tool_call(tool_call) for tool_call in tool_calls]
+        payload["tool_calls"] = [
+            _serialize_tool_call(tool_call) for tool_call in tool_calls
+        ]
     return payload
 
 
@@ -100,9 +115,13 @@ def _get_chat_client() -> AsyncOpenAI:
 def _get_agent_client() -> AsyncOpenAI:
     """OpenAI-compatible client for the System Agent model."""
     return AsyncOpenAI(
-        api_key=os.getenv("LOCAL_AGENT_API_KEY") or os.getenv("LOCAL_CHAT_API_KEY", "sk-placeholder"),
-        base_url=os.getenv("LOCAL_AGENT_API_BASE") or os.getenv("LOCAL_CHAT_API_BASE", "https://api.openai.com/v1"),
-        timeout=float(os.getenv("LOCAL_AGENT_TIMEOUT") or os.getenv("LOCAL_CHAT_TIMEOUT", "60")),
+        api_key=os.getenv("LOCAL_AGENT_API_KEY")
+        or os.getenv("LOCAL_CHAT_API_KEY", "sk-placeholder"),
+        base_url=os.getenv("LOCAL_AGENT_API_BASE")
+        or os.getenv("LOCAL_CHAT_API_BASE", "https://api.openai.com/v1"),
+        timeout=float(
+            os.getenv("LOCAL_AGENT_TIMEOUT") or os.getenv("LOCAL_CHAT_TIMEOUT", "60")
+        ),
     )
 
 
@@ -187,10 +206,12 @@ def _build_user_content(
         base64_data = str(img.get("data", ""))
         mime_type = str(img.get("mime_type", "image/jpeg"))
         if base64_data:
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:{mime_type};base64,{base64_data}"},
-            })
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime_type};base64,{base64_data}"},
+                }
+            )
     return content
 
 
@@ -211,13 +232,25 @@ class LocalLLMClient:
         self._system_agent_model = os.getenv("LOCAL_AGENT_MODEL", self._chat_model)
         self._vision_model = os.getenv("LOCAL_VISION_MODEL", self._chat_model)
         self._temperature_chat = float(os.getenv("LOCAL_CHAT_TEMPERATURE", "0.55"))
-        self._temperature_agent = float(os.getenv("LOCAL_AGENT_TEMPERATURE", os.getenv("LOCAL_CHAT_TEMPERATURE", "0.1")))
+        self._temperature_agent = float(
+            os.getenv(
+                "LOCAL_AGENT_TEMPERATURE", os.getenv("LOCAL_CHAT_TEMPERATURE", "0.1")
+            )
+        )
         # Thinking config — chat (Gemini) deliberately left unconfigured = off
-        self._agent_enable_thinking = os.getenv("LOCAL_AGENT_ENABLE_THINKING", "true").lower() in ("true", "1", "yes")
-        self._agent_reasoning_effort = os.getenv("LOCAL_AGENT_REASONING_EFFORT", "").strip().lower()
+        self._agent_enable_thinking = os.getenv(
+            "LOCAL_AGENT_ENABLE_THINKING", "true"
+        ).lower() in ("true", "1", "yes")
+        self._agent_reasoning_effort = (
+            os.getenv("LOCAL_AGENT_REASONING_EFFORT", "").strip().lower()
+        )
         self._agent_thinking_budget = int(os.getenv("LOCAL_AGENT_THINKING_BUDGET", "0"))
-        self._vision_enable_thinking = os.getenv("LOCAL_VISION_ENABLE_THINKING", "true").lower() in ("true", "1", "yes")
-        self._vision_thinking_budget = int(os.getenv("LOCAL_VISION_THINKING_BUDGET", "1024"))
+        self._vision_enable_thinking = os.getenv(
+            "LOCAL_VISION_ENABLE_THINKING", "true"
+        ).lower() in ("true", "1", "yes")
+        self._vision_thinking_budget = int(
+            os.getenv("LOCAL_VISION_THINKING_BUDGET", "1024")
+        )
         # Per-session conversation history
         self._histories: dict[str, list[dict[str, Any]]] = {}
 
@@ -325,12 +358,12 @@ class LocalLLMClient:
         prompt = VISION_EVALUATION_PROMPT.format(current_task=current_task or "学习")
 
         content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
-        
+
         # Parse and concatenate multiple images if present
         import io
         from PIL import Image
         import base64
-        
+
         pil_images = []
         for img in images:
             base64_data = str(img.get("data", ""))
@@ -341,35 +374,39 @@ class LocalLLMClient:
                     pil_images.append(pil_img)
                 except Exception as e:
                     logger.warning("Failed to decode image: %s", e)
-                    
+
         if pil_images:
             # Concatenate horizontally
             widths, heights = zip(*(i.size for i in pil_images))
             total_width = sum(widths)
             max_height = max(heights)
-            
-            new_im = Image.new('RGB', (total_width, max_height))
+
+            new_im = Image.new("RGB", (total_width, max_height))
             x_offset = 0
             for im in pil_images:
                 new_im.paste(im, (x_offset, 0))
                 x_offset += im.size[0]
-                
+
             # Save for debugging
-            debug_path = os.path.join(os.path.dirname(__file__), "..", "..", "latest_vision_input.jpg")
+            debug_path = os.path.join(
+                os.path.dirname(__file__), "..", "..", "latest_vision_input.jpg"
+            )
             try:
                 new_im.save(debug_path)
             except Exception as e:
                 logger.warning("Failed to save debug image: %s", e)
-                
+
             # Compress and encode
             buffered = io.BytesIO()
             new_im.save(buffered, format="JPEG", quality=80)
             final_b64 = base64.b64encode(buffered.getvalue()).decode()
-            
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{final_b64}"},
-            })
+
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{final_b64}"},
+                }
+            )
 
         vision_extra: dict[str, Any] = {"enable_thinking": self._vision_enable_thinking}
         if self._vision_enable_thinking:
@@ -392,10 +429,11 @@ class LocalLLMClient:
             )
             text = (response.choices[0].message.content or "").strip()
             text = _strip_code_fences(text)
-            
+
             is_distracted = False
             reason = ""
             import re
+
             match = re.search(r"\{.*\}", text, re.DOTALL)
             if match:
                 try:
@@ -406,7 +444,7 @@ class LocalLLMClient:
                     logger.warning("Failed to parse vision response as JSON: %s", text)
             else:
                 logger.warning("No JSON found in vision response: %s", text)
-                
+
             logger.info(
                 "local vision api response session_id=%s model=%s text=%s",
                 session_id,
@@ -436,7 +474,9 @@ class LocalLLMClient:
         for img in images:
             source = str(img.get("source", "image"))
             raw_metadata = img.get("metadata")
-            metadata: dict[str, Any] = raw_metadata if isinstance(raw_metadata, dict) else {}
+            metadata: dict[str, Any] = (
+                raw_metadata if isinstance(raw_metadata, dict) else {}
+            )
             width = metadata.get("width")
             height = metadata.get("height")
             display_surface = metadata.get("displaySurface")
@@ -461,10 +501,12 @@ class LocalLLMClient:
             base64_data = str(img.get("data", ""))
             mime_type = str(img.get("mime_type", "image/jpeg"))
             if base64_data:
-                content.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{mime_type};base64,{base64_data}"},
-                })
+                content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime_type};base64,{base64_data}"},
+                    }
+                )
 
         vision_extra: dict[str, Any] = {"enable_thinking": self._vision_enable_thinking}
         if self._vision_enable_thinking:
@@ -485,7 +527,9 @@ class LocalLLMClient:
                 max_tokens=160,
                 extra_body=vision_extra,
             )
-            text = _strip_code_fences((response.choices[0].message.content or "").strip())
+            text = _strip_code_fences(
+                (response.choices[0].message.content or "").strip()
+            )
             data = json.loads(text)
             if not isinstance(data, dict):
                 raise ValueError("start readiness response is not a JSON object")
@@ -564,15 +608,19 @@ class LocalLLMClient:
                         fn_args = {}
                     logger.info(
                         "system agent tool call: %s(%s) user_id=%s",
-                        fn_name, fn_args, user_id,
+                        fn_name,
+                        fn_args,
+                        user_id,
                     )
                     result_str = execute_tool(fn_name, fn_args, user_id)
-                    messages.append({
-                        "role": "tool",
-                        "name": fn_name,
-                        "tool_call_id": tool_call.id,
-                        "content": result_str,
-                    })
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "name": fn_name,
+                            "tool_call_id": tool_call.id,
+                            "content": result_str,
+                        }
+                    )
                 continue
 
             # No tool calls — parse the final text as JSON
@@ -587,7 +635,9 @@ class LocalLLMClient:
             return self._parse_agent_json(raw_text)
 
         # Exhausted tool rounds
-        logger.warning("system agent exceeded max tool rounds, session_id=%s", session_id)
+        logger.warning(
+            "system agent exceeded max tool rounds, session_id=%s", session_id
+        )
         return {"action": "none", "approved": False, "system_events": []}
 
     def _format_system_agent_context(self, inputs: dict[str, Any]) -> str:

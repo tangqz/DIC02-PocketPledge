@@ -8,14 +8,12 @@ from typing import Any
 
 from app.business.models import SessionLocal
 from app.business.crud import (
-    create_session_summary,
     get_active_plan,
     get_user_profile_document,
     get_user_status,
     list_pause_requests,
     list_session_summaries,
     list_user_transactions,
-    record_pause_request,
     upsert_study_plan,
     upsert_user_profile_document,
 )
@@ -63,7 +61,10 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                         },
                     },
                     "totalMinutes": {"type": "integer", "description": "总分钟数"},
-                    "suggestedDuration": {"type": "integer", "description": "建议专注时长（秒）"},
+                    "suggestedDuration": {
+                        "type": "integer",
+                        "description": "建议专注时长（秒）",
+                    },
                 },
                 "required": ["tasks", "totalMinutes", "suggestedDuration"],
             },
@@ -85,7 +86,10 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "content": {"type": "string", "description": "新的画像文档内容（纯文本）"},
+                    "content": {
+                        "type": "string",
+                        "description": "新的画像文档内容（纯文本）",
+                    },
                 },
                 "required": ["content"],
             },
@@ -99,7 +103,11 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "limit": {"type": "integer", "description": "最多返回条数", "default": 10},
+                    "limit": {
+                        "type": "integer",
+                        "description": "最多返回条数",
+                        "default": 10,
+                    },
                 },
                 "required": [],
             },
@@ -113,7 +121,11 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "limit": {"type": "integer", "description": "最多返回条数", "default": 10},
+                    "limit": {
+                        "type": "integer",
+                        "description": "最多返回条数",
+                        "default": 10,
+                    },
                 },
                 "required": [],
             },
@@ -127,7 +139,11 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "limit": {"type": "integer", "description": "最多返回条数", "default": 20},
+                    "limit": {
+                        "type": "integer",
+                        "description": "最多返回条数",
+                        "default": 20,
+                    },
                 },
                 "required": [],
             },
@@ -169,7 +185,9 @@ def _dispatch(
         return get_user_profile_document(db, user_id)
 
     if tool_name == "update_user_profile":
-        return upsert_user_profile_document(db, user_id, content=arguments.get("content", ""))
+        return upsert_user_profile_document(
+            db, user_id, content=arguments.get("content", "")
+        )
 
     if tool_name == "list_pause_requests":
         return list_pause_requests(db, user_id, limit=arguments.get("limit", 10))
