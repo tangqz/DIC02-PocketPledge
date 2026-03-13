@@ -12,11 +12,13 @@ interface ChatPanelProps {
   /** When true, show full chat history; otherwise show only subtitle bar */
   expanded?: boolean;
   onSendText?: (text: string) => void;
+  disabled?: boolean;
 }
 
 export default function ChatPanel({
   expanded = false,
   onSendText,
+  disabled,
 }: ChatPanelProps) {
   const { messages, streamingText, isAgentSpeaking } = useChatStore();
   const activeToolCall = useSessionStore((s) => s.activeToolCall);
@@ -89,7 +91,7 @@ export default function ChatPanel({
       </div>
 
       {/* Text input */}
-      {onSendText && <TextInput onSend={onSendText} />}
+      {onSendText && <TextInput onSend={onSendText} disabled={disabled} />}
     </div>
   );
 }

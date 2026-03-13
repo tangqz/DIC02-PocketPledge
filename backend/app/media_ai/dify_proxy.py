@@ -67,10 +67,11 @@ class MockDifyClient:
         session_id: str,
         images: list[dict[str, Any]] | None = None,
         current_task: str | None = None,
+        focus_status: str | None = None,
         language_mode: str = "zh",
         character_id: str = "milly",
     ) -> AsyncIterator[str]:
-        _ = (session_id, language_mode, character_id)
+        _ = (session_id, language_mode, character_id, focus_status)
         lower_text = user_text.lower()
         has_system_result = "[SYSTEM_RESULT:" in user_text
 
@@ -455,6 +456,7 @@ class DifyClient:
         session_id: str,
         images: list[dict[str, Any]] | None = None,
         current_task: str | None = None,
+        focus_status: str | None = None,
         language_mode: str = "zh",
         character_id: str = "milly",
     ) -> AsyncIterator[str]:
@@ -464,6 +466,7 @@ class DifyClient:
         payload: dict[str, Any] = {
             "inputs": {
                 "current_task": current_task or "",
+                    "focus_status": focus_status or "",
                 "language_mode": language_mode,
                 "character_id": character_id,
             },

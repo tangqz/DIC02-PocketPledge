@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -13,6 +14,14 @@ from .parser import SentenceBuffer, extract_expression_and_clean
 logger = logging.getLogger(__name__)
 
 INVALID_ASR_UTTERANCES = {".", "。", "..", "...", "。。", "。。。"}
+SYS_OR_CAPTURE_MARKER_PATTERN = re.compile(r"<<(?:sys|capture)>>", re.IGNORECASE)
+
+
+def _analyze_markers(text: str) -> tuple[bool, bool, str]:
+    has_sys = bool(re.search(r"<<sys>>", text, flags=re.IGNORECASE))
+    is_capture = bool(re.search(r"<<capture>>", text, flags=re.IGNORECASE))
+    cleaned = SYS_OR_CAPTURE_MARKER_PATTERN.sub("", text)
+    return has_sys or is_capture, is_capture, cleaned
 
 
 async def _build_audio_chunk(
@@ -42,6 +51,7 @@ async def process_text_chat(
     session_id: str,
     images: list[dict[str, Any]] | None = None,
     current_task: str | None = None,
+    focus_status: str | None = None,
     language_mode: str = "zh",
     character_id: str = "milly",
 ) -> AsyncIterator[dict[str, Any]]:
@@ -56,46 +66,53 @@ async def process_text_chat(
             session_id=session_id,
             images=images,
             current_task=current_task,
+            focus_status=focus_status,
             language_mode=language_mode,
             character_id=character_id,
         ):
             for sentence in buffer.push(token):
-                has_sys = "<<SYS>>" in sentence or "<<CAPTURE>>" in sentence
-                is_capture = "<<CAPTURE>>" in sentence
-                clean_sentence = sentence.replace("<<SYS>>", "").replace("<<CAPTURE>>", "")
+                has_sys, is_capture, clean_sentence = _analyze_markers(sentence)
                 expression, clean_text = extract_expression_and_clean(clean_sentence)
-                if not clean_text:
+                if not clean_text and not has_sys:
                     continue
                 yield {
                     "text": clean_text,
+                    "raw_text": sentence,
                     "expression": expression,
                     "sys_triggered": has_sys,
                     "capture_triggered": is_capture,
-                    "audio_coro": _build_audio_chunk_with_service(
-                        clean_text,
-                        expression,
-                        tts_service,
-                        character_id,
+                    "audio_coro": (
+                        _build_audio_chunk_with_service(
+                            clean_text,
+                            expression,
+                            tts_service,
+                            character_id,
+                        )
+                        if clean_text
+                        else None
                     ),
                 }
 
         remainder = buffer.flush()
         if remainder:
-            has_sys = "<<SYS>>" in remainder or "<<CAPTURE>>" in remainder
-            is_capture = "<<CAPTURE>>" in remainder
-            clean_remainder = remainder.replace("<<SYS>>", "").replace("<<CAPTURE>>", "")
+            has_sys, is_capture, clean_remainder = _analyze_markers(remainder)
             expression, clean_text = extract_expression_and_clean(clean_remainder)
-            if clean_text:
+            if clean_text or has_sys:
                 yield {
                     "text": clean_text,
+                    "raw_text": remainder,
                     "expression": expression,
                     "sys_triggered": has_sys,
                     "capture_triggered": is_capture,
-                    "audio_coro": _build_audio_chunk_with_service(
-                        clean_text,
-                        expression,
-                        tts_service,
-                        character_id,
+                    "audio_coro": (
+                        _build_audio_chunk_with_service(
+                            clean_text,
+                            expression,
+                            tts_service,
+                            character_id,
+                        )
+                        if clean_text
+                        else None
                     ),
                 }
     except Exception:
@@ -131,6 +148,7 @@ async def process_voice_chat(
     images: list[dict[str, Any]] | None = None,
     session_id: str = "anonymous",
     current_task: str | None = None,
+    focus_status: str | None = None,
     language_mode: str = "zh",
     character_id: str = "milly",
 ) -> AsyncIterator[dict[str, str]]:
@@ -144,6 +162,7 @@ async def process_voice_chat(
         session_id=session_id,
         images=images,
         current_task=current_task,
+        focus_status=focus_status,
         language_mode=language_mode,
         character_id=character_id,
     ):

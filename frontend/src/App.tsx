@@ -177,7 +177,7 @@ function AuthenticatedApp() {
 
   useVAD({
     onSpeechEnd: handleSpeechEnd,
-    enabled: micGranted && !micMuted,
+    enabled: micGranted && !micMuted && supervisionState !== "paused",
   });
 
   const snapshotEnabled =

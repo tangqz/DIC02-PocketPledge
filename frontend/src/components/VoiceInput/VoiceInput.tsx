@@ -29,11 +29,13 @@ export default function VoiceInput() {
     requestMicrophone,
   } = useMediaStore();
   const isAgentSpeaking = useChatStore((s) => s.isAgentSpeaking);
+  const supervisionState = useChatStore((s) => s.supervisionState);
+  const isPaused = supervisionState === "paused";
   const { t } = useI18n();
 
   // Determine visual state
   const state: VoiceState =
-    micMuted || isAgentSpeaking
+    micMuted || isAgentSpeaking || isPaused
       ? "muted"
       : isListening
         ? "listening"
