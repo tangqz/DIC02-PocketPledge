@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+from datetime import datetime
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
@@ -17,6 +18,7 @@ from openai import AsyncOpenAI
 
 from app.agent.prompts import (
     CHAT_SYSTEM_PROMPT,
+    PROFILE_MEMORY_EXTRACT_PROMPT,
     START_READINESS_PROMPT,
     SYSTEM_AGENT_PROMPT,
     VISION_EVALUATION_PROMPT,
@@ -28,7 +30,7 @@ from app.business.crud import get_user_profile_document
 
 logger = logging.getLogger(__name__)
 
-MAX_HISTORY_MESSAGES = 40
+MAX_HISTORY_MESSAGES = 50
 MAX_TOOL_ROUNDS = 8
 LOG_TEXT_LIMIT = 300
 
@@ -155,7 +157,14 @@ def _build_chat_system_prompt(
     current_task: str | None,
     focus_status: str | None,
 ) -> str:
+    now_local = datetime.now().astimezone()
     parts = [CHAT_SYSTEM_PROMPT]
+    parts.append(
+        "\n═══ 时间上下文 ═══"
+        f"\n当前本地时间：{now_local.isoformat()}"
+        f"\n当前本地日期：{now_local.date().isoformat()}"
+        f"\n时区：{now_local.tzname() or 'local'}"
+    )
     if profile_content:
         parts.append(f"\n═══ 用户画像 ═══\n{profile_content}")
     if current_task:
@@ -665,7 +674,11 @@ class LocalLLMClient:
         return {"action": "none", "approved": False, "system_events": []}
 
     def _format_system_agent_context(self, inputs: dict[str, Any]) -> str:
+        now_local = datetime.now().astimezone()
         lines = [
+            f"current_time_local: {now_local.isoformat()}",
+            f"current_date_local: {now_local.date().isoformat()}",
+            f"timezone: {now_local.tzname() or 'local'}",
             f"user_text: {inputs.get('user_text', '')}",
             f"chat_history:\n{inputs.get('chat_history', '')}",
             f"language_mode: {inputs.get('language_mode', 'zh')}",
@@ -702,3 +715,62 @@ class LocalLLMClient:
 
         logger.warning("failed to parse system agent JSON: %s", raw_text[:200])
         return {"action": "none", "approved": False, "system_events": []}
+
+    async def extract_profile_memories(
+        self,
+        session_id: str,
+        inputs: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Extract stable profile memories from one rotated chat batch."""
+        rotated_chat = str(inputs.get("rotated_chat", "")).strip()
+        if not rotated_chat:
+            return {
+                "should_update": False,
+                "memory_lines": [],
+                "reason": "empty rotated chat",
+            }
+
+        existing_profile = str(inputs.get("existing_profile", "")).strip()
+        context_text = (
+            f"rotated_chat:\n{rotated_chat}\n\n"
+            f"existing_profile:\n{existing_profile}\n"
+        )
+
+        try:
+            response = await _get_agent_client().chat.completions.create(
+                model=self._system_agent_model,
+                messages=cast(
+                    Any,
+                    [
+                        {"role": "system", "content": PROFILE_MEMORY_EXTRACT_PROMPT},
+                        {"role": "user", "content": context_text},
+                    ],
+                ),
+                temperature=0.1,
+                max_tokens=512,
+            )
+            raw_text = (response.choices[0].message.content or "").strip()
+            parsed = self._parse_agent_json(raw_text)
+            memory_lines = parsed.get("memory_lines")
+            if not isinstance(memory_lines, list):
+                memory_lines = []
+            normalized_lines = [
+                str(line).strip()
+                for line in memory_lines
+                if str(line).strip()
+            ][:3]
+            return {
+                "should_update": bool(parsed.get("should_update", False))
+                and bool(normalized_lines),
+                "memory_lines": normalized_lines,
+                "reason": str(parsed.get("reason", "") or ""),
+            }
+        except Exception:
+            logger.exception(
+                "local profile memory extraction failed, session_id=%s", session_id
+            )
+            return {
+                "should_update": False,
+                "memory_lines": [],
+                "reason": "extract failed",
+            }

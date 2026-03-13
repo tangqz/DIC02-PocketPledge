@@ -110,6 +110,12 @@ function AuthenticatedApp() {
       }
 
       if (msg.type === "control") {
+        if (msg.command === "set-expression") {
+          const expression = String(msg.payload?.expression || "neutral");
+          useAvatarStore.getState().setCurrentExpression(expression);
+          return;
+        }
+
         if (msg.command === "downgrade") {
           useAvatarStore.getState().clearAudioMessages();
           setDegradedMode(true);

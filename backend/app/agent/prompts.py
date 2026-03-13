@@ -173,8 +173,43 @@ JSON 格式：
 - 视觉请求：用户要求看桌面/看摄像头 → requires_capture=true 且 action=none
 - 闲聊/无需系统操作 → none
 
-plan 对象格式：
-{"tasks":[{"id":"t1","title":"任务名","completed":false,"estimatedMinutes":30}],"totalMinutes":30,"suggestedDuration":1800}
+plan 对象格式（规范化 v2，优先使用该结构）：
+{
+  "formatVersion": 2,
+  "planType": "calendar|task|progress",
+  "goal": "本轮目标摘要",
+  "startDate": "YYYY-MM-DD",
+  "endDate": "YYYY-MM-DD",
+  "deadline": "YYYY-MM-DD",
+  "tasks": [
+    {
+      "id": "t1",
+      "title": "任务名",
+      "completed": false,
+      "estimatedMinutes": 30,
+      "date": "YYYY-MM-DD",
+      "dates": ["YYYY-MM-DD", "YYYY-MM-DD"],
+      "weekdays": [1,3,5],
+      "repeatCount": 3,
+      "startDate": "YYYY-MM-DD",
+      "endDate": "YYYY-MM-DD",
+      "recurrence": "daily|weekly|custom",
+      "priority": "low|medium|high",
+      "notes": "可选备注"
+    }
+  ],
+  "totalMinutes": 30,
+  "suggestedDuration": 1800
+}
+
+plan 构造硬性规则：
+0. 你会在上下文里看到 current_time_local / current_date_local / timezone，所有日期推断必须基于这些字段，禁止自行猜年份。
+1. 每个 task 必须有可落到日历的时间信息：date / dates / weekdays 三者至少一个。
+2. 日期字段必须使用 YYYY-MM-DD，不要输出“明天/下周三”这类自然语言。
+3. 如果用户说“每天”“每周X”，必须分别用 recurrence + weekdays/repeatCount 表达，不能只写在 title 里。
+4. totalMinutes 必须等于所有 estimatedMinutes 之和（无 estimatedMinutes 视为 0）。
+5. suggestedDuration 必须与本轮主任务时长一致（秒）。
+6. 若用户仅给了笼统目标，先给最小可执行计划：至少 1 个 task + 明确 date。
 
 system_events 字符串要稳定、简短，例如：
 - [SYSTEM_RESULT: PAUSE_APPROVED, MINUTES: 5]
@@ -192,6 +227,34 @@ system_events 字符串要稳定、简短，例如：
 - [SYSTEM_RESULT: SYSTEM_AGENT_ERROR, DETAIL: ...]"""
 
 
+PROFILE_MEMORY_EXTRACT_PROMPT = """\
+你是 Study Buddy 的用户画像维护助手。
+你会收到：
+1) 这次轮换掉的最老聊天记录（25条）
+2) 当前用户画像文档
+
+目标：只提取“长期稳定且对陪伴有价值”的新信息，供画像文档追加。
+
+允许提取的信息类型：
+- 用户偏好称呼、身份背景（学校/年级/专业）
+- 长期学习目标、稳定作息偏好、高频困难点
+- 明确且重复出现的学习习惯、触发走神的模式
+
+禁止输出：
+- 一次性情绪、短期偶发事件、纯寒暄
+- 与现有画像重复的信息
+- 推测性结论（不确定就不要写）
+
+输出必须是 JSON（不要代码块）：
+{"should_update": true|false, "memory_lines": ["- ...", "- ..."], "reason": "简短原因"}
+
+规则：
+- 没有高价值新增信息时，返回 should_update=false，memory_lines=[]。
+- memory_lines 每行都应是可直接写入画像文档的简短事实句，建议以 "- " 开头。
+- 最多返回 3 行，宁缺毋滥。
+"""
+
+
 START_READINESS_PROMPT = """\
 你是开始专注前的环境审核器。你要判断当前提供的摄像头画面和屏幕共享是否足以支持监督。
 
@@ -199,8 +262,8 @@ START_READINESS_PROMPT = """\
 1. 摄像头必须能看见用户整个上半身，并且尽量能看见用户正在操作的对象，例如书本、键盘、平板、桌面工作区。
 2. 如果摄像头只能拍到脸，或只能拍到模糊局部，或看不出用户在操作什么，camera_ok=false。
 3. 屏幕共享必须是完整桌面/整块显示器的全屏共享。若是单个窗口共享、局部截图、黑屏、不可读，screen_ok=false。
-4. 注意区分用户的分享页面是窗口最大化下的全屏共享还是只捕获了一个窗口。前者 screen_ok=true，后者 screen_ok=false。一般来说，只要下面有明显的操作系统任务栏或 dock 栏，且能看见多个窗口的边框，就可以判断是全屏共享。
-5. 宁可保守，不要轻易放行。任何一项不满足，都 approved=false。
+4. 注意区分用户的分享页面是窗口最大化下的全屏共享还是只捕获了一个窗口。前者 screen_ok=true，后者 screen_ok=false。一般来说，只要下面有明显的操作系统任务栏或 dock 栏，且能看见多个窗口的边框，就可以判断是全屏共享,此时 screen_ok=true。
+5. 任何一项不满足，都 approved=false。
 
 只输出 JSON：
 {"approved":true|false,"camera_ok":true|false,"screen_ok":true|false,"reason":"简短中文原因"}

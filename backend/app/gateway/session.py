@@ -34,19 +34,39 @@ class SessionState:
     pending_capture_sources: list[str] = field(default_factory=list)
     pending_capture_mode: str = "system-agent"
     chat_history: list[dict[str, str]] = field(default_factory=list)
+    profile_rollover_buffer: list[dict[str, str]] = field(default_factory=list)
     image_timeline: list[tuple[float, list[dict[str, Any]]]] = field(
         default_factory=list
     )
     language_mode: str = "zh"
     character_id: str = "milly"
 
-    MAX_HISTORY_TURNS: int = 30
+    MAX_HISTORY_TURNS: int = 50
+    PROFILE_ROLLOVER_BATCH: int = 25
 
     def append_chat(self, role: str, content: str) -> None:
         """Append a message to the chat history ring buffer."""
         self.chat_history.append({"role": role, "content": content})
         if len(self.chat_history) > self.MAX_HISTORY_TURNS:
-            self.chat_history = self.chat_history[-self.MAX_HISTORY_TURNS :]
+            overflow_count = len(self.chat_history) - self.MAX_HISTORY_TURNS
+            overflow_items = self.chat_history[:overflow_count]
+            self.chat_history = self.chat_history[overflow_count:]
+            self.profile_rollover_buffer.extend(overflow_items)
+
+    def pop_profile_rollover_batch(self) -> list[dict[str, str]]:
+        """Return one full rollover batch once 25 old messages have rotated out."""
+        if len(self.profile_rollover_buffer) < self.PROFILE_ROLLOVER_BATCH:
+            return []
+        batch = self.profile_rollover_buffer[: self.PROFILE_ROLLOVER_BATCH]
+        self.profile_rollover_buffer = self.profile_rollover_buffer[
+            self.PROFILE_ROLLOVER_BATCH :
+        ]
+        return batch
+
+    def clear_chat_context(self) -> None:
+        """Clear chat history and rollover buffers when switching persona/session context."""
+        self.chat_history = []
+        self.profile_rollover_buffer = []
 
     def format_chat_history(self) -> str:
         """Format recent chat history as a readable string for the system agent."""

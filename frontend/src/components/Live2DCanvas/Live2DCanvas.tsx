@@ -52,6 +52,7 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
     };
   } | null>(null);
   const modelInfo = useAvatarStore((s) => s.modelInfo);
+  const currentExpression = useAvatarStore((s) => s.currentExpression);
   const pendingAudioMessages = useAvatarStore((s) => s.pendingAudioMessages);
   const playbackInterruptVersion = useAvatarStore((s) => s.playbackInterruptVersion);
   const shiftAudioMessage = useAvatarStore((s) => s.shiftAudioMessage);
@@ -95,7 +96,14 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
       if (!adapter) {
         return;
       }
-      const idx = config.emotionMap[emotionKeyword.toLowerCase()];
+      const normalizedKeyword = emotionKeyword.toLowerCase();
+      const aliasMap: Record<string, string> = {
+        anger: "angry",
+        joyful: "happy",
+        encourage: "encouraging",
+      };
+      const mappedKeyword = aliasMap[normalizedKeyword] ?? normalizedKeyword;
+      const idx = config.emotionMap[mappedKeyword];
       if (idx === undefined) {
         return;
       }
@@ -239,6 +247,13 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
     }),
     [playBase64Audio, setExpression, stopAudio],
   );
+
+  useEffect(() => {
+    if (!isLoaded || !currentExpression) {
+      return;
+    }
+    setExpression(currentExpression);
+  }, [currentExpression, isLoaded, setExpression]);
 
   useEffect(() => {
     if (pendingAudioMessages.length === 0 || degradedMode) {

@@ -61,9 +61,27 @@ class PlanTaskPayload(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     completed: bool = False
     estimatedMinutes: int | None = Field(default=None, ge=1, le=1440)
+    actualMinutes: int | None = Field(default=None, ge=0, le=10080)
+    actualMinutesByDate: dict[str, int] | None = None
+    date: str | None = Field(default=None, max_length=32)
+    dueDate: str | None = Field(default=None, max_length=32)
+    dates: List[str] | None = None
+    weekdays: List[int] | None = None
+    repeatCount: int | None = Field(default=None, ge=1, le=365)
+    startDate: str | None = Field(default=None, max_length=32)
+    endDate: str | None = Field(default=None, max_length=32)
+    recurrence: str | None = Field(default=None, max_length=32)
+    priority: str | None = Field(default=None, max_length=16)
+    notes: str | None = Field(default=None, max_length=500)
 
 
 class PlanPayload(BaseModel):
+    formatVersion: int | None = Field(default=None, ge=1, le=20)
+    planType: str | None = Field(default=None, max_length=32)
+    goal: str | None = Field(default=None, max_length=255)
+    startDate: str | None = Field(default=None, max_length=32)
+    endDate: str | None = Field(default=None, max_length=32)
+    deadline: str | None = Field(default=None, max_length=32)
     tasks: List[PlanTaskPayload]
     totalMinutes: int = Field(..., ge=0, le=10080)
     suggestedDuration: int | None = Field(default=None, ge=0, le=604800)

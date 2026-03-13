@@ -194,9 +194,27 @@ export interface PlanTask {
   title: string;
   completed: boolean;
   estimatedMinutes?: number;
+  actualMinutes?: number;
+  actualMinutesByDate?: Record<string, number>;
+  date?: string;
+  dueDate?: string;
+  dates?: string[];
+  weekdays?: number[];
+  repeatCount?: number;
+  startDate?: string;
+  endDate?: string;
+  recurrence?: "daily" | "weekly" | "custom";
+  priority?: "low" | "medium" | "high";
+  notes?: string;
 }
 
 export interface PlanData {
+  formatVersion?: number;
+  planType?: "calendar" | "task" | "progress";
+  goal?: string;
+  startDate?: string;
+  endDate?: string;
+  deadline?: string;
   tasks: PlanTask[];
   totalMinutes: number;
   /** Suggested session duration derived from plan */
@@ -264,6 +282,7 @@ export interface ControlMessage {
     prompt?: string;
     sources?: Array<"camera" | "screen">;
     reason?: string;
+    expression?: string;
   };
 }
 

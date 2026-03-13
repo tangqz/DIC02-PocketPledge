@@ -38,7 +38,7 @@ export interface CharacterProfile {
 export const MAO_PRO_CONFIG: ModelConfig = {
   name: "mao_pro",
   url: "/live2d-models/mao_pro/mao_pro.model3.json",
-  kScale: 0.5,
+  kScale: 1.0,
   emotionMap: {
     neutral: 0, // exp_01
     fear: 1, // exp_02
@@ -69,7 +69,7 @@ export const MAO_PRO_CONFIG: ModelConfig = {
 export const REN_PRO_CONFIG: ModelConfig = {
   name: "natori_pro_zh",
   url: "/live2d-models/natori_pro_zh/runtime/natori_pro_t06.model3.json",
-  kScale: 0.52,
+  kScale: 1.0,
   emotionMap: {
     neutral: 2,
     fear: 3,
