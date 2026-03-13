@@ -187,18 +187,22 @@ export function useSnapshot({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoCacheRef = useRef<Map<string, HTMLVideoElement>>(new Map());
   const onCaptureRef = useRef(onCapture);
-  onCaptureRef.current = onCapture;
-  const [cameraReady, setCameraReady] = useState(false);
-  const [screenReady, setScreenReady] = useState(false);
+  const [cameraReadyInternal, setCameraReady] = useState(false);
+
+  useEffect(() => {
+    onCaptureRef.current = onCapture;
+  }, [onCapture]);
+  const [screenReadyInternal, setScreenReady] = useState(false);
+
+  const cameraReady = cameraReadyInternal || Boolean(cameraStream);
+  const screenReady = screenReadyInternal || Boolean(screenStream);
 
   useEffect(() => {
     cameraStreamRef.current = cameraStream ?? null;
-    setCameraReady(Boolean(cameraStream));
   }, [cameraStream]);
 
   useEffect(() => {
     screenStreamRef.current = screenStream ?? null;
-    setScreenReady(Boolean(screenStream));
   }, [screenStream]);
 
   // Create an offscreen canvas for capturing
@@ -258,12 +262,18 @@ export function useSnapshot({
     [],
   );
 
+  const historyBufferRef = useRef<{ timestamp: number; images: SnapshotImage[] }[]>([]);
+
   // Periodic capture loop
   useEffect(() => {
-    if (!active) return;
+    if (!active) {
+      historyBufferRef.current = [];
+      return;
+    }
 
-    const timer = setInterval(() => {
+    const captureInterval = setInterval(() => {
       const images: SnapshotImage[] = [];
+      const timestamp = Date.now();
 
       if (cameraEnabled && cameraStreamRef.current) {
         const data = captureFrame(cameraStreamRef.current);
@@ -272,6 +282,7 @@ export function useSnapshot({
             source: "camera" as const,
             data,
             mime_type: "image/jpeg",
+            metadata: { timestamp },
           });
         }
       }
@@ -283,26 +294,84 @@ export function useSnapshot({
             source: "screen" as const,
             data,
             mime_type: "image/jpeg",
+            metadata: { timestamp },
           });
         }
       }
 
       if (images.length > 0) {
-        onCaptureRef.current(images);
+        historyBufferRef.current.push({ timestamp, images });
+
+        // Maintain up to a maximum of 10.5 minutes (630 seconds) to cover the 600s maximum target offset
+        const maxAgeMs = 630 * 1000;
+        const cutoff = timestamp - maxAgeMs;
+        historyBufferRef.current = historyBufferRef.current.filter((item) => item.timestamp >= cutoff);
+      }
+    }, 1000); // Capture frequently (e.g., every 1 second)
+
+    const sendInterval = setInterval(() => {
+      if (historyBufferRef.current.length === 0) return;
+
+      const now = Date.now();
+
+      // Nonlinear sparse sampling in seconds (e.g. 1s ago, 5s ago, 15s ago, 30s ago, 60s ago, 120s ago, 300s ago, 600s ago)
+      const targetOffsetsSec = [1, 5, 15, 30, 60, 120, 300, 600];
+      const targetsMs = targetOffsetsSec.map((s) => s * 1000);
+
+      const selectedImages: SnapshotImage[] = [];
+      const seenIds = new Set<number>();
+
+      // We clone the buffer so it won't be modified while iterating
+      const buffer = [...historyBufferRef.current];
+
+      for (const tOffsetMs of targetsMs) {
+        const targetTime = now - tOffsetMs;
+
+        // Find closest item
+        let closestItem = buffer[0];
+        let minDiff = Math.abs(buffer[0].timestamp - targetTime);
+
+        for (const item of buffer) {
+          const diff = Math.abs(item.timestamp - targetTime);
+          if (diff < minDiff) {
+            minDiff = diff;
+            closestItem = item;
+          }
+        }
+
+        // Avoid including images that are too far from the target (e.g. gap > 5 seconds)
+        // Since we capture every 1s, the gap should be very small (e.g. <= 2 seconds) unless the tab was throttled.
+        if (minDiff > 5000) {
+          continue;
+        }
+
+        // Only include if not chosen before, up to 8 targets (16 images total if camera + screen)
+        if (!seenIds.has(closestItem.timestamp) && selectedImages.length < 16) {
+          seenIds.add(closestItem.timestamp);
+          selectedImages.push(...closestItem.images);
+        }
+      }
+
+      if (selectedImages.length > 0) {
+        onCaptureRef.current(selectedImages);
       }
     }, intervalMs);
 
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(captureInterval);
+      clearInterval(sendInterval);
+    };
   }, [active, cameraEnabled, screenEnabled, intervalMs, captureFrame]);
 
   // Cleanup streams on unmount
   useEffect(() => {
+    const videoCache = videoCacheRef.current;
     return () => {
-      videoCacheRef.current.forEach((video) => {
+      videoCache.forEach((video) => {
         video.pause();
         video.srcObject = null;
       });
-      videoCacheRef.current.clear();
+      videoCache.clear();
     };
   }, []);
 
@@ -311,6 +380,6 @@ export function useSnapshot({
     requestScreen,
     cameraReady,
     screenReady,
-    cameraStream: cameraStreamRef.current,
+    cameraStream,
   };
 }

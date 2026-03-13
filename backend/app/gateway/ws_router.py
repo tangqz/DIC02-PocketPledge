@@ -6,7 +6,7 @@ import uuid
 import logging
 import re
 from datetime import UTC, datetime, timedelta
-from typing import Any, AsyncIterator, Callable, Coroutine
+from typing import Any, Callable, Coroutine
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
@@ -1161,50 +1161,31 @@ def _build_temporal_stitched_image(session: SessionState, current_images: list[d
     import time
     import io
     import base64
+    from collections import defaultdict
     from PIL import Image, ImageDraw, ImageFont
 
-    now = time.time()
-    session.image_timeline.append((now, current_images))
+    # Find the relative "now" from the maximum timestamp in the batch to avoid client-server clock skew issues.
+    client_timestamps = []
+    for img in current_images:
+        meta = img.get("metadata", {})
+        if "timestamp" in meta and isinstance(meta["timestamp"], (int, float)):
+            client_timestamps.append(meta["timestamp"])
 
-    # Estimate base interval from recent history (default 15s)
-    intervals = []
-    for i in range(1, len(session.image_timeline)):
-        diff = session.image_timeline[i][0] - session.image_timeline[i-1][0]
-        if 0.5 <= diff <= 120:
-            intervals.append(diff)
+    relative_now_ms = max(client_timestamps) if client_timestamps else time.time() * 1000
 
-    base_interval = sum(intervals) / len(intervals) if intervals else 15.0
+    # Group images by timestamp
+    grouped_images: dict[int, list[dict[str, Any]]] = defaultdict(list)
 
-    # Nonlinear sparse sampling: multipliers e.g. 0, 1, 3, 7, 15, 31, 63, 127
-    multipliers = [0, 1, 3, 7, 15, 31, 63, 127]
-    targets = [m * base_interval for m in multipliers]
+    for img in current_images:
+        meta = img.get("metadata", {})
+        ts_ms = meta.get("timestamp")
+        if not isinstance(ts_ms, (int, float)):
+            ts_ms = relative_now_ms
+        grouped_images[int(ts_ms)].append(img)
 
-    # Keep timeline items up to the max target time + a buffer
-    max_history = max(targets) + base_interval * 2
-    session.image_timeline = [item for item in session.image_timeline if now - item[0] < max_history]
+    # Sort groups descending by timestamp (newest first)
+    sorted_groups = sorted(grouped_images.items(), key=lambda x: x[0], reverse=True)
 
-    selected = []
-    seen_ids = set()
-
-    for t_offset in targets:
-        target_time = now - t_offset
-        if not session.image_timeline:
-            break
-
-        # Find closest item
-        closest = min(session.image_timeline, key=lambda x: abs(x[0] - target_time))
-
-        # Avoid including images that are too far from the target (e.g. gap > base_interval * 1.5)
-        if abs(closest[0] - target_time) > base_interval * 1.5:
-            continue
-
-        # Only include if not chosen before, up to 8 images total
-        item_id = id(closest[1])
-        if item_id not in seen_ids and len(selected) < 8:
-            seen_ids.add(item_id)
-            selected.append(closest)
-
-    selected.sort(key=lambda x: x[0], reverse=True)
     ROW_HEIGHT = 240
     row_images = []
 
@@ -1213,7 +1194,7 @@ def _build_temporal_stitched_image(session: SessionState, current_images: list[d
     except Exception:
         font = ImageFont.load_default()
 
-    for timestamp, imgs in selected:
+    for ts_ms, imgs in sorted_groups:
         pil_imgs = []
         for img_dict in imgs:
             b64 = str(img_dict.get("data", ""))
@@ -1243,7 +1224,7 @@ def _build_temporal_stitched_image(session: SessionState, current_images: list[d
             group_img.paste(sc, (x_offset, 0))
             x_offset += sc.width
 
-        dt = int(now - timestamp)
+        dt = int((relative_now_ms - ts_ms) / 1000)
         label = "T" if dt <= 1 else f"T-{dt}s"
         txt_height = 48
         

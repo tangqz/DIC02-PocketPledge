@@ -30,6 +30,7 @@ export interface SnapshotImage {
     height?: number;
     displaySurface?: string;
     facingMode?: string;
+    timestamp?: number;
   };
 }
 
