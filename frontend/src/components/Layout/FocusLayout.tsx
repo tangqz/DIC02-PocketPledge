@@ -102,7 +102,7 @@ export default function FocusLayout() {
       </div>
 
       <div className="h-[34%] min-h-[210px] border-t border-slate-200 bg-surface-elevated/60 backdrop-blur-lg">
-        <ChatPanel expanded onSendText={handleSendText} />
+        <ChatPanel expanded onSendText={handleSendText} disabled={isPaused} />
       </div>
 
       {isPaused && pauseRemaining !== undefined ? (

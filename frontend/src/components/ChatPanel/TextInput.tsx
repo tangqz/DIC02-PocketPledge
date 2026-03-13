@@ -6,9 +6,10 @@ import { useI18n } from "@/lib/i18n";
 
 interface Props {
   onSend: (text: string) => void;
+  disabled?: boolean;
 }
 
-export default function TextInput({ onSend }: Props) {
+export default function TextInput({ onSend, disabled }: Props) {
   const [value, setValue] = useState("");
   const { t } = useI18n();
 
@@ -34,13 +35,14 @@ export default function TextInput({ onSend }: Props) {
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKey}
-          placeholder={t("focus.sendPlaceholder")}
+          placeholder={disabled ? "暂停状态下不可交互" : t("focus.sendPlaceholder")}
           aria-label={t("focus.sendPlaceholder")}
-          className="flex-1 rounded-xl bg-surface-elevated px-4 py-2.5 text-sm text-slate-800 outline-none ring-1 ring-white/5 transition-all placeholder:text-slate-400 focus:ring-accent/40"
+          disabled={disabled}
+          className="flex-1 rounded-xl bg-surface-elevated px-4 py-2.5 text-sm text-slate-800 outline-none ring-1 ring-white/5 transition-all placeholder:text-slate-400 focus:ring-accent/40 disabled:opacity-50 disabled:cursor-not-allowed"
         />
         <button
           onClick={handleSubmit}
-          disabled={!value.trim()}
+          disabled={!value.trim() || disabled}
           aria-label={t("focus.send")}
           className="rounded-xl bg-accent px-4 py-2.5 text-sm font-medium text-slate-800 transition-opacity hover:opacity-90 disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
         >

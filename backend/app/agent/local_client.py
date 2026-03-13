@@ -149,12 +149,18 @@ def _load_profile_content(user_id: str) -> str:
         db.close()
 
 
-def _build_chat_system_prompt(profile_content: str, current_task: str | None) -> str:
+def _build_chat_system_prompt(
+    profile_content: str,
+    current_task: str | None,
+    focus_status: str | None,
+) -> str:
     parts = [CHAT_SYSTEM_PROMPT]
     if profile_content:
         parts.append(f"\n═══ 用户画像 ═══\n{profile_content}")
     if current_task:
         parts.append(f"\n当前学习任务：{current_task}")
+    if focus_status:
+        parts.append(f"\n当前专注状态：{focus_status}")
     return "\n".join(parts)
 
 
@@ -187,10 +193,11 @@ def _build_character_block(character_id: str) -> str:
 def _build_runtime_chat_system_prompt(
     profile_content: str,
     current_task: str | None,
+    focus_status: str | None,
     language_mode: str,
     character_id: str,
 ) -> str:
-    base = _build_chat_system_prompt(profile_content, current_task)
+    base = _build_chat_system_prompt(profile_content, current_task, focus_status)
     return f"{base}{_build_language_block(language_mode)}{_build_character_block(character_id)}"
 
 
@@ -283,6 +290,7 @@ class LocalLLMClient:
         session_id: str,
         images: list[dict[str, Any]] | None = None,
         current_task: str | None = None,
+        focus_status: str | None = None,
         language_mode: str = "zh",
         character_id: str = "milly",
     ) -> AsyncIterator[str]:
@@ -291,6 +299,7 @@ class LocalLLMClient:
         system_prompt = _build_runtime_chat_system_prompt(
             profile_content=profile_content,
             current_task=current_task,
+            focus_status=focus_status,
             language_mode=language_mode,
             character_id=character_id,
         )

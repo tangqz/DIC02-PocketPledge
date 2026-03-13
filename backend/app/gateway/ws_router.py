@@ -188,6 +188,7 @@ PENALTY_AMOUNT = PENALTY_PER_DISTRACTION
 BOT_NAME = "Study Buddy"
 DEFAULT_BALANCE = 100
 SYS_MARKER = "<<SYS>>"
+CAPTURE_MARKER = "<<CAPTURE>>"
 LOG_PREVIEW_LIMIT = 240
 START_CAPTURE_SOURCES = ["camera", "screen"]
 MAX_AGENT_STAGES = 6
@@ -542,7 +543,22 @@ def _split_sys_marker_buffer(buffer: str) -> tuple[str, str, bool]:
 
 def _sanitize_agent_text(text: str) -> str:
     """Remove internal trigger markers from any user-visible agent text."""
-    return text.replace(SYS_MARKER, "").replace("<<CAPTURE>>", "").strip()
+    cleaned = re.sub(r"<<\s*sys\s*>>", "", text, flags=re.IGNORECASE)
+    cleaned = re.sub(r"<<\s*capture\s*>>", "", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
+
+
+def _build_focus_status(session: SessionState) -> str:
+    if session.supervision_state != "active":
+        return "不是专注模式"
+
+    total = session.total_focus_seconds or 0
+    remaining = session.focus_time_remaining
+    if remaining is None:
+        return "专注中"
+
+    elapsed = max(total - remaining, 0)
+    return f"专注中，已专注{elapsed}/{total}"
 
 
 def _can_start_session(session: SessionState) -> bool:
@@ -832,6 +848,7 @@ async def dispatch_message(
                 user_text="[SYSTEM_RESULT: RESUME_APPROVED]",
                 images=[],
                 current_task=session.current_plan,
+                focus_status=_build_focus_status(session),
                 language_mode=session.language_mode,
                 character_id=session.character_id,
                 include_audio=not session.is_bankrupt,
@@ -951,6 +968,7 @@ async def _handle_user_turn(
         user_text=text,
         images=images,
         current_task=session.current_plan,
+        focus_status=_build_focus_status(session),
         language_mode=session.language_mode,
         character_id=session.character_id,
         include_audio=not session.is_bankrupt,
@@ -1390,7 +1408,7 @@ def _build_temporal_stitched_image(
     # Sort groups descending by timestamp (newest first)
     sorted_groups = sorted(grouped_images.items(), key=lambda x: x[0], reverse=True)
 
-    ROW_HEIGHT = 240
+    ROW_HEIGHT = 360
     row_images = []
 
     try:
@@ -1691,6 +1709,7 @@ async def stream_agent_reply(
     user_text: str,
     images: list[dict[str, Any]] | None,
     current_task: str | None,
+    focus_status: str,
     language_mode: str,
     character_id: str,
     include_audio: bool,
@@ -1707,6 +1726,7 @@ async def stream_agent_reply(
         session_id=user_id,
         images=images,
         current_task=current_task,
+        focus_status=focus_status,
         language_mode=language_mode,
         character_id=character_id,
     ):
@@ -1752,6 +1772,7 @@ async def _stream_and_detect_sys(
     user_text: str,
     images: list[dict[str, Any]] | None,
     current_task: str | None,
+    focus_status: str,
     language_mode: str,
     character_id: str,
     include_audio: bool,
@@ -1774,14 +1795,17 @@ async def _stream_and_detect_sys(
         session_id=user_id,
         images=images,
         current_task=current_task,
+        focus_status=focus_status,
         language_mode=language_mode,
         character_id=character_id,
     ):
         chunk_text = _sanitize_agent_text(str(chunk.get("text", "")))
+        raw_text = str(chunk.get("raw_text", ""))
         expression = str(chunk.get("expression", "neutral"))
         audio_coro = chunk.get("audio_coro")
-        chunk_sys_triggered = bool(chunk.get("sys_triggered"))
-        chunk_capture_triggered = bool(chunk.get("capture_triggered"))
+        raw_upper = raw_text.upper()
+        chunk_sys_triggered = bool(chunk.get("sys_triggered")) or SYS_MARKER in raw_upper
+        chunk_capture_triggered = bool(chunk.get("capture_triggered")) or CAPTURE_MARKER in raw_upper
 
         if chunk_text:
             parts.append(chunk_text)
