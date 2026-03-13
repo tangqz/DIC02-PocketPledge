@@ -17,8 +17,8 @@
 PocketPledge 打破了传统时间管理软件的枯燥与死板，将“陪伴”与“督导”完美融合：
 
 - 🎭 **Live2D 虚拟伙伴**：告别冷冰冰的倒计时器！系统提供互动式的虚拟伙伴前端界面，支持表情与动作同步，全程陪你一起度过漫长的学习时光。
-- 🗣️ **极速实时语音对话**：通过强大的本地 ASR (Sherpa-ONNX) 与云端 TTS 的组合，加上代理模型的思考，实现极低延迟的语音流转。想开小差？你的伙伴不仅会用语音提醒你，还会给予你灵魂的拷问。
-- 👁️ **硬核视觉分心判定**：学习时频繁看手机、离开座位？系统会定时进行摄像头抽帧，由强大的多模态 AI (如 GPT-4o) 进行**实时状态分析**，闭环扣费逻辑，精准捕捉你的每一次分心。
+- 🗣️ **极速实时语音对话**：通过强大的本地 ASR (Sherpa-ONNX) 与云端 TTS 的组合，加上代理模型的思考，实现较低延迟的语音流转。想开小差？你的伙伴不仅会用语音提醒你，还会给予你灵魂的拷问。
+- 👁️ **硬核视觉分心判定**：学习时频繁看手机、离开座位？系统会对摄像头与屏幕非线性稀疏采样，由强大的多模态 AI 进行**实时状态分析**，精准捕捉你的每一次分心。
 - 💰 **经济督导 (真金白银的考验)**：一旦被 AI 抓到分心并屡教不改，将立即扣除一定罚金。真实的余额结算机制，用痛感建立起最坚固的专注力防线。
 
 ## 📁 目录结构与技术栈概览
@@ -72,21 +72,21 @@ AGENT_BACKEND=local
 MEDIA_AI_SHERPA_MODEL_PATH="/绝对路径/sherpa-onnx/model.int8.onnx"
 MEDIA_AI_SHERPA_TOKENS_PATH="/绝对路径/sherpa-onnx/tokens.txt"
 
-# ----------------- AI 模型配置 -----------------
+# ----------------- AI 模型配置（可自定义） -----------------
 # 聊天模型配置
-LOCAL_CHAT_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-LOCAL_CHAT_API_BASE=""
-LOCAL_CHAT_MODEL=""
+LOCAL_CHAT_API_KEY="xxxxxxxxxxxxxxxxxxxxxxxx"
+LOCAL_CHAT_API_BASE="https://generativelanguage.googleapis.com/v1beta/openai/"
+LOCAL_CHAT_MODEL="gemini-3.1-flash-lite-preview"
 
 # 视觉模型配置
 LOCAL_VISION_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-LOCAL_VISION_API_BASE=""
-LOCAL_VISION_MODEL=""
+LOCAL_VISION_API_BASE="https://dashscope.aliyuncs.com/compatible-mode/v1"
+LOCAL_VISION_MODEL="qwen3.5-flash"
 
 # 系统代理模型配置
-LOCAL_AGENT_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-LOCAL_AGENT_API_BASE=""
-LOCAL_AGENT_MODEL=""
+LOCAL_AGENT_API_KEY="xxxxxxxxxxxxxxxxxxxxxxxx"
+LOCAL_AGENT_API_BASE="https://generativelanguage.googleapis.com/v1beta/openai/"
+LOCAL_AGENT_MODEL="gemini-3.1-flash-lite-preview"
 ```
 
 **启动后端服务**：
