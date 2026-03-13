@@ -29,7 +29,8 @@ export default function LoginPage() {
       <button
         type="button"
         onClick={() => setLocale(locale === "zh" ? "en" : "zh")}
-        className="absolute right-4 top-4 rounded-lg bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm ring-1 ring-slate-200 backdrop-blur hover:bg-white"
+        aria-label={locale === "zh" ? "Switch to English" : "切换到中文"}
+        className="absolute right-4 top-4 rounded-lg bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm ring-1 ring-slate-200 backdrop-blur hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
       >
         {locale === "zh" ? "EN" : "中"}
       </button>
@@ -43,6 +44,7 @@ export default function LoginPage() {
           <input
             type="text"
             placeholder={t("auth.username")}
+            aria-label={t("auth.username")}
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             required
@@ -55,6 +57,7 @@ export default function LoginPage() {
             <input
               type="email"
               placeholder={t("auth.emailOptional")}
+              aria-label={t("auth.emailOptional")}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full rounded-lg bg-slate-50 border border-slate-200 px-4 py-2.5 text-slate-800 placeholder-slate-400 outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-400 transition-colors"
@@ -64,6 +67,7 @@ export default function LoginPage() {
           <input
             type="password"
             placeholder={t("auth.password")}
+            aria-label={t("auth.password")}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
@@ -78,7 +82,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-lg bg-orange-500 py-2.5 font-semibold text-white transition hover:bg-orange-600 disabled:opacity-50"
+            className="w-full rounded-lg bg-orange-500 py-2.5 font-semibold text-white transition hover:bg-orange-600 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-600 focus-visible:ring-offset-2"
           >
             {loading ? t("auth.pleaseWait") : isRegister ? t("auth.register") : t("auth.login")}
           </button>
@@ -92,7 +96,7 @@ export default function LoginPage() {
               setIsRegister(!isRegister);
               useAuthStore.setState({ error: null });
             }}
-            className="ml-1 text-orange-600 font-medium underline hover:text-orange-700"
+            className="ml-1 text-orange-600 font-medium underline hover:text-orange-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400 focus-visible:rounded"
           >
             {isRegister ? t("auth.goLogin") : t("auth.goRegister")}
           </button>

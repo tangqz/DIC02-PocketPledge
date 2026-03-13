@@ -297,14 +297,16 @@ export default function DailyPlanCalendar({ plan }: DailyPlanCalendarProps) {
           <div className="mb-2 flex items-center justify-between">
             <button
               onClick={() => setDisplayMonth((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
-              className="rounded bg-slate-50 px-2 py-0.5 text-xs text-slate-600 hover:bg-black/30"
+              aria-label={locale === "zh" ? "上个月" : "Previous Month"}
+              className="rounded bg-slate-50 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               {locale === "zh" ? "上月" : "Prev"}
             </button>
             <p className="text-sm text-slate-700">{monthLabel}</p>
             <button
               onClick={() => setDisplayMonth((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
-              className="rounded bg-slate-50 px-2 py-0.5 text-xs text-slate-600 hover:bg-black/30"
+              aria-label={locale === "zh" ? "下个月" : "Next Month"}
+              className="rounded bg-slate-50 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               {locale === "zh" ? "下月" : "Next"}
             </button>
