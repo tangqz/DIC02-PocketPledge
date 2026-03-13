@@ -86,6 +86,40 @@ class SystemAgentService:
             ),
         )
 
+    async def extract_profile_memories(
+        self,
+        session_id: str,
+        rotated_chat: str,
+        existing_profile: str,
+    ) -> list[str]:
+        """Extract profile-worthy memory lines from rotated chat chunks."""
+        client = get_dify_client()
+        extract_method = getattr(client, "extract_profile_memories", None)
+        if extract_method is None:
+            return []
+
+        try:
+            outputs = await extract_method(
+                session_id=session_id,
+                inputs={
+                    "rotated_chat": rotated_chat,
+                    "existing_profile": existing_profile,
+                },
+            )
+        except Exception:
+            logger.exception(
+                "profile memory extraction failed, session_id=%s", session_id
+            )
+            return []
+
+        if not isinstance(outputs, dict):
+            return []
+
+        if not self._coerce_bool(outputs.get("should_update"), default=False):
+            return []
+
+        return self._coerce_profile_lines(outputs.get("memory_lines"))
+
     def _coerce_action(
         self, value: Any
     ) -> Literal["none", "plan", "start", "pause", "resume", "complete"]:
@@ -147,3 +181,22 @@ class SystemAgentService:
             if isinstance(parsed, dict):
                 return parsed
         return None
+
+    def _coerce_profile_lines(self, value: Any) -> list[str]:
+        lines = self._coerce_string_list(value)
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for line in lines:
+            text = line.strip()
+            if not text:
+                continue
+            if not text.startswith("-"):
+                text = f"- {text}"
+            key = text.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(text)
+            if len(normalized) >= 3:
+                break
+        return normalized

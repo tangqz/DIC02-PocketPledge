@@ -1,7 +1,7 @@
 import json
 import uuid
 from decimal import Decimal, ROUND_HALF_UP
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -331,6 +331,73 @@ def _normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
                 return None
         return None
 
+    def _parse_date_key(value: object) -> str | None:
+        if not isinstance(value, str):
+            return None
+        raw = value.strip()
+        if not raw:
+            return None
+        raw = raw.replace("/", "-")
+        try:
+            if len(raw) == 10:
+                dt = datetime.strptime(raw, "%Y-%m-%d")
+                return dt.strftime("%Y-%m-%d")
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            return None
+
+    def _normalize_dates(value: object) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        normalized: list[str] = []
+        for item in value:
+            date_key = _parse_date_key(item)
+            if date_key:
+                normalized.append(date_key)
+        # Keep order but remove duplicates
+        seen: set[str] = set()
+        unique_dates: list[str] = []
+        for item in normalized:
+            if item in seen:
+                continue
+            seen.add(item)
+            unique_dates.append(item)
+        return unique_dates
+
+    def _normalize_weekdays(value: object) -> list[int]:
+        if not isinstance(value, list):
+            return []
+        normalized: list[int] = []
+        for item in value:
+            parsed = _parse_int(item)
+            if parsed is None:
+                continue
+            if 0 <= parsed <= 6:
+                normalized.append(parsed)
+        return sorted(set(normalized))
+
+    def _sanitize_text(value: object, max_len: int = 255) -> str | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        return text[:max_len]
+
+    normalized_plan_type = str(plan.get("planType") or "").strip().lower()
+    if normalized_plan_type not in {"calendar", "task", "progress"}:
+        normalized_plan_type = "calendar"
+
+    normalized_start_date = _parse_date_key(plan.get("startDate"))
+    normalized_end_date = _parse_date_key(plan.get("endDate"))
+    normalized_deadline = _parse_date_key(
+        plan.get("deadline") or plan.get("dueDate") or plan.get("endDate")
+    )
+    fallback_base = (
+        datetime.strptime(normalized_start_date, "%Y-%m-%d")
+        if normalized_start_date
+        else datetime.utcnow()
+    )
+
     raw_tasks = plan.get("tasks") or []
     tasks: list[dict[str, Any]] = []
     for index, raw_task in enumerate(raw_tasks, start=1):
@@ -346,14 +413,87 @@ def _normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
             )
         except (TypeError, ValueError):
             normalized_minutes = None
-        tasks.append(
-            {
-                "id": str(raw_task.get("id") or f"task_{index}"),
-                "title": title,
-                "completed": bool(raw_task.get("completed", False)),
-                "estimatedMinutes": normalized_minutes,
-            }
-        )
+        actual_minutes = _parse_int(raw_task.get("actualMinutes"))
+        if actual_minutes is not None and actual_minutes < 0:
+            actual_minutes = 0
+
+        task_date = _parse_date_key(raw_task.get("date") or raw_task.get("dueDate"))
+        task_dates = _normalize_dates(raw_task.get("dates"))
+        task_weekdays = _normalize_weekdays(raw_task.get("weekdays"))
+        task_repeat_count = _parse_int(raw_task.get("repeatCount"))
+        task_start_date = _parse_date_key(raw_task.get("startDate"))
+        task_end_date = _parse_date_key(raw_task.get("endDate"))
+        task_recurrence = str(raw_task.get("recurrence") or "").strip().lower()
+        if task_recurrence not in {"daily", "weekly", "custom"}:
+            task_recurrence = ""
+
+        if (
+            task_recurrence == "daily"
+            and task_start_date
+            and task_end_date
+            and not task_dates
+        ):
+            try:
+                start_dt = datetime.strptime(task_start_date, "%Y-%m-%d")
+                end_dt = datetime.strptime(task_end_date, "%Y-%m-%d")
+                if end_dt >= start_dt:
+                    span_days = min((end_dt - start_dt).days, 365)
+                    task_dates = [
+                        (start_dt + timedelta(days=offset)).strftime("%Y-%m-%d")
+                        for offset in range(span_days + 1)
+                    ]
+            except ValueError:
+                pass
+
+        # Fallback: if no explicit schedule is provided, place tasks on sequential days.
+        if not task_date and not task_dates and not task_weekdays:
+            fallback_date = (fallback_base + timedelta(days=index - 1)).strftime(
+                "%Y-%m-%d"
+            )
+            task_date = fallback_date
+
+        normalized_task: dict[str, Any] = {
+            "id": str(raw_task.get("id") or f"task_{index}"),
+            "title": title,
+            "completed": bool(raw_task.get("completed", False)),
+            "estimatedMinutes": normalized_minutes,
+        }
+        if actual_minutes is not None:
+            normalized_task["actualMinutes"] = actual_minutes
+
+        raw_actual_by_date = raw_task.get("actualMinutesByDate")
+        if isinstance(raw_actual_by_date, dict):
+            normalized_actual_by_date: dict[str, int] = {}
+            for raw_date_key, raw_value in raw_actual_by_date.items():
+                date_key = _parse_date_key(raw_date_key)
+                parsed_minutes = _parse_int(raw_value)
+                if date_key and parsed_minutes is not None and parsed_minutes >= 0:
+                    normalized_actual_by_date[date_key] = parsed_minutes
+            if normalized_actual_by_date:
+                normalized_task["actualMinutesByDate"] = normalized_actual_by_date
+        if task_date:
+            normalized_task["date"] = task_date
+        if task_dates:
+            normalized_task["dates"] = task_dates
+        if task_weekdays:
+            normalized_task["weekdays"] = task_weekdays
+        if task_repeat_count and task_repeat_count > 0:
+            normalized_task["repeatCount"] = task_repeat_count
+        if task_start_date:
+            normalized_task["startDate"] = task_start_date
+        if task_end_date:
+            normalized_task["endDate"] = task_end_date
+        if task_recurrence:
+            normalized_task["recurrence"] = task_recurrence
+
+        priority = str(raw_task.get("priority") or "").strip().lower()
+        if priority in {"low", "medium", "high"}:
+            normalized_task["priority"] = priority
+        notes = _sanitize_text(raw_task.get("notes"), max_len=500)
+        if notes:
+            normalized_task["notes"] = notes
+
+        tasks.append(normalized_task)
 
     total_minutes = plan.get("totalMinutes")
     normalized_total_minutes = _parse_int(total_minutes)
@@ -384,11 +524,25 @@ def _normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
     ):
         normalized_duration = derived_duration
 
-    return {
+    normalized_goal = _sanitize_text(plan.get("goal"), max_len=255)
+    if not normalized_goal:
+        normalized_goal = tasks[0].get("title") if tasks else "学习计划"
+
+    result: dict[str, Any] = {
+        "formatVersion": 2,
+        "planType": normalized_plan_type,
+        "goal": normalized_goal,
         "tasks": tasks,
         "totalMinutes": max(normalized_total_minutes, 0),
         "suggestedDuration": max(normalized_duration, 0),
     }
+    if normalized_start_date:
+        result["startDate"] = normalized_start_date
+    if normalized_end_date:
+        result["endDate"] = normalized_end_date
+    if normalized_deadline:
+        result["deadline"] = normalized_deadline
+    return result
 
 
 def _serialize_plan_row(row: StudyPlan) -> dict[str, Any]:
@@ -413,6 +567,21 @@ def get_active_plan(db: Session, user_id: int) -> dict[str, Any] | None:
     )
     if row is None:
         return None
+
+    try:
+        raw_plan = json.loads(row.plan_json or "{}")
+    except json.JSONDecodeError:
+        raw_plan = {}
+    normalized_plan = _normalize_plan(raw_plan if isinstance(raw_plan, dict) else {})
+    if raw_plan != normalized_plan:
+        row.plan_json = json.dumps(normalized_plan, ensure_ascii=False)
+        row.title = str(
+            (normalized_plan.get("tasks") or [{}])[0].get("title") or "学习计划"
+        )
+        row.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(row)
+
     return _serialize_plan_row(row)
 
 

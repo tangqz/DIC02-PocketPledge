@@ -62,7 +62,8 @@ class ConnectionManager:
         self.disconnected_at.pop(user_id, None)
 
         session = self.user_states.get(user_id)
-        if session is None:
+        if session is None or session.supervision_state == "completed":
+            # Prevent users from getting stuck in "completed" upon reconnect
             session = SessionState()
             self.user_states[user_id] = session
 
@@ -146,7 +147,7 @@ CHARACTER_CATALOG: dict[str, dict[str, Any]] = {
         "modelInfo": {
             "name": "mao_pro",
             "url": "/live2d-models/mao_pro/mao_pro.model3.json",
-            "kScale": 0.5,
+            "kScale": 1.0,
             "emotionMap": {
                 "neutral": 0,
                 "happy": 3,
@@ -167,7 +168,7 @@ CHARACTER_CATALOG: dict[str, dict[str, Any]] = {
         "modelInfo": {
             "name": "natori_pro_zh",
             "url": "/live2d-models/natori_pro_zh/runtime/natori_pro_t06.model3.json",
-            "kScale": 0.52,
+            "kScale": 1.0,
             "emotionMap": {
                 "neutral": 2,
                 "happy": 4,
@@ -334,6 +335,59 @@ def _plan_focus_seconds(plan: dict[str, Any] | None) -> int | None:
     return None
 
 
+def _parse_non_negative_int(value: Any) -> int:
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return 0
+    return max(parsed, 0)
+
+
+def _apply_focus_progress_to_plan(
+    plan: dict[str, Any] | None,
+    task_title: str | None,
+    focused_seconds: int,
+    completed_date_key: str,
+) -> bool:
+    if not isinstance(plan, dict) or focused_seconds <= 0:
+        return False
+
+    tasks = plan.get("tasks")
+    if not isinstance(tasks, list) or not tasks:
+        return False
+
+    gained_minutes = max(1, focused_seconds // 60)
+    normalized_title = str(task_title or "").strip()
+
+    target_task: dict[str, Any] | None = None
+    if normalized_title:
+        for task in tasks:
+            if not isinstance(task, dict):
+                continue
+            if str(task.get("title") or "").strip() == normalized_title:
+                target_task = task
+                break
+    if target_task is None:
+        for task in tasks:
+            if isinstance(task, dict):
+                target_task = task
+                break
+    if target_task is None:
+        return False
+
+    current_total = _parse_non_negative_int(target_task.get("actualMinutes"))
+    target_task["actualMinutes"] = current_total + gained_minutes
+
+    by_date = target_task.get("actualMinutesByDate")
+    if not isinstance(by_date, dict):
+        by_date = {}
+    by_date_current = _parse_non_negative_int(by_date.get(completed_date_key))
+    by_date[completed_date_key] = by_date_current + gained_minutes
+    target_task["actualMinutesByDate"] = by_date
+
+    return True
+
+
 def _build_completion_summary(session: SessionState) -> tuple[str, dict[str, Any]]:
     total_seconds = session.total_focus_seconds or 0
     remaining_seconds = session.focus_time_remaining or 0
@@ -489,6 +543,78 @@ async def _append_chat(
     await _persist_chat_message(
         user_id=user_id, role=role, content=content, session_ref=session.session_ref
     )
+    await _process_profile_rollover(session=session, user_id=user_id)
+
+
+def _format_chat_messages_for_profile_rollover(
+    messages: list[dict[str, str]], character_id: str
+) -> str:
+    speaker_name = "Ren" if character_id == "ren" else "米莉"
+    lines: list[str] = []
+    for msg in messages:
+        role = str(msg.get("role", "")).strip().lower()
+        content = str(msg.get("content", "")).strip()
+        if not content:
+            continue
+        if role == "user":
+            prefix = "用户"
+        elif role == "assistant":
+            prefix = speaker_name
+        else:
+            prefix = "系统"
+        lines.append(f"{prefix}: {content}")
+    return "\n".join(lines)
+
+
+async def _process_profile_rollover(session: SessionState, user_id: str) -> None:
+    batch = session.pop_profile_rollover_batch()
+    if not batch:
+        return
+
+    try:
+        uid = int(user_id)
+    except ValueError:
+        return
+
+    rotated_chat = _format_chat_messages_for_profile_rollover(
+        batch, session.character_id
+    )
+    if not rotated_chat.strip():
+        return
+
+    db = SessionLocal()
+    try:
+        existing_profile = str(
+            db_get_user_profile_document(db=db, user_id=uid).get("content", "")
+        )
+    except Exception:
+        logger.exception("failed to load profile for rollover, user_id=%s", user_id)
+        return
+    finally:
+        db.close()
+
+    memory_lines = await system_agent.extract_profile_memories(
+        session_id=user_id,
+        rotated_chat=rotated_chat,
+        existing_profile=existing_profile,
+    )
+    if not memory_lines:
+        logger.info("profile rollover had no new memory, user_id=%s", user_id)
+        return
+
+    db = SessionLocal()
+    try:
+        for line in memory_lines:
+            db_append_user_profile_memory(db=db, user_id=uid, memory_line=line)
+        logger.info(
+            "profile rollover appended %s memory lines, user_id=%s",
+            len(memory_lines),
+            user_id,
+        )
+    except Exception:
+        logger.exception("failed to append profile rollover memory, user_id=%s", user_id)
+    finally:
+        db.close()
 
 
 async def _hydrate_chat_history(user_id: str, session: SessionState) -> None:
@@ -831,7 +957,7 @@ async def dispatch_message(
             if session.character_id == character_id:
                 return
             session.character_id = character_id
-            session.chat_history = []
+            session.clear_chat_context()
             await send_model_info(user_id, session)
             await send_control(
                 user_id,
@@ -972,7 +1098,8 @@ async def _handle_user_turn(
         language_mode=session.language_mode,
         character_id=session.character_id,
         include_audio=not session.is_bankrupt,
-        on_sys_detected=_run_system_agent,
+        detect_sys=not is_tool_result,
+        on_sys_detected=(_run_system_agent if not is_tool_result else None),
     )
 
     if capture_detected:
@@ -1010,7 +1137,7 @@ async def _handle_user_turn(
         await _handle_user_turn(
             user_id=user_id,
             session=session,
-            text=f"{text}\n[SYSTEM_RESULT: SYSTEM_AGENT_ERROR, DETAIL: {_truncate_log_text(directive.error_message)}]",
+            text=f"[SYSTEM_RESULT: SYSTEM_AGENT_ERROR, DETAIL: {_truncate_log_text(directive.error_message)}]",
             images=images,
             is_tool_result=True,
             append_user_message=False,
@@ -1247,7 +1374,7 @@ async def _handle_user_turn(
         if system_events
         else f"[SYSTEM_RESULT: action={directive.action}, approved={directive.approved}]"
     )
-    enriched_text = f"{text}\n{result_context}"
+    enriched_text = result_context
     logger.info(
         "follow-up request, user_id=%s stage=%s action=%s result_context=%s",
         user_id,
@@ -1693,6 +1820,25 @@ async def handle_complete(user_id: str, session: SessionState) -> None:
             pending_capture_sources=list(session.pending_capture_sources),
             chat_history=list(session.chat_history),
         )
+
+        focused_seconds = max(
+            (summary_snapshot.total_focus_seconds or 0)
+            - (summary_snapshot.focus_time_remaining or 0),
+            0,
+        )
+        completed_date_key = datetime.now().astimezone().date().isoformat()
+        plan_updated = _apply_focus_progress_to_plan(
+            session.current_plan_data,
+            summary_snapshot.current_plan,
+            focused_seconds,
+            completed_date_key,
+        )
+        if plan_updated and session.current_plan_data is not None:
+            persisted = await _persist_active_plan(user_id, session.current_plan_data)
+            if persisted and persisted.get("plan"):
+                session.current_plan_data = persisted["plan"]
+            await send_plan_update(user_id, session.current_plan_data)
+
         session.complete()
         await send_supervision_state(user_id, session, reason="time up")
         await send_timer_sync(user_id, session)
@@ -1737,6 +1883,12 @@ async def stream_agent_reply(
             parts.append(chunk_text)
             sent_text = True
             await send_agent_text_chunk(user_id, chunk_text)
+            if expression:
+                await send_control(
+                    user_id,
+                    "set-expression",
+                    {"expression": expression},
+                )
         if include_audio and audio_coro is not None and chunk_text:
             audio_task = asyncio.create_task(audio_coro)
             audio_tasks.append((audio_task, expression, chunk_text))
@@ -1776,6 +1928,7 @@ async def _stream_and_detect_sys(
     language_mode: str,
     character_id: str,
     include_audio: bool,
+    detect_sys: bool = True,
     on_sys_detected: Callable[[], Coroutine[Any, Any, Any]] | None = None,
 ) -> tuple[str, bool, bool, asyncio.Task[Any] | None]:
     """Stream white-brain reply while detecting the <<SYS>> and <<CAPTURE>> trigger markers.
@@ -1811,12 +1964,23 @@ async def _stream_and_detect_sys(
             parts.append(chunk_text)
             sent_text = True
             await send_agent_text_chunk(user_id, chunk_text)
+            if expression:
+                await send_control(
+                    user_id,
+                    "set-expression",
+                    {"expression": expression},
+                )
 
         if chunk_capture_triggered and not capture_detected:
             capture_detected = True
             logger.info("CAPTURE trigger detected for user_id=%s", user_id)
 
-        if chunk_sys_triggered and not sys_detected and not chunk_capture_triggered:
+        if (
+            detect_sys
+            and chunk_sys_triggered
+            and not sys_detected
+            and not chunk_capture_triggered
+        ):
             sys_detected = True
             logger.info("SYS trigger detected for user_id=%s", user_id)
             if on_sys_detected is not None:

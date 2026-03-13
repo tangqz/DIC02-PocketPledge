@@ -46,6 +46,27 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "formatVersion": {
+                        "type": "integer",
+                        "description": "计划格式版本，推荐为2",
+                    },
+                    "planType": {
+                        "type": "string",
+                        "description": "计划类型: calendar/task/progress",
+                    },
+                    "goal": {"type": "string", "description": "本轮目标摘要"},
+                    "startDate": {
+                        "type": "string",
+                        "description": "计划起始日期，YYYY-MM-DD",
+                    },
+                    "endDate": {
+                        "type": "string",
+                        "description": "计划结束日期，YYYY-MM-DD",
+                    },
+                    "deadline": {
+                        "type": "string",
+                        "description": "截止日期，YYYY-MM-DD",
+                    },
                     "tasks": {
                         "type": "array",
                         "description": "任务列表",
@@ -56,6 +77,45 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                                 "title": {"type": "string"},
                                 "completed": {"type": "boolean"},
                                 "estimatedMinutes": {"type": "integer"},
+                                "date": {
+                                    "type": "string",
+                                    "description": "单次任务日期，YYYY-MM-DD",
+                                },
+                                "dueDate": {
+                                    "type": "string",
+                                    "description": "兼容字段，截止日期，YYYY-MM-DD",
+                                },
+                                "dates": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "多日期任务，YYYY-MM-DD 列表",
+                                },
+                                "weekdays": {
+                                    "type": "array",
+                                    "items": {"type": "integer"},
+                                    "description": "周几列表，0=Sun..6=Sat",
+                                },
+                                "repeatCount": {
+                                    "type": "integer",
+                                    "description": "重复周数/次数",
+                                },
+                                "startDate": {
+                                    "type": "string",
+                                    "description": "任务起始日期，YYYY-MM-DD",
+                                },
+                                "endDate": {
+                                    "type": "string",
+                                    "description": "任务结束日期，YYYY-MM-DD",
+                                },
+                                "recurrence": {
+                                    "type": "string",
+                                    "description": "重复规则: daily/weekly/custom",
+                                },
+                                "priority": {
+                                    "type": "string",
+                                    "description": "优先级: low/medium/high",
+                                },
+                                "notes": {"type": "string"},
                             },
                             "required": ["id", "title"],
                         },
@@ -66,7 +126,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                         "description": "建议专注时长（秒）",
                     },
                 },
-                "required": ["tasks", "totalMinutes", "suggestedDuration"],
+                "required": ["tasks", "totalMinutes"],
             },
         },
     },

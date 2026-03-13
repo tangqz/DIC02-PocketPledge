@@ -12,6 +12,7 @@ import VoiceInput from "@/components/VoiceInput/VoiceInput";
 import Live2DCanvas, { type Live2DCanvasHandle } from "@/components/Live2DCanvas/Live2DCanvas";
 import DailyPlanCalendar from "@/components/Dashboard/DailyPlanCalendar";
 import CharacterMarket from "@/components/Dashboard/CharacterMarket";
+import UserProfileDocument from "@/components/Dashboard/UserProfileDocument";
 import MediaPreviewDock from "@/components/SupervisionPanel/MediaPreviewDock";
 
 export default function SetupLayout() {
@@ -23,6 +24,8 @@ export default function SetupLayout() {
 
   const [sessionSummaries, setSessionSummaries] = useState<Array<{ id: string; summary_text: string; created_at: string }>>([]);
   const [transactions, setTransactions] = useState<Array<{ id: string; amount: number; reason: string; created_at: string; tx_type: string; from_user_id?: number | null; to_user_id?: number | null }>>([]);
+  const [profileDoc, setProfileDoc] = useState<{ content: string; updated_at?: string | null; max_chars?: number } | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
 
   const plan = useSessionStore((s) => s.plan);
   const balance = useSessionStore((s) => s.balance);
@@ -41,15 +44,30 @@ export default function SetupLayout() {
   useEffect(() => {
     const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:12393";
     if (!token) {
+      setProfileDoc(null);
+      setProfileLoading(false);
       return;
     }
+    setProfileLoading(true);
     const headers = { Authorization: `Bearer ${token}` };
     void Promise.all([
       fetch(`${API_BASE}/api/business/me/session-summaries?limit=6`, { headers }).then((r) => r.json()).catch(() => ({ items: [] })),
       fetch(`${API_BASE}/api/business/me/transactions?limit=8`, { headers }).then((r) => r.json()).catch(() => ({ items: [] })),
-    ]).then(([summaryData, txData]) => {
+      fetch(`${API_BASE}/api/business/me/profile`, { headers }).then((r) => r.json()).catch(() => null),
+    ]).then(([summaryData, txData, profileData]) => {
       setSessionSummaries(Array.isArray(summaryData?.items) ? summaryData.items : []);
       setTransactions(Array.isArray(txData?.items) ? txData.items : []);
+      if (profileData && typeof profileData?.content === "string") {
+        setProfileDoc({
+          content: profileData.content,
+          updated_at: profileData.updated_at,
+          max_chars: profileData.max_chars,
+        });
+      } else {
+        setProfileDoc({ content: "" });
+      }
+    }).finally(() => {
+      setProfileLoading(false);
     });
   }, [token]);
 
@@ -112,7 +130,15 @@ export default function SetupLayout() {
           </button>
         </div>
 
-        <DailyPlanCalendar plan={plan} />
+        <DailyPlanCalendar plan={plan} onStartFocusDay={(payload) => {
+          interruptAgentOutput();
+          const taskPreview = payload.tasks.slice(0, 2).map((item) => item.taskTitle).join("、");
+          const text = locale === "zh"
+            ? `我想开始 ${payload.dateKey} 的专注任务${taskPreview ? `：${taskPreview}` : ""}`
+            : `I want to start my focus tasks for ${payload.dateKey}${taskPreview ? `: ${taskPreview}` : ""}`;
+          useChatStore.getState().addMessage("user", text);
+          send({ type: "text-input", text });
+        }} />
 
         <section className="rounded-2xl border border-slate-200 bg-surface-elevated/70 p-4 backdrop-blur-sm">
           <h3 className="mb-3 text-sm font-semibold text-slate-700">
@@ -200,6 +226,14 @@ export default function SetupLayout() {
             ? "提示：切换角色会立即热切换模型，并清空聊天记录以保证人设一致性。"
             : "Tip: Switching character hot-loads the model and clears chat history to keep persona consistency."}
         </section>
+
+        <UserProfileDocument
+          locale={locale}
+          loading={profileLoading}
+          content={profileDoc?.content ?? ""}
+          updatedAt={profileDoc?.updated_at}
+          maxChars={profileDoc?.max_chars}
+        />
       </aside>
 
       <main className="relative flex flex-1 min-w-0 flex-col bg-gradient-to-b from-surface/20 to-transparent">
