@@ -1,4 +1,5 @@
 import os
+import hmac
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -51,7 +52,9 @@ def require_internal_tool_access(
             detail="Internal tool token is not configured",
         )
 
-    if creds is None or creds.credentials != configured_token:
+    if creds is None or not hmac.compare_digest(
+        creds.credentials.encode("utf-8"), configured_token.encode("utf-8")
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid internal tool token",
