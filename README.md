@@ -25,6 +25,8 @@ PocketPledge breaks the dullness and rigidity of traditional time management sof
 - 👁️ **Hardcore Visual Distraction Detection**: Frequently checking your phone or leaving your seat while studying? The system uses non-linear sparse sampling from your camera and screen, powered by a robust multimodal AI for **real-time state analysis** to accurately catch your every distraction.
 - 💰 **Financial Supervision (The Real Money Test)**: Once caught distracted by the AI and refusing to correct your behavior, a specific fine will be deducted immediately. The realistic balance settlement mechanism builds the strongest defense line for concentration through the pain of losing money.
 
+> **Note: Since we have not yet deployed this project as a cloud service, we currently only provide a locally deployable version. The penalty mechanism also only applies to a local virtual account and does not affect real funds.**
+
 ## 📁 Directory Structure & Tech Stack Overview
 
 - **Frontend (`frontend/`)**: React + TypeScript + Vite, Tailwind CSS v4 (pure `@theme` driven without `tailwind.config.js`), Zustand for state management. Responsible for chat UI, Live2D display, audio recording, and WebSocket communication.
