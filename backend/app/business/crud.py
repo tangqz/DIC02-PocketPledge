@@ -67,12 +67,23 @@ def _require_wallet(db: Session, user_id: int) -> Wallet:
     return wallet
 
 
+def _require_wallet_for_update(db: Session, user_id: int) -> Wallet:
+    wallet = db.query(Wallet).with_for_update().filter(Wallet.user_id == user_id).first()
+    if not wallet:
+        raise ValueError(f"wallet for user_id={user_id} not found")
+    return wallet
+
+
 def start_focus_session(db: Session, user_id: int, planned_focus_minutes: int) -> dict:
     if user_id in (0, 1):
         raise ValueError("user_id 0/1 are reserved system accounts")
 
-    _, user_wallet = _get_or_create_user_with_wallet(db, user_id)
-    pool_wallet = _require_wallet(db, 1)
+    _get_or_create_user_with_wallet(db, user_id)
+
+    # Always order locks by ID to avoid deadlocks
+    # System IDs are 0 and 1, user IDs > 1
+    pool_wallet = _require_wallet_for_update(db, 1)
+    user_wallet = _require_wallet_for_update(db, user_id)
 
     upfront_cost = _focus_fee_cents(planned_focus_minutes)
     if user_wallet.balance < upfront_cost:
@@ -138,9 +149,13 @@ def execute_penalty(
     if distraction_count < 1:
         raise ValueError("distraction_count must be >= 1")
 
-    _, user_wallet = _get_or_create_user_with_wallet(db, user_id)
-    charity_wallet = _require_wallet(db, 0)
-    pool_wallet = _require_wallet(db, 1)
+    _get_or_create_user_with_wallet(db, user_id)
+
+    # Always order locks by ID to avoid deadlocks
+    # System IDs are 0 and 1, user IDs > 1
+    charity_wallet = _require_wallet_for_update(db, 0)
+    pool_wallet = _require_wallet_for_update(db, 1)
+    user_wallet = _require_wallet_for_update(db, user_id)
 
     requested_penalty = (
         penalty_amount
@@ -229,6 +244,51 @@ def execute_penalty(
             ]
             if tx_id
         ],
+    }
+
+
+def topup_wallet(db: Session, user_id: int, amount: int, reason: str = "User top-up") -> dict:
+    if user_id in (0, 1):
+        raise ValueError("cannot top-up system accounts directly")
+
+    if amount <= 0:
+        raise ValueError("top-up amount must be positive")
+
+    _get_or_create_user_with_wallet(db, user_id)
+    user_wallet = _require_wallet_for_update(db, user_id)
+
+    tx_id = _new_tx_id()
+    try:
+        user_wallet.balance += amount
+        db.add(
+            Transaction(
+                id=tx_id,
+                tx_type="topup",
+                to_user_id=user_id,
+                amount=amount,
+                reason=reason,
+                meta_json=json.dumps(
+                    {
+                        "amount": amount,
+                        "created_at": _now_iso(),
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    db.refresh(user_wallet)
+
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "amount": amount,
+        "balance_after": user_wallet.balance,
+        "tx_id": tx_id,
     }
 
 

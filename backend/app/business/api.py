@@ -17,6 +17,7 @@ from .crud import (
     list_user_transactions,
     record_pause_request,
     start_focus_session,
+    topup_wallet,
     upsert_study_plan,
     upsert_user_profile_document,
 )
@@ -36,6 +37,8 @@ from .schemas import (
     SessionSummaryListResponse,
     TransactionListResponse,
     UserStatusResponse,
+    WalletTopupRequest,
+    WalletTopupResponse,
 )
 
 router = APIRouter(prefix="/api/business", tags=["business"])
@@ -353,3 +356,20 @@ def my_transactions_api(
     current_user_id: int = Depends(get_current_user_id),
 ):
     return list_user_transactions(db=db, user_id=current_user_id, limit=limit)
+
+
+@router.post("/me/wallet/topup", response_model=WalletTopupResponse)
+def topup_wallet_api(
+    payload: WalletTopupRequest,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id),
+):
+    try:
+        return topup_wallet(
+            db=db,
+            user_id=current_user_id,
+            amount=payload.amount,
+            reason=payload.reason,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

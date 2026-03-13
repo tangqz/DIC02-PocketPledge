@@ -43,6 +43,19 @@ class UserStatusResponse(BaseModel):
     is_bankrupt: bool
 
 
+class WalletTopupRequest(BaseModel):
+    amount: int = Field(..., gt=0, description="Amount to top up in cents")
+    reason: str = Field(default="User top-up", max_length=255)
+
+
+class WalletTopupResponse(BaseModel):
+    ok: bool
+    user_id: int
+    amount: int
+    balance_after: int
+    tx_id: str
+
+
 class PlanTaskPayload(BaseModel):
     id: str
     title: str = Field(..., min_length=1, max_length=255)
