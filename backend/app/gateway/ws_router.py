@@ -1365,39 +1365,40 @@ def _build_temporal_stitched_image(
     import time
     import io
     import base64
+    from collections import defaultdict
     from PIL import Image, ImageDraw, ImageFont
 
-    now = time.time()
-    session.image_timeline.append((now, current_images))
-    session.image_timeline = [
-        item for item in session.image_timeline if now - item[0] < 400
-    ]
+    # Find the relative "now" from the maximum timestamp in the batch to avoid client-server clock skew issues.
+    client_timestamps = []
+    for img in current_images:
+        meta = img.get("metadata", {})
+        if "timestamp" in meta and isinstance(meta["timestamp"], (int, float)):
+            client_timestamps.append(meta["timestamp"])
 
-    targets = [0, 5, 10, 30, 60, 120]
-    selected = []
-    seen_ids = set()
+    relative_now_ms = max(client_timestamps) if client_timestamps else time.time() * 1000
 
-    for t_offset in targets:
-        target_time = now - t_offset
-        if not session.image_timeline:
-            break
-        closest = min(session.image_timeline, key=lambda x: abs(x[0] - target_time))
-        # only include if not chosen before
-        item_id = id(closest[1])
-        if item_id not in seen_ids:
-            seen_ids.add(item_id)
-            selected.append(closest)
+    # Group images by timestamp
+    grouped_images: dict[int, list[dict[str, Any]]] = defaultdict(list)
 
-    selected.sort(key=lambda x: x[0], reverse=True)
+    for img in current_images:
+        meta = img.get("metadata", {})
+        ts_ms = meta.get("timestamp")
+        if not isinstance(ts_ms, (int, float)):
+            ts_ms = relative_now_ms
+        grouped_images[int(ts_ms)].append(img)
+
+    # Sort groups descending by timestamp (newest first)
+    sorted_groups = sorted(grouped_images.items(), key=lambda x: x[0], reverse=True)
+
     ROW_HEIGHT = 240
     row_images = []
 
     try:
-        font = ImageFont.load_default()
+        font = ImageFont.load_default(size=36)
     except Exception:
-        font = None
+        font = ImageFont.load_default()
 
-    for timestamp, imgs in selected:
+    for ts_ms, imgs in sorted_groups:
         pil_imgs = []
         for img_dict in imgs:
             b64 = str(img_dict.get("data", ""))
@@ -1427,16 +1428,14 @@ def _build_temporal_stitched_image(
             group_img.paste(sc, (x_offset, 0))
             x_offset += sc.width
 
-        dt = int(now - timestamp)
+        dt = int((relative_now_ms - ts_ms) / 1000)
         label = "T" if dt <= 1 else f"T-{dt}s"
-        txt_height = 24
-
-        row_final = Image.new(
-            "RGB", (group_img.width, group_img.height + txt_height), color=(30, 30, 30)
-        )
+        txt_height = 48
+        
+        row_final = Image.new('RGB', (group_img.width, group_img.height + txt_height), color=(30, 30, 30))
         row_final.paste(group_img, (0, txt_height))
         draw = ImageDraw.Draw(row_final)
-        draw.text((5, 2), label, fill=(255, 255, 0), font=font)
+        draw.text((5, 5), label, fill=(255, 255, 0), font=font)
         row_images.append(row_final)
 
     if not row_images:
