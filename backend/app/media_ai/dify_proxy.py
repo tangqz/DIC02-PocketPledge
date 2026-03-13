@@ -466,7 +466,7 @@ class DifyClient:
         payload: dict[str, Any] = {
             "inputs": {
                 "current_task": current_task or "",
-                    "focus_status": focus_status or "",
+                "focus_status": focus_status or "",
                 "language_mode": language_mode,
                 "character_id": character_id,
             },
