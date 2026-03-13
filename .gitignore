@@ -40,3 +40,4 @@ frontend/temp-openllm-web/
 
 # Dify exported DSL files (environment-specific, re-export locally)
 dify_orchestration/exported_dsl/
+venv/

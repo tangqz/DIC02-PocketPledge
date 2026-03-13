@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, memo } from "react";
 import { useI18n } from "@/lib/i18n";
 import { useMediaStore } from "@/stores/mediaStore";
 
@@ -17,7 +17,8 @@ export default function MediaPreviewDock({ className = "" }: { className?: strin
   );
 }
 
-function PreviewTile({
+// ⚡ Bolt: memoize to prevent unnecessary re-renders of video elements when unrelated store changes trigger dock re-renders
+const PreviewTile = memo(function PreviewTile({
   label,
   stream,
   emptyText,
@@ -61,4 +62,4 @@ function PreviewTile({
       </div>
     </div>
   );
-}
+});

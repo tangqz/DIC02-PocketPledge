@@ -26,9 +26,9 @@ CHAT_MESSAGE_MAX_CHARS = 2000
 
 def _focus_fee_cents(planned_focus_minutes: int) -> int:
     """Calculate focus fee in cents from RMB 8/hour, rounded to 2 decimals RMB."""
-    fee_rmb = (Decimal(planned_focus_minutes) * SERVICE_FEE_PER_HOUR_RMB / Decimal("60")).quantize(
-        Decimal("0.01"), rounding=ROUND_HALF_UP
-    )
+    fee_rmb = (
+        Decimal(planned_focus_minutes) * SERVICE_FEE_PER_HOUR_RMB / Decimal("60")
+    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     return int((fee_rmb * FEN_PER_RMB).to_integral_value(rounding=ROUND_HALF_UP))
 
 
@@ -67,16 +67,29 @@ def _require_wallet(db: Session, user_id: int) -> Wallet:
     return wallet
 
 
+def _require_wallet_for_update(db: Session, user_id: int) -> Wallet:
+    wallet = db.query(Wallet).with_for_update().filter(Wallet.user_id == user_id).first()
+    if not wallet:
+        raise ValueError(f"wallet for user_id={user_id} not found")
+    return wallet
+
+
 def start_focus_session(db: Session, user_id: int, planned_focus_minutes: int) -> dict:
     if user_id in (0, 1):
         raise ValueError("user_id 0/1 are reserved system accounts")
 
-    _, user_wallet = _get_or_create_user_with_wallet(db, user_id)
-    pool_wallet = _require_wallet(db, 1)
+    _get_or_create_user_with_wallet(db, user_id)
+
+    # Always order locks by ID to avoid deadlocks
+    # System IDs are 0 and 1, user IDs > 1
+    pool_wallet = _require_wallet_for_update(db, 1)
+    user_wallet = _require_wallet_for_update(db, user_id)
 
     upfront_cost = _focus_fee_cents(planned_focus_minutes)
     if user_wallet.balance < upfront_cost:
-        raise ValueError(f"insufficient balance: need {upfront_cost}, have {user_wallet.balance}")
+        raise ValueError(
+            f"insufficient balance: need {upfront_cost}, have {user_wallet.balance}"
+        )
 
     session_ref = _new_session_ref()
     tx_id = _new_tx_id()
@@ -136,11 +149,19 @@ def execute_penalty(
     if distraction_count < 1:
         raise ValueError("distraction_count must be >= 1")
 
-    _, user_wallet = _get_or_create_user_with_wallet(db, user_id)
-    charity_wallet = _require_wallet(db, 0)
-    pool_wallet = _require_wallet(db, 1)
+    _get_or_create_user_with_wallet(db, user_id)
 
-    requested_penalty = penalty_amount if penalty_amount is not None else distraction_count * PENALTY_PER_DISTRACTION
+    # Always order locks by ID to avoid deadlocks
+    # System IDs are 0 and 1, user IDs > 1
+    charity_wallet = _require_wallet_for_update(db, 0)
+    pool_wallet = _require_wallet_for_update(db, 1)
+    user_wallet = _require_wallet_for_update(db, user_id)
+
+    requested_penalty = (
+        penalty_amount
+        if penalty_amount is not None
+        else distraction_count * PENALTY_PER_DISTRACTION
+    )
     actual_penalty = min(requested_penalty, max(user_wallet.balance, 0))
 
     charity_amount = actual_penalty * 40 // 100
@@ -226,6 +247,51 @@ def execute_penalty(
     }
 
 
+def topup_wallet(db: Session, user_id: int, amount: int, reason: str = "User top-up") -> dict:
+    if user_id in (0, 1):
+        raise ValueError("cannot top-up system accounts directly")
+
+    if amount <= 0:
+        raise ValueError("top-up amount must be positive")
+
+    _get_or_create_user_with_wallet(db, user_id)
+    user_wallet = _require_wallet_for_update(db, user_id)
+
+    tx_id = _new_tx_id()
+    try:
+        user_wallet.balance += amount
+        db.add(
+            Transaction(
+                id=tx_id,
+                tx_type="topup",
+                to_user_id=user_id,
+                amount=amount,
+                reason=reason,
+                meta_json=json.dumps(
+                    {
+                        "amount": amount,
+                        "created_at": _now_iso(),
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    db.refresh(user_wallet)
+
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "amount": amount,
+        "balance_after": user_wallet.balance,
+        "tx_id": tx_id,
+    }
+
+
 def get_user_status(db: Session, user_id: int) -> dict:
     if user_id in (0, 1):
         wallet = _require_wallet(db, user_id)
@@ -275,7 +341,9 @@ def _normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
             continue
         estimated_minutes = raw_task.get("estimatedMinutes")
         try:
-            normalized_minutes = int(estimated_minutes) if estimated_minutes is not None else None
+            normalized_minutes = (
+                int(estimated_minutes) if estimated_minutes is not None else None
+            )
         except (TypeError, ValueError):
             normalized_minutes = None
         tasks.append(
@@ -290,12 +358,16 @@ def _normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
     total_minutes = plan.get("totalMinutes")
     normalized_total_minutes = _parse_int(total_minutes)
     if normalized_total_minutes is None:
-        normalized_total_minutes = sum(task.get("estimatedMinutes") or 0 for task in tasks)
+        normalized_total_minutes = sum(
+            task.get("estimatedMinutes") or 0 for task in tasks
+        )
 
     suggested_duration = plan.get("suggestedDuration")
     derived_duration = 0
     first_task = tasks[0] if tasks else None
-    first_task_minutes = first_task.get("estimatedMinutes") if isinstance(first_task, dict) else None
+    first_task_minutes = (
+        first_task.get("estimatedMinutes") if isinstance(first_task, dict) else None
+    )
     if isinstance(first_task_minutes, int) and first_task_minutes > 0:
         derived_duration = first_task_minutes * 60
     elif normalized_total_minutes > 0 and len(tasks) <= 1:
@@ -305,7 +377,11 @@ def _normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
     if normalized_duration is None:
         normalized_duration = derived_duration or max(normalized_total_minutes, 0) * 60
 
-    if derived_duration > 0 and normalized_duration > 0 and abs(normalized_duration - derived_duration) >= 60:
+    if (
+        derived_duration > 0
+        and normalized_duration > 0
+        and abs(normalized_duration - derived_duration) >= 60
+    ):
         normalized_duration = derived_duration
 
     return {
@@ -391,7 +467,9 @@ def get_user_profile_document(db: Session, user_id: int) -> dict[str, Any]:
     }
 
 
-def upsert_user_profile_document(db: Session, user_id: int, content: str) -> dict[str, Any]:
+def upsert_user_profile_document(
+    db: Session, user_id: int, content: str
+) -> dict[str, Any]:
     normalized_content = content.strip()
     if len(normalized_content) > PROFILE_DOC_MAX_CHARS:
         normalized_content = normalized_content[:PROFILE_DOC_MAX_CHARS]
@@ -420,7 +498,9 @@ def upsert_user_profile_document(db: Session, user_id: int, content: str) -> dic
     }
 
 
-def append_user_profile_memory(db: Session, user_id: int, memory_line: str) -> dict[str, Any]:
+def append_user_profile_memory(
+    db: Session, user_id: int, memory_line: str
+) -> dict[str, Any]:
     """Append one profile memory line while keeping the profile document bounded."""
     normalized_line = memory_line.strip()
     if not normalized_line:
@@ -476,7 +556,9 @@ def create_chat_message(
     }
 
 
-def list_recent_chat_messages(db: Session, user_id: int, limit: int = 40) -> dict[str, Any]:
+def list_recent_chat_messages(
+    db: Session, user_id: int, limit: int = 40
+) -> dict[str, Any]:
     rows = (
         db.query(ChatMessage)
         .filter(ChatMessage.user_id == user_id)
@@ -590,7 +672,9 @@ def create_session_summary(
     return payload
 
 
-def list_session_summaries(db: Session, user_id: int, limit: int = 20) -> dict[str, Any]:
+def list_session_summaries(
+    db: Session, user_id: int, limit: int = 20
+) -> dict[str, Any]:
     rows = (
         db.query(SessionSummary)
         .filter(SessionSummary.user_id == user_id)
@@ -605,10 +689,14 @@ def list_session_summaries(db: Session, user_id: int, limit: int = 20) -> dict[s
     }
 
 
-def list_user_transactions(db: Session, user_id: int, limit: int = 50) -> dict[str, Any]:
+def list_user_transactions(
+    db: Session, user_id: int, limit: int = 50
+) -> dict[str, Any]:
     rows = (
         db.query(Transaction)
-        .filter((Transaction.from_user_id == user_id) | (Transaction.to_user_id == user_id))
+        .filter(
+            (Transaction.from_user_id == user_id) | (Transaction.to_user_id == user_id)
+        )
         .order_by(Transaction.created_at.desc())
         .limit(max(1, min(limit, 200)))
         .all()

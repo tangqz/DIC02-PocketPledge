@@ -34,7 +34,9 @@ class SessionState:
     pending_capture_sources: list[str] = field(default_factory=list)
     pending_capture_mode: str = "system-agent"
     chat_history: list[dict[str, str]] = field(default_factory=list)
-    image_timeline: list[tuple[float, list[dict[str, Any]]]] = field(default_factory=list)
+    image_timeline: list[tuple[float, list[dict[str, Any]]]] = field(
+        default_factory=list
+    )
     language_mode: str = "zh"
     character_id: str = "milly"
 
@@ -44,7 +46,7 @@ class SessionState:
         """Append a message to the chat history ring buffer."""
         self.chat_history.append({"role": role, "content": content})
         if len(self.chat_history) > self.MAX_HISTORY_TURNS:
-            self.chat_history = self.chat_history[-self.MAX_HISTORY_TURNS:]
+            self.chat_history = self.chat_history[-self.MAX_HISTORY_TURNS :]
 
     def format_chat_history(self) -> str:
         """Format recent chat history as a readable string for the system agent."""

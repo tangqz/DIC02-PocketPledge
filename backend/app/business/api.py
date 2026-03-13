@@ -1,4 +1,5 @@
 import os
+import hmac
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -16,6 +17,7 @@ from .crud import (
     list_user_transactions,
     record_pause_request,
     start_focus_session,
+    topup_wallet,
     upsert_study_plan,
     upsert_user_profile_document,
 )
@@ -35,6 +37,8 @@ from .schemas import (
     SessionSummaryListResponse,
     TransactionListResponse,
     UserStatusResponse,
+    WalletTopupRequest,
+    WalletTopupResponse,
 )
 
 router = APIRouter(prefix="/api/business", tags=["business"])
@@ -51,7 +55,9 @@ def require_internal_tool_access(
             detail="Internal tool token is not configured",
         )
 
-    if creds is None or creds.credentials != configured_token:
+    if creds is None or not hmac.compare_digest(
+        creds.credentials.encode("utf-8"), configured_token.encode("utf-8")
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid internal tool token",
@@ -165,7 +171,9 @@ def internal_update_user_profile_api(
     )
 
 
-@router.get("/internal/users/{user_id}/pause-requests", response_model=PauseRequestListResponse)
+@router.get(
+    "/internal/users/{user_id}/pause-requests", response_model=PauseRequestListResponse
+)
 def internal_pause_requests_api(
     user_id: int,
     limit: int = 20,
@@ -175,7 +183,9 @@ def internal_pause_requests_api(
     return list_pause_requests(db=db, user_id=user_id, limit=limit)
 
 
-@router.post("/internal/users/{user_id}/pause-requests", response_model=PauseRequestListResponse)
+@router.post(
+    "/internal/users/{user_id}/pause-requests", response_model=PauseRequestListResponse
+)
 def internal_create_pause_request_api(
     user_id: int,
     payload: PauseRequestCreate,
@@ -195,7 +205,10 @@ def internal_create_pause_request_api(
     return list_pause_requests(db=db, user_id=user_id, limit=20)
 
 
-@router.get("/internal/users/{user_id}/session-summaries", response_model=SessionSummaryListResponse)
+@router.get(
+    "/internal/users/{user_id}/session-summaries",
+    response_model=SessionSummaryListResponse,
+)
 def internal_session_summaries_api(
     user_id: int,
     limit: int = 20,
@@ -205,7 +218,10 @@ def internal_session_summaries_api(
     return list_session_summaries(db=db, user_id=user_id, limit=limit)
 
 
-@router.post("/internal/users/{user_id}/session-summaries", response_model=SessionSummaryListResponse)
+@router.post(
+    "/internal/users/{user_id}/session-summaries",
+    response_model=SessionSummaryListResponse,
+)
 def internal_create_session_summary_api(
     user_id: int,
     payload: SessionSummaryCreate,
@@ -222,7 +238,9 @@ def internal_create_session_summary_api(
     return list_session_summaries(db=db, user_id=user_id, limit=20)
 
 
-@router.get("/internal/users/{user_id}/transactions", response_model=TransactionListResponse)
+@router.get(
+    "/internal/users/{user_id}/transactions", response_model=TransactionListResponse
+)
 def internal_transactions_api(
     user_id: int,
     limit: int = 50,
@@ -338,3 +356,20 @@ def my_transactions_api(
     current_user_id: int = Depends(get_current_user_id),
 ):
     return list_user_transactions(db=db, user_id=current_user_id, limit=limit)
+
+
+@router.post("/me/wallet/topup", response_model=WalletTopupResponse)
+def topup_wallet_api(
+    payload: WalletTopupRequest,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id),
+):
+    try:
+        return topup_wallet(
+            db=db,
+            user_id=current_user_id,
+            amount=payload.amount,
+            reason=payload.reason,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

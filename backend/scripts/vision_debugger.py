@@ -2,7 +2,7 @@ import cv2
 import time
 import os
 
-IMAGE_PATH = "../latest_vision_input.jpg" # backend/latest_vision_input.jpg
+IMAGE_PATH = "../latest_vision_input.jpg"  # backend/latest_vision_input.jpg
 
 print(f"Watching {IMAGE_PATH} for changes...")
 
@@ -21,13 +21,13 @@ while True:
                     h, w = img.shape[:2]
                     max_w, max_h = 1000, 600
                     if w > max_w or h > max_h:
-                        scale = min(max_w/w, max_h/h)
-                        img = cv2.resize(img, (int(w*scale), int(h*scale)))
+                        scale = min(max_w / w, max_h / h)
+                        img = cv2.resize(img, (int(w * scale), int(h * scale)))
                     cv2.imshow("Vision Debugger", img)
                 last_mtime = mtime
-        
+
         # 100ms wait
-        if cv2.waitKey(100) & 0xFF == ord('q'):
+        if cv2.waitKey(100) & 0xFF == ord("q"):
             break
     except Exception as e:
         print(f"Error: {e}")

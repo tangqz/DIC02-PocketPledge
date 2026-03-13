@@ -2,14 +2,25 @@ import os
 from datetime import datetime
 from typing import Generator
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, create_engine, Boolean
+from sqlalchemy import (
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    create_engine,
+    Boolean,
+)
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker, Session
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./reward.db")
 
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {},
+    connect_args={"check_same_thread": False}
+    if DATABASE_URL.startswith("sqlite")
+    else {},
     future=True,
 )
 
@@ -35,7 +46,9 @@ class User(Base):
     role = Column(String(50), nullable=False, default="user")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
-    wallet = relationship("Wallet", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    wallet = relationship(
+        "Wallet", back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
 
 
 class Wallet(Base):
@@ -126,7 +139,9 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
-def _seed_user_with_wallet(db: Session, user_id: int, username: str, role: str, balance: int) -> None:
+def _seed_user_with_wallet(
+    db: Session, user_id: int, username: str, role: str, balance: int
+) -> None:
     user = db.get(User, user_id)
     if not user:
         user = User(id=user_id, username=username, role=role)

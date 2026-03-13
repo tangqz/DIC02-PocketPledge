@@ -8,6 +8,7 @@ import os
 import time
 import uuid
 from typing import Any
+from urllib.parse import parse_qsl, urlencode
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -43,7 +44,14 @@ def _mask_sensitive(value: Any) -> Any:
     if isinstance(value, dict):
         masked: dict[str, Any] = {}
         for key, nested_value in value.items():
-            if key.lower() in {"password", "token", "access_token", "refresh_token", "authorization", "api_key"}:
+            if key.lower() in {
+                "password",
+                "token",
+                "access_token",
+                "refresh_token",
+                "authorization",
+                "api_key",
+            }:
                 masked[key] = "***"
             else:
                 masked[key] = _mask_sensitive(nested_value)
@@ -51,6 +59,26 @@ def _mask_sensitive(value: Any) -> Any:
     if isinstance(value, list):
         return [_mask_sensitive(item) for item in value]
     return value
+
+
+def _mask_query(query: str) -> str:
+    if not query:
+        return ""
+    parsed = parse_qsl(query, keep_blank_values=True)
+    masked_pairs = []
+    for k, v in parsed:
+        if k.lower() in {
+            "password",
+            "token",
+            "access_token",
+            "refresh_token",
+            "authorization",
+            "api_key",
+        }:
+            masked_pairs.append((k, "***"))
+        else:
+            masked_pairs.append((k, v))
+    return urlencode(masked_pairs, safe="*")
 
 
 def _format_body_for_log(body: bytes) -> str:
@@ -72,7 +100,9 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Study Buddy Backend")
 
 allowed_origins_str = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173")
-allowed_origins = [origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()]
+allowed_origins = [
+    origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()
+]
 
 app.add_middleware(
     CORSMiddleware,
@@ -98,7 +128,7 @@ async def log_http_requests(request: Request, call_next):
         request_id,
         request.method,
         request.url.path,
-        request.url.query,
+        _mask_query(request.url.query),
         body_preview,
     )
 
