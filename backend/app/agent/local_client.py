@@ -21,6 +21,7 @@ from app.agent.prompts import (
     SYSTEM_AGENT_PROMPT,
     VISION_EVALUATION_PROMPT,
 )
+from app.agent.token_tracker import track_token_usage
 from app.agent.tools import TOOL_DEFINITIONS, execute_tool
 from app.business.models import SessionLocal
 from app.business.crud import get_user_profile_document
@@ -332,12 +333,17 @@ class LocalLLMClient:
                 temperature=self._temperature_chat,
                 stream=True,
                 max_tokens=256,
+                stream_options={"include_usage": True},
             )
             async for chunk in stream:
-                delta = chunk.choices[0].delta if chunk.choices else None
-                if delta and delta.content:
-                    collected_text += delta.content
-                    yield delta.content
+                if chunk.choices:
+                    delta = chunk.choices[0].delta
+                    if delta and delta.content:
+                        collected_text += delta.content
+                        yield delta.content
+                if getattr(chunk, "usage", None):
+                    track_token_usage(self._chat_model, chunk.usage, session_id)
+
             logger.info(
                 "local chat api response session_id=%s model=%s text=%s",
                 session_id,
@@ -436,6 +442,9 @@ class LocalLLMClient:
                 max_tokens=64,
                 extra_body=vision_extra,
             )
+            if getattr(response, "usage", None):
+                track_token_usage(self._vision_model, response.usage, session_id)
+
             text = (response.choices[0].message.content or "").strip()
             text = _strip_code_fences(text)
 
@@ -536,6 +545,9 @@ class LocalLLMClient:
                 max_tokens=160,
                 extra_body=vision_extra,
             )
+            if getattr(response, "usage", None):
+                track_token_usage(self._vision_model, response.usage, session_id)
+
             text = _strip_code_fences(
                 (response.choices[0].message.content or "").strip()
             )
@@ -603,6 +615,9 @@ class LocalLLMClient:
             except Exception:
                 logger.exception("local system agent LLM call failed, round=%d", _round)
                 raise
+
+            if getattr(response, "usage", None):
+                track_token_usage(self._system_agent_model, response.usage, session_id)
 
             choice = response.choices[0]
 

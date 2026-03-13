@@ -68,7 +68,9 @@ def _require_wallet(db: Session, user_id: int) -> Wallet:
 
 
 def _require_wallet_for_update(db: Session, user_id: int) -> Wallet:
-    wallet = db.query(Wallet).with_for_update().filter(Wallet.user_id == user_id).first()
+    wallet = (
+        db.query(Wallet).with_for_update().filter(Wallet.user_id == user_id).first()
+    )
     if not wallet:
         raise ValueError(f"wallet for user_id={user_id} not found")
     return wallet
@@ -247,7 +249,9 @@ def execute_penalty(
     }
 
 
-def topup_wallet(db: Session, user_id: int, amount: int, reason: str = "User top-up") -> dict:
+def topup_wallet(
+    db: Session, user_id: int, amount: int, reason: str = "User top-up"
+) -> dict:
     if user_id in (0, 1):
         raise ValueError("cannot top-up system accounts directly")
 

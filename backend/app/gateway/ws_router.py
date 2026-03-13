@@ -963,7 +963,12 @@ async def _handle_user_turn(
         return await system_agent.build_directive(user_id, text, session)
 
     # Phase 1: stream white brain, detect <<SYS>> trigger
-    phase1_text, sys_detected, capture_detected, directive_task = await _stream_and_detect_sys(
+    (
+        phase1_text,
+        sys_detected,
+        capture_detected,
+        directive_task,
+    ) = await _stream_and_detect_sys(
         user_id=user_id,
         user_text=text,
         images=images,
@@ -1393,7 +1398,9 @@ def _build_temporal_stitched_image(
         if "timestamp" in meta and isinstance(meta["timestamp"], (int, float)):
             client_timestamps.append(meta["timestamp"])
 
-    relative_now_ms = max(client_timestamps) if client_timestamps else time.time() * 1000
+    relative_now_ms = (
+        max(client_timestamps) if client_timestamps else time.time() * 1000
+    )
 
     # Group images by timestamp
     grouped_images: dict[int, list[dict[str, Any]]] = defaultdict(list)
@@ -1449,8 +1456,10 @@ def _build_temporal_stitched_image(
         dt = int((relative_now_ms - ts_ms) / 1000)
         label = "T" if dt <= 1 else f"T-{dt}s"
         txt_height = 48
-        
-        row_final = Image.new('RGB', (group_img.width, group_img.height + txt_height), color=(30, 30, 30))
+
+        row_final = Image.new(
+            "RGB", (group_img.width, group_img.height + txt_height), color=(30, 30, 30)
+        )
         row_final.paste(group_img, (0, txt_height))
         draw = ImageDraw.Draw(row_final)
         draw.text((5, 5), label, fill=(255, 255, 0), font=font)
@@ -1804,8 +1813,12 @@ async def _stream_and_detect_sys(
         expression = str(chunk.get("expression", "neutral"))
         audio_coro = chunk.get("audio_coro")
         raw_upper = raw_text.upper()
-        chunk_sys_triggered = bool(chunk.get("sys_triggered")) or SYS_MARKER in raw_upper
-        chunk_capture_triggered = bool(chunk.get("capture_triggered")) or CAPTURE_MARKER in raw_upper
+        chunk_sys_triggered = (
+            bool(chunk.get("sys_triggered")) or SYS_MARKER in raw_upper
+        )
+        chunk_capture_triggered = (
+            bool(chunk.get("capture_triggered")) or CAPTURE_MARKER in raw_upper
+        )
 
         if chunk_text:
             parts.append(chunk_text)
@@ -1853,7 +1866,6 @@ async def _stream_and_detect_sys(
         await send_agent_text_end(user_id)
 
     return "".join(parts), sys_detected, capture_detected, sys_task
-
 
 
 def _resolve_character(session: SessionState) -> tuple[str, dict[str, Any]]:
