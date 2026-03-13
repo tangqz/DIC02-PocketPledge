@@ -11,7 +11,7 @@
 ### 核心特性
 - **Live2D 虚拟陪伴**：互动式前端界面，支持表情与动作同步。
 - **实时语音流转**：前端录音 -> Sherpa-ONNX 本地 VAD/ASR 识别 -> 代理模型思考 -> TTS 语音流式下发。
-- **视觉分心判定**：调用基于本地代理配置的视觉模型（如 GPT-4o 等），动态分析用户当前状态，实时闭环扣费逻辑。
+- **视觉分心判定**：调用基于本地代理配置的视觉模型，动态分析用户当前状态，实时闭环扣费逻辑。
 - **经济督导模型**：真实的余额扣除与结算机制，强化监督效果。
 
 ## 目录结构
@@ -66,18 +66,18 @@ DASHSCOPE_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
 
 # 聊天模型配置
 LOCAL_CHAT_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-LOCAL_CHAT_API_BASE="https://api.openai.com/v1"
-LOCAL_CHAT_MODEL="gpt-4o"
+LOCAL_CHAT_API_BASE=""
+LOCAL_CHAT_MODEL=""
 
 # 视觉模型配置
 LOCAL_VISION_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-LOCAL_VISION_API_BASE="https://api.openai.com/v1"
-LOCAL_VISION_MODEL="gpt-4o"
+LOCAL_VISION_API_BASE=""
+LOCAL_VISION_MODEL=""
 
 # 系统代理模型配置
 LOCAL_AGENT_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-LOCAL_AGENT_API_BASE="https://api.openai.com/v1"
-LOCAL_AGENT_MODEL="gpt-4o"
+LOCAL_AGENT_API_BASE=""
+LOCAL_AGENT_MODEL=""
 ```
 
 **启动后端**：

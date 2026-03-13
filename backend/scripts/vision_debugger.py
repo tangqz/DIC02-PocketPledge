@@ -17,6 +17,8 @@ while True:
             if mtime != last_mtime:
                 img = cv2.imread(IMAGE_PATH)
                 if img is not None:
+                    raw_h, raw_w = img.shape[:2]
+                    print(f"[Vision Debugger] loaded image: {raw_w}x{raw_h}")
                     # Resize if too large
                     h, w = img.shape[:2]
                     max_w, max_h = 1000, 600

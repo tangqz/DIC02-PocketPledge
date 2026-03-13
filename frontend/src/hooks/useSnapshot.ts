@@ -43,17 +43,17 @@ function captureFrameFromStream(
   const track = stream.getVideoTracks()[0];
   if (!track || track.readyState !== "live") return null;
 
+  const streamKey = track.id;
+  const video = getOrCreateVideoElement(stream, streamKey, videoCache);
   const settings = track.getSettings();
-  const width = settings.width || 640;
-  const height = settings.height || 480;
+  // Prefer actual decoded frame size over track settings to avoid browser-reported low fallback values.
+  const width = video.videoWidth || settings.width || 1280;
+  const height = video.videoHeight || settings.height || 720;
   canvas.width = width;
   canvas.height = height;
 
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
-
-  const streamKey = track.id;
-  const video = getOrCreateVideoElement(stream, streamKey, videoCache);
 
   if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
     return null;
@@ -61,7 +61,7 @@ function captureFrameFromStream(
 
   try {
     ctx.drawImage(video, 0, 0, width, height);
-    return canvas.toDataURL("image/jpeg", 0.7).split(",")[1];
+    return canvas.toDataURL("image/jpeg", 0.9).split(",")[1];
   } catch {
     return null;
   }
@@ -115,13 +115,14 @@ export async function captureImagesFromStreams(options: {
       const cameraSettings = cameraTrack?.getSettings?.() ?? {};
       const data = await captureFrameFromStreamWithWait(options.cameraStream, canvas, videoCache);
       if (data) {
+        const trackSettings = options.cameraStream.getVideoTracks()[0]?.getSettings?.() ?? {};
         images.push({
           source: "camera",
           data,
           mime_type: "image/jpeg",
           metadata: {
-            width: Number(cameraSettings.width) || undefined,
-            height: Number(cameraSettings.height) || undefined,
+            width: Number(trackSettings.width || cameraSettings.width) || undefined,
+            height: Number(trackSettings.height || cameraSettings.height) || undefined,
             facingMode: typeof cameraSettings.facingMode === "string" ? cameraSettings.facingMode : undefined,
           },
         });
@@ -133,13 +134,14 @@ export async function captureImagesFromStreams(options: {
       const screenSettings = screenTrack?.getSettings?.() ?? {};
       const data = await captureFrameFromStreamWithWait(options.screenStream, canvas, videoCache);
       if (data) {
+        const trackSettings = options.screenStream.getVideoTracks()[0]?.getSettings?.() ?? {};
         images.push({
           source: "screen",
           data,
           mime_type: "image/jpeg",
           metadata: {
-            width: Number(screenSettings.width) || undefined,
-            height: Number(screenSettings.height) || undefined,
+            width: Number(trackSettings.width || screenSettings.width) || undefined,
+            height: Number(trackSettings.height || screenSettings.height) || undefined,
             displaySurface: typeof screenSettings.displaySurface === "string" ? screenSettings.displaySurface : undefined,
           },
         });
@@ -217,7 +219,11 @@ export function useSnapshot({
   const requestCamera = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, facingMode: "user" },
+        video: {
+          facingMode: "user",
+          width: { ideal: 1920, min: 1280 },
+          height: { ideal: 1080, min: 720 },
+        },
         audio: false,
       });
       cameraStreamRef.current = stream;
@@ -234,7 +240,11 @@ export function useSnapshot({
   const requestScreen = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { width: 1280, height: 720 },
+        video: {
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          frameRate: { ideal: 15, max: 30 },
+        },
       });
       screenStreamRef.current = stream;
       setScreenReady(true);
@@ -254,10 +264,17 @@ export function useSnapshot({
 
   /** Capture a frame from a MediaStream → base64 JPEG */
   const captureFrame = useCallback(
-    (stream: MediaStream): string | null => {
+    (stream: MediaStream): { data: string; width?: number; height?: number } | null => {
       const canvas = canvasRef.current;
       if (!canvas) return null;
-      return captureFrameFromStream(stream, canvas, videoCacheRef.current);
+      const data = captureFrameFromStream(stream, canvas, videoCacheRef.current);
+      if (!data) return null;
+      const settings = stream.getVideoTracks()[0]?.getSettings?.() ?? {};
+      return {
+        data,
+        width: Number(settings.width) || undefined,
+        height: Number(settings.height) || undefined,
+      };
     },
     [],
   );
@@ -276,25 +293,25 @@ export function useSnapshot({
       const timestamp = Date.now();
 
       if (cameraEnabled && cameraStreamRef.current) {
-        const data = captureFrame(cameraStreamRef.current);
-        if (data) {
+        const captured = captureFrame(cameraStreamRef.current);
+        if (captured?.data) {
           images.push({
             source: "camera" as const,
-            data,
+            data: captured.data,
             mime_type: "image/jpeg",
-            metadata: { timestamp },
+            metadata: { timestamp, width: captured.width, height: captured.height },
           });
         }
       }
 
       if (screenEnabled && screenStreamRef.current) {
-        const data = captureFrame(screenStreamRef.current);
-        if (data) {
+        const captured = captureFrame(screenStreamRef.current);
+        if (captured?.data) {
           images.push({
             source: "screen" as const,
-            data,
+            data: captured.data,
             mime_type: "image/jpeg",
-            metadata: { timestamp },
+            metadata: { timestamp, width: captured.width, height: captured.height },
           });
         }
       }
