@@ -1,7 +1,7 @@
 # PocketPledge
 
 <div align="center">
-  <img src="imgs/logo.jpg" alt="PocketPledge Logo" width="200" />
+  <img src="imgs/logo.jpg" alt="PocketPledge Logo" width="400" />
 </div>
 
 <div align="center">
@@ -19,11 +19,9 @@ PocketPledge 打破了传统时间管理软件的枯燥与死板，将“陪伴�
 - 🎭 **Live2D 虚拟伙伴**：告别冷冰冰的倒计时器！系统提供互动式的虚拟伙伴前端界面，支持表情与动作同步，全程陪你一起度过漫长的学习时光。
 - 🗣️ **极速实时语音对话**：通过强大的本地 ASR (Sherpa-ONNX) 与云端 TTS 的组合，加上代理模型的思考，实现极低延迟的语音流转。想开小差？你的伙伴不仅会用语音提醒你，还会给予你灵魂的拷问。
 - 👁️ **硬核视觉分心判定**：学习时频繁看手机、离开座位？系统会定时进行摄像头抽帧，由强大的多模态 AI (如 GPT-4o) 进行**实时状态分析**，闭环扣费逻辑，精准捕捉你的每一次分心。
-- 💰 **经济督导 (真金白银的考验)**：开启专注前需“预扣押金”。一旦被 AI 抓到分心，将立即扣除一定罚金，仅在专注结束后退还剩余金额。真实的余额结算机制，用痛感建立起最坚固的专注力防线。
+- 💰 **经济督导 (真金白银的考验)**：一旦被 AI 抓到分心并屡教不改，将立即扣除一定罚金。真实的余额结算机制，用痛感建立起最坚固的专注力防线。
 
 ## 📁 目录结构与技术栈概览
-
-本项目采用前后端分离架构，追求极致的开发体验与运行效率：
 
 - **前端 (`frontend/`)**：React + TypeScript + Vite, Tailwind CSS v4 (无 `tailwind.config.js` 纯 `@theme` 驱动), Zustand 状态管理。负责聊天 UI、Live2D 展示、录音采集与 WebSocket 通信。
 - **后端 (`backend/`)**：FastAPI + Python 3.12, SQLAlchemy。负责核心业务（钱包、惩罚结算）、WebSocket 网关路由、本地 ASR 推理及 TTS 转发。彻底拥抱 `uv` 极速包管理与运行。
