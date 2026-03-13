@@ -60,17 +60,18 @@ async def process_text_chat(
             character_id=character_id,
         ):
             for sentence in buffer.push(token):
-                has_sys = "<<SYS>>" in sentence
-                expression, clean_text = extract_expression_and_clean(
-                    sentence.replace("<<SYS>>", "")
-                )
+                has_sys = "<<SYS>>" in sentence or "<<CAPTURE>>" in sentence
+                is_capture = "<<CAPTURE>>" in sentence
+                clean_sentence = sentence.replace("<<SYS>>", "").replace("<<CAPTURE>>", "")
+                expression, clean_text = extract_expression_and_clean(clean_sentence)
                 if not clean_text:
                     continue
                 yield {
                     "text": clean_text,
                     "expression": expression,
                     "sys_triggered": has_sys,
-                    "audio": await _build_audio_chunk_with_service(
+                    "capture_triggered": is_capture,
+                    "audio_coro": _build_audio_chunk_with_service(
                         clean_text,
                         expression,
                         tts_service,
@@ -80,16 +81,17 @@ async def process_text_chat(
 
         remainder = buffer.flush()
         if remainder:
-            has_sys = "<<SYS>>" in remainder
-            expression, clean_text = extract_expression_and_clean(
-                remainder.replace("<<SYS>>", "")
-            )
+            has_sys = "<<SYS>>" in remainder or "<<CAPTURE>>" in remainder
+            is_capture = "<<CAPTURE>>" in remainder
+            clean_remainder = remainder.replace("<<SYS>>", "").replace("<<CAPTURE>>", "")
+            expression, clean_text = extract_expression_and_clean(clean_remainder)
             if clean_text:
                 yield {
                     "text": clean_text,
                     "expression": expression,
                     "sys_triggered": has_sys,
-                    "audio": await _build_audio_chunk_with_service(
+                    "capture_triggered": is_capture,
+                    "audio_coro": _build_audio_chunk_with_service(
                         clean_text,
                         expression,
                         tts_service,
@@ -102,7 +104,7 @@ async def process_text_chat(
         yield {
             "text": fallback_text,
             "expression": "neutral",
-            "audio": await _build_audio_chunk_with_service(
+            "audio_coro": _build_audio_chunk_with_service(
                 fallback_text,
                 "neutral",
                 tts_service,
