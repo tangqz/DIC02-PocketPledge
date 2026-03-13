@@ -542,7 +542,7 @@ def _split_sys_marker_buffer(buffer: str) -> tuple[str, str, bool]:
 
 def _sanitize_agent_text(text: str) -> str:
     """Remove internal trigger markers from any user-visible agent text."""
-    return text.replace(SYS_MARKER, "").strip()
+    return text.replace(SYS_MARKER, "").replace("<<CAPTURE>>", "").strip()
 
 
 def _can_start_session(session: SessionState) -> bool:
@@ -946,7 +946,7 @@ async def _handle_user_turn(
         return await system_agent.build_directive(user_id, text, session)
 
     # Phase 1: stream white brain, detect <<SYS>> trigger
-    phase1_text, sys_detected, directive_task = await _stream_and_detect_sys(
+    phase1_text, sys_detected, capture_detected, directive_task = await _stream_and_detect_sys(
         user_id=user_id,
         user_text=text,
         images=images,
@@ -956,6 +956,22 @@ async def _handle_user_turn(
         include_audio=not session.is_bankrupt,
         on_sys_detected=_run_system_agent,
     )
+
+    if capture_detected:
+        await _append_chat(session, user_id, "assistant", phase1_text)
+        request_id = uuid.uuid4().hex
+        session.set_pending_capture(
+            request_id, text, START_CAPTURE_SOURCES, mode="chat"
+        )
+        await send_tool_call_status(
+            user_id, "visual.capture", "calling", "direct visual request"
+        )
+        await send_control(
+            user_id,
+            "request-visual-context",
+            {"requestId": request_id, "prompt": text, "sources": START_CAPTURE_SOURCES},
+        )
+        return
 
     if not sys_detected:
         await _append_chat(session, user_id, "assistant", phase1_text)
@@ -1686,6 +1702,7 @@ async def stream_agent_reply(
     """
     parts: list[str] = []
     sent_text = False
+    audio_tasks = []
     async for chunk in process_text_chat(
         user_text=user_text,
         session_id=user_id,
@@ -1696,18 +1713,27 @@ async def stream_agent_reply(
     ):
         chunk_text = _sanitize_agent_text(str(chunk.get("text", "")))
         expression = str(chunk.get("expression", "neutral"))
-        audio = str(chunk.get("audio", ""))
+        audio_coro = chunk.get("audio_coro")
         if chunk_text:
             parts.append(chunk_text)
             sent_text = True
             await send_agent_text_chunk(user_id, chunk_text)
-        if include_audio and audio and chunk_text:
-            await send_audio(
-                user_id,
-                audio=audio,
-                expression=expression,
-                text=chunk_text or "...",
-            )
+        if include_audio and audio_coro is not None and chunk_text:
+            audio_task = asyncio.create_task(audio_coro)
+            audio_tasks.append((audio_task, expression, chunk_text))
+
+    for task, expression, chunk_text in audio_tasks:
+        try:
+            audio_data = await task
+            if audio_data:
+                await send_audio(
+                    user_id,
+                    audio=audio_data,
+                    expression=expression,
+                    text=chunk_text or "...",
+                )
+        except Exception:
+            logger.exception("Failed to generate audio for chunk")
 
     if sent_text:
         await send_agent_text_end(user_id)
@@ -1731,15 +1757,18 @@ async def _stream_and_detect_sys(
     character_id: str,
     include_audio: bool,
     on_sys_detected: Callable[[], Coroutine[Any, Any, Any]] | None = None,
-) -> tuple[str, bool, asyncio.Task[Any] | None]:
-    """Stream white-brain reply while detecting the <<SYS>> trigger marker.
+) -> tuple[str, bool, bool, asyncio.Task[Any] | None]:
+    """Stream white-brain reply while detecting the <<SYS>> and <<CAPTURE>> trigger markers.
 
-    Returns (collected_clean_text, sys_detected).
+    Returns (collected_clean_text, sys_detected, capture_detected, directive_task).
     """
     parts: list[str] = []
     sys_detected = False
+    capture_detected = False
     sent_text = False
     sys_task: asyncio.Task[Any] | None = None
+
+    audio_tasks = []
 
     async for chunk in process_text_chat(
         user_text=user_text,
@@ -1751,39 +1780,57 @@ async def _stream_and_detect_sys(
     ):
         chunk_text = _sanitize_agent_text(str(chunk.get("text", "")))
         expression = str(chunk.get("expression", "neutral"))
-        audio = str(chunk.get("audio", ""))
+        audio_coro = chunk.get("audio_coro")
         chunk_sys_triggered = bool(chunk.get("sys_triggered"))
+        chunk_capture_triggered = bool(chunk.get("capture_triggered"))
 
         if chunk_text:
             parts.append(chunk_text)
             sent_text = True
             await send_agent_text_chunk(user_id, chunk_text)
 
-        if chunk_sys_triggered and not sys_detected:
+        if chunk_capture_triggered and not capture_detected:
+            capture_detected = True
+            logger.info("CAPTURE trigger detected for user_id=%s", user_id)
+
+        if chunk_sys_triggered and not sys_detected and not chunk_capture_triggered:
             sys_detected = True
             logger.info("SYS trigger detected for user_id=%s", user_id)
             if on_sys_detected is not None:
                 sys_task = asyncio.create_task(on_sys_detected())
 
-        if include_audio and audio and chunk_text:
-            await send_audio(
-                user_id,
-                audio=audio,
-                expression=expression,
-                text=chunk_text,
-            )
+        if include_audio and audio_coro is not None and chunk_text:
+            # We wrap the audio coroutine into a task to run it concurrently,
+            # and append it to our queue of audio tasks.
+            audio_task = asyncio.create_task(audio_coro)
+            audio_tasks.append((audio_task, expression, chunk_text))
+
+    # Await and send audio chunks in order, but in the background relative to text streaming
+    for task, expression, chunk_text in audio_tasks:
+        try:
+            audio_data = await task
+            if audio_data:
+                await send_audio(
+                    user_id,
+                    audio=audio_data,
+                    expression=expression,
+                    text=chunk_text,
+                )
+        except Exception:
+            logger.exception("Failed to generate audio for chunk")
 
     if sent_text:
         await send_agent_text_end(user_id)
-    elif not sys_detected:
+    elif not sys_detected and not capture_detected:
         logger.warning(
-            "empty phase1 reply without SYS, user_id=%s text=%s",
+            "empty phase1 reply without SYS or CAPTURE, user_id=%s text=%s",
             user_id,
             _truncate_log_text(user_text),
         )
         await send_agent_text_end(user_id)
 
-    return "".join(parts), sys_detected, sys_task
+    return "".join(parts), sys_detected, capture_detected, sys_task
+
 
 
 def _resolve_character(session: SessionState) -> tuple[str, dict[str, Any]]:
