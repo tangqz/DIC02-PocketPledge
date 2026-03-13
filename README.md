@@ -157,4 +157,8 @@ pnpm run dev
 - 📄 **接口文档**: [docs/api_contract.md](docs/api_contract.md)
 - 🔌 **协议说明**: [docs/ws_protocol.md](docs/ws_protocol.md)
 
+## 🤝 致谢
+
+- [Open-LLM-VTuber](https://github.com/Open-LLM-VTuber/Open-LLM-VTuber) 为本项目的 Live2D 与语音交互功能提供了宝贵的参考。
+
 > *“一旦你许下承诺 (Pledge)，就请专注于当下。”*
