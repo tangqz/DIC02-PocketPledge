@@ -76,21 +76,19 @@ MEDIA_AI_SHERPA_TOKENS_PATH="/绝对路径/sherpa-onnx/tokens.txt"
 
 # ----------------- AI 模型配置 -----------------
 # 聊天模型配置
-LOCAL_CHAT_API_KEY="sk-你的聊天模型API-KEY"
-LOCAL_CHAT_API_BASE="https://api.openai.com/v1"
-LOCAL_CHAT_MODEL="gpt-4o"
-LOCAL_CHAT_TEMPERATURE=0.55
+LOCAL_CHAT_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+LOCAL_CHAT_API_BASE=""
+LOCAL_CHAT_MODEL=""
 
-# 视觉模型配置 (用于判定是否分心)
-LOCAL_VISION_API_KEY="sk-你的视觉模型API-KEY"
-LOCAL_VISION_API_BASE="https://api.openai.com/v1"
-LOCAL_VISION_MODEL="gpt-4o"
+# 视觉模型配置
+LOCAL_VISION_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+LOCAL_VISION_API_BASE=""
+LOCAL_VISION_MODEL=""
 
-# 系统智能体配置
-LOCAL_AGENT_API_KEY="sk-你的系统代理API-KEY"
-LOCAL_AGENT_API_BASE="https://api.openai.com/v1"
-LOCAL_AGENT_MODEL="gpt-4o"
-LOCAL_AGENT_TEMPERATURE=0.1
+# 系统代理模型配置
+LOCAL_AGENT_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+LOCAL_AGENT_API_BASE=""
+LOCAL_AGENT_MODEL=""
 ```
 
 **启动后端服务**：
