@@ -13,6 +13,7 @@
  * ──────────────────────────────────────────────── */
 import { useMediaStore } from "@/stores/mediaStore";
 import { useChatStore } from "@/stores/chatStore";
+import { useSessionStore } from "@/stores/sessionStore";
 import { useI18n } from "@/lib/i18n";
 
 export type VoiceState = "listening" | "idle" | "muted" | "off";
@@ -29,7 +30,7 @@ export default function VoiceInput() {
     requestMicrophone,
   } = useMediaStore();
   const isAgentSpeaking = useChatStore((s) => s.isAgentSpeaking);
-  const supervisionState = useChatStore((s) => s.supervisionState);
+  const supervisionState = useSessionStore((s) => s.supervisionState);
   const isPaused = supervisionState === "paused";
   const { t } = useI18n();
 

@@ -145,7 +145,7 @@ TTS 音频与表情动作。
   "type": "audio",
   "audio": "<base64-wav>",
   "actions": { "expressions": ["happy"] },
-  "display_text": { "text": "做得很好！", "name": "Study Buddy" }
+  "display_text": { "text": "做得很好！", "name": "PocketPledge" }
 }
 ```
 
