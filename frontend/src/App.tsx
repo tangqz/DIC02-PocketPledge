@@ -260,6 +260,15 @@ export default function App() {
     }
   }, [fetchMe, token, user]);
 
+  useEffect(() => {
+    if (user?.balance !== undefined) {
+      useSessionStore.setState({ balance: user.balance });
+    }
+    if (user?.charity_ratio !== undefined) {
+      useSessionStore.setState({ charityRatio: user.charity_ratio });
+    }
+  }, [user?.balance, user?.charity_ratio]);
+
   if (!ready) {
     return (
       <div className="flex h-screen items-center justify-center bg-slate-50">

@@ -41,6 +41,11 @@ class UserStatusResponse(BaseModel):
     user_id: int
     balance: int
     is_bankrupt: bool
+    charity_ratio: int = 40
+
+
+class CharityRatioUpdateRequest(BaseModel):
+    charity_ratio: int = Field(..., ge=0, le=100, description="Percentage (0-100) of penalty to go to charity")
 
 
 class WalletTopupRequest(BaseModel):

@@ -10,6 +10,7 @@ from .crud import (
     create_session_summary,
     execute_penalty,
     get_active_plan,
+    update_charity_ratio,
     get_user_profile_document,
     get_user_status,
     list_pause_requests,
@@ -39,6 +40,7 @@ from .schemas import (
     UserStatusResponse,
     WalletTopupRequest,
     WalletTopupResponse,
+    CharityRatioUpdateRequest,
 )
 
 router = APIRouter(prefix="/api/business", tags=["business"])
@@ -76,6 +78,18 @@ def start_session_api(
             user_id=current_user_id,
             planned_focus_minutes=payload.planned_focus_minutes,
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.put("/me/settings/charity-ratio", response_model=UserStatusResponse)
+def update_charity_ratio_api(
+    payload: CharityRatioUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id),
+):
+    try:
+        update_charity_ratio(db=db, user_id=current_user_id, new_ratio=payload.charity_ratio)
+        return get_user_status(db=db, user_id=current_user_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

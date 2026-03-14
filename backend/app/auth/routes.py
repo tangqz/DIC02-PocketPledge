@@ -40,7 +40,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     db.add(user)
     db.flush()
 
-    wallet = Wallet(user_id=user.id, balance=INITIAL_BALANCE)
+    wallet = Wallet(user_id=user.id, balance=INITIAL_BALANCE, charity_ratio=40)
     db.add(wallet)
     db.commit()
     db.refresh(user)
@@ -75,6 +75,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     wallet = db.get(Wallet, user.id)
     balance = wallet.balance if wallet else 0
+    charity_ratio = wallet.charity_ratio if wallet else 40
     return UserMeResponse(
         user_id=user.id,
         username=user.username,
@@ -82,4 +83,5 @@ def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
         balance=balance,
         is_active=user.is_active,
         role=user.role,
+        charity_ratio=charity_ratio,
     )

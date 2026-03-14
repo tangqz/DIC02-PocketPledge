@@ -56,6 +56,7 @@ class Wallet(Base):
 
     user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
     balance = Column(Integer, nullable=False, default=0)
+    charity_ratio = Column(Integer, nullable=False, default=40)
 
     user = relationship("User", back_populates="wallet")
 
@@ -150,7 +151,7 @@ def _seed_user_with_wallet(
 
     wallet = db.get(Wallet, user_id)
     if not wallet:
-        wallet = Wallet(user_id=user_id, balance=balance)
+        wallet = Wallet(user_id=user_id, balance=balance, charity_ratio=40)
         db.add(wallet)
 
 

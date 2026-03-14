@@ -141,6 +141,8 @@ const en: TranslationDict = {
   "status.state.completed": "Completed",
   "status.connected": "Connected",
   "status.disconnected": "Disconnected",
+    "status.charity": "Charity",
+    "status.pool": "Pool",
 
   "summary.title": "Focus Report",
   "summary.totalTime": "Total Time",
