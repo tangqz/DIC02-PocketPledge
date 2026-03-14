@@ -53,7 +53,7 @@ def _get_or_create_user_with_wallet(db: Session, user_id: int) -> tuple[User, Wa
 
     wallet = db.get(Wallet, user_id)
     if not wallet:
-        wallet = Wallet(user_id=user_id, balance=0)
+        wallet = Wallet(user_id=user_id, balance=0, charity_ratio=40)
         db.add(wallet)
         db.flush()
 
@@ -166,7 +166,7 @@ def execute_penalty(
     )
     actual_penalty = min(requested_penalty, max(user_wallet.balance, 0))
 
-    charity_amount = actual_penalty * 40 // 100
+    charity_amount = actual_penalty * user_wallet.charity_ratio // 100
     pool_amount = actual_penalty - charity_amount
 
     charity_tx_id = _new_tx_id()
@@ -296,6 +296,19 @@ def topup_wallet(
     }
 
 
+def update_charity_ratio(db: Session, user_id: int, new_ratio: int) -> Wallet:
+    if not (0 <= new_ratio <= 100):
+        raise ValueError("Charity ratio must be between 0 and 100")
+
+    wallet = db.get(Wallet, user_id)
+    if not wallet:
+        raise ValueError("User wallet not found")
+
+    wallet.charity_ratio = new_ratio
+    db.commit()
+    db.refresh(wallet)
+    return wallet
+
 def get_user_status(db: Session, user_id: int) -> dict:
     if user_id in (0, 1):
         wallet = _require_wallet(db, user_id)
@@ -314,6 +327,7 @@ def get_user_status(db: Session, user_id: int) -> dict:
         "user_id": user_id,
         "balance": wallet.balance,
         "is_bankrupt": wallet.balance <= 0,
+        "charity_ratio": wallet.charity_ratio,
     }
 
 
