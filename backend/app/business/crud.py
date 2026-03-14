@@ -18,14 +18,14 @@ from .models import (
 )
 
 FEN_PER_RMB = Decimal("100")
-SERVICE_FEE_PER_HOUR_RMB = Decimal("8.00")
+SERVICE_FEE_PER_HOUR_RMB = Decimal("2.00")
 PENALTY_PER_DISTRACTION = 300  # 单位：分，每走神一次扣3元
 PROFILE_DOC_MAX_CHARS = 4000
 CHAT_MESSAGE_MAX_CHARS = 2000
 
 
 def _focus_fee_cents(planned_focus_minutes: int) -> int:
-    """Calculate focus fee in cents from RMB 8/hour, rounded to 2 decimals RMB."""
+    """Calculate focus fee in cents from RMB 2/hour, rounded to 2 decimals RMB."""
     fee_rmb = (
         Decimal(planned_focus_minutes) * SERVICE_FEE_PER_HOUR_RMB / Decimal("60")
     ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
