@@ -101,7 +101,7 @@ export const CHARACTER_MARKET: CharacterProfile[] = [
   {
     id: "milly",
     displayName: "Milly",
-    shortDescription: "Warm but strict study buddy",
+    shortDescription: "Warm but strict study companion",
     personality: "Emotional, playful, and sharp when you slack. She pushes you with pressure and care.",
     supportedExpressions: ["neutral", "happy", "encouraging", "angry", "proud"],
     model: MAO_PRO_CONFIG,
