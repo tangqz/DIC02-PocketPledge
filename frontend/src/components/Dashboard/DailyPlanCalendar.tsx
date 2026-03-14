@@ -335,7 +335,7 @@ export default function DailyPlanCalendar({ plan, onStartFocusDay }: DailyPlanCa
                   setSelectedDateKey(key);
                 }
               }}
-              className={`relative flex aspect-square cursor-pointer flex-col items-start justify-between rounded-lg border p-1.5 text-[11px] transition-all ${
+              className={`relative flex aspect-square cursor-pointer flex-col items-start justify-between rounded-lg border p-1.5 text-[11px] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 ${
                 inMonth ? "text-slate-700" : "text-slate-400"
               } ${
                 items.length === 0
