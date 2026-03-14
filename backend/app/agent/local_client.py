@@ -6,6 +6,7 @@ swapped in via the AGENT_BACKEND environment variable.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -137,19 +138,24 @@ def _get_vision_client() -> AsyncOpenAI:
     )
 
 
-def _load_profile_content(user_id: str) -> str:
+# ⚡ Bolt: execute synchronous database I/O in a separate thread to avoid blocking the main asyncio event loop during chat streaming
+async def _load_profile_content(user_id: str) -> str:
     try:
         uid = int(user_id)
     except ValueError:
         return ""
-    db = SessionLocal()
-    try:
-        result = get_user_profile_document(db, uid)
-        return result.get("content", "")
-    except Exception:
-        return ""
-    finally:
-        db.close()
+
+    def _sync_load() -> str:
+        db = SessionLocal()
+        try:
+            result = get_user_profile_document(db, uid)
+            return result.get("content", "")
+        except Exception:
+            return ""
+        finally:
+            db.close()
+
+    return await asyncio.to_thread(_sync_load)
 
 
 def _build_chat_system_prompt(
@@ -305,7 +311,7 @@ class LocalLLMClient:
         character_id: str = "milly",
     ) -> AsyncIterator[str]:
         """Stream chat response tokens, matching DifyClient.stream_chat interface."""
-        profile_content = _load_profile_content(session_id)
+        profile_content = await _load_profile_content(session_id)
         system_prompt = _build_runtime_chat_system_prompt(
             profile_content=profile_content,
             current_task=current_task,
