@@ -42,6 +42,13 @@ const resolveDefaultWsUrl = (): string => {
     return envUrl.trim();
   }
 
+  // In dev mode (Vite dev server) connect directly to the backend port.
+  // In production builds (Docker + nginx) follow the current host so the
+  // nginx reverse proxy can handle the /ws path.
+  if (import.meta.env.DEV) {
+    return "ws://localhost:12393/ws";
+  }
+
   if (typeof window !== "undefined") {
     const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     return `${wsProtocol}//${window.location.host}/ws`;
