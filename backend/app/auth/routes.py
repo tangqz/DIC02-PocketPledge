@@ -17,6 +17,9 @@ from .security import (
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
+# Pre-computed dummy hash to mitigate user enumeration timing attacks
+DUMMY_HASH = hash_password("dummy")
+
 
 @router.post(
     "/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED
@@ -56,10 +59,16 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == payload.username).first()
+
+    # Timing attack mitigation: always perform a hash verification even if user is not found.
+    # This ensures response time is roughly equal whether the username exists or not.
     if not user or not user.password_hash:
+        verify_password(payload.password, DUMMY_HASH)
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
     if not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Account disabled")
 
