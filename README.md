@@ -5,122 +5,122 @@
 </div>
 
 <div align="center">
-  <strong>PocketPledge</strong> is a hardcore AI companion and supervision system designed for study monitoring scenarios.<br>
-  Combining <b>Live2D virtual avatars</b>, <b>real-time voice conversation</b>, <b>visual state analysis</b>, and a <b>financial penalty mechanism</b>, it creates a comprehensive and immersive study experience for you.<br>
-  <i>End your moments of distraction with the cost of real money!</i>
-</div>
-
-<div align="center">
-  <a href="README-zh.md">简体中文</a>
+  <strong>PocketPledge</strong> is an AI companionship and supervision system designed for study-monitoring scenarios.<br>
+  It integrates <b>Live2D virtual avatars</b>, <b>real-time voice conversations</b>, <b>visual state analysis</b>, and <b>economic penalty mechanisms</b> to create a fully immersive e-learning experience.<br>
+  <i>Put your money where your mouth is and end distractions for good!</i>
 </div>
 
 ---
 
-## 🌟 Core Charms & Features
+## 🌟 Core Highlights & Features
 
-PocketPledge breaks the dullness and rigidity of traditional time management software, perfectly blending "companionship" and "supervision":
+PocketPledge breaks the monotony and rigidity of traditional time-management tools by perfectly blending "companionship" with "supervision":
 
-- 🎭 **Live2D Virtual Companion**: Say goodbye to cold countdown timers! The system provides an interactive virtual companion frontend interface that supports synchronized expressions and movements, accompanying you throughout your long study sessions.
-- 🗣️ **Ultra-fast Real-time Voice Conversation**: Through a combination of powerful local ASR (Sherpa-ONNX) and cloud TTS, coupled with the proxy model's reasoning, it achieves low-latency voice streaming. Thinking about slacking off? Your companion won't just remind you verbally, but will also hit you with some soul-searching questions.
-- 👁️ **Hardcore Visual Distraction Detection**: Frequently checking your phone or leaving your seat while studying? The system uses non-linear sparse sampling from your camera and screen, powered by a robust multimodal AI for **real-time state analysis** to accurately catch your every distraction.
-- 💰 **Financial Supervision (The Real Money Test)**: Once caught distracted by the AI and refusing to correct your behavior, a specific fine will be deducted immediately. The realistic balance settlement mechanism builds the strongest defense line for concentration through the pain of losing money.
+- 🎭 **Live2D Virtual Companion**: Say goodbye to cold countdown timers! A virtual partner will accompany you while you study, making your learning sessions no longer lonely or dull. The study companion supports long-term memory, giving you the opportunity to build lasting bonds. It also supports visual recognition and is always ready to answer your questions.
+- 🗣️ **Real-time Voice Conversations**: Through a combination of powerful on-device ASR (Sherpa-ONNX) and cloud-based TTS, along with agent-based reasoning, we achieve low-latency voice interaction.
+- 👁️ **Hardcore Visual Distraction Detection**: Casually pick up your phone or lie down to nap during study sessions? The system performs non-linear sparse sampling of your camera and screen, analyzed in **real-time by powerful multimodal AI** to catch every moment of distraction. Thinking of slacking off? Your companion will **proactively** remind you with voice prompts. If you don't want to let them down, just keep studying.
+- 💰 **Economic Supervision (Real Money at Stake)**: Once you're caught distracted and fail to correct after reminders, a penalty fee will be instantly deducted. A real balance settlement mechanism builds the strongest defense for focus through the pain of loss.
 
-> **Note: Since we have not yet deployed this project as a cloud service, we currently only provide a locally deployable version. The penalty mechanism also only applies to a local virtual account and does not affect real funds.**
+![Web User Interface](UI-en.jpg)
+
+> **Note: Since we haven't deployed this project as a cloud service yet, currently only a local deployment version is available. The penalty mechanism only affects a local virtual account and does not involve real funds.**
 
 ## 📁 Directory Structure & Tech Stack Overview
 
-- **Frontend (`frontend/`)**: React + TypeScript + Vite, Tailwind CSS v4 (pure `@theme` driven without `tailwind.config.js`), Zustand for state management. Responsible for chat UI, Live2D display, audio recording, and WebSocket communication.
-- **Backend (`backend/`)**: FastAPI + Python 3.12, SQLAlchemy. Responsible for core business logic (wallet, penalty settlement), WebSocket gateway routing, local ASR inference, and TTS forwarding. Fully embraces `uv` for ultra-fast package management and execution.
-- **Documentation (`docs/`)**: REST API standards and WebSocket protocol documentation.
+- **Frontend (`frontend/`)**: React + TypeScript + Vite, Tailwind CSS v4, Zustand for state management. Handles chat UI, Live2D display, audio recording, and WebSocket communication.
+- **Backend (`backend/`)**: FastAPI + Python 3.12, SQLAlchemy. Manages core business logic (wallet, penalty settlement), WebSocket gateway routing, on-device ASR inference, and TTS forwarding. Uses `uv` for package management and execution.
+- **Docs (`docs/`)**: Contains REST API standards and WebSocket protocol documentation.
 
+![Project Architecture (Generated using nano banana 2 pro)](imgs/Architecture.png)
+![Project Flowchart (Generated using nano banana 2 pro)](imgs/Flowchart.png)
 ---
 
 ## 🚀 Quick Start & Installation Guide
 
-**Important Note: This project heavily relies on a local ASR model (Sherpa-ONNX). Please be sure to completely download and place the model files according to the guide below.**
+**Important: This project heavily relies on the ASR model (Sherpa-ONNX). Please ensure you follow the guide below to completely download and place the model files.**
 
 ### 0. Prerequisites
 
 - **Node.js**: `v20+` and strictly use `pnpm` (`npm` and `yarn` are prohibited in this project).
-- **Python**: `3.12+` (Using `uv` for environment and package management is recommended).
+- **Python**: `3.12+`.
+- **uv**: Use `uv` for Python environment and package management.
+- **Visual Studio C++ Build Tools**: Required for the backend environment.
 
-### 1. Prepare the Local ASR Model (Sherpa-ONNX SenseVoice)
+### 1. Prepare the On-device ASR Model (Sherpa-ONNX SenseVoice)
 
-To achieve ultra-low latency voice interaction, the microphone audio stream is sent to the backend in real-time via WebSocket for local ASR transcription.
+To achieve low-latency voice interaction, microphone audio streams are sent to the backend in real-time via WebSocket for ASR transcription.
 
-1. **Download the model**:
-   Go to the official Sherpa-ONNX repository or HuggingFace to get the corresponding model package (`sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17`).
-2. **Confirm files are ready**:
-   After extracting, make sure the package contains the following key files, and note down their **absolute paths**:
+1. **Download the Model**:
+   Go to the official Sherpa-ONNX repository or HuggingFace to obtain the corresponding model package (`sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17`).
+2. **Ensure Files are Ready**:
+   After extraction, make sure the package contains the following key files and note their **absolute paths**:
    - `model.int8.onnx`
    - `tokens.txt`
 
 ### 2. Backend Configuration & Startup
 
-Enter the backend directory and use `uv` for environment installation and management:
+Navigate to the backend directory and use `uv` for environment setup and management:
 
 ```bash
 cd backend
-# Install dependencies using uv
-uv pip install -r requirements.txt
-
+# Create and sync the backend dependency environment
+uv sync
 ```
 
 **Configure Environment Variables (`backend/.env`)**:
 
-Copy `.env.example` in the `backend` directory, rename it to `.env`, and fill in your actual configurations:
+Copy `.env.example` in the `backend` directory and rename it to `.env`, then fill in your actual configuration:
 
 ```env
-# Enable local proxy model architecture
+# Enable local agent model architecture
 AGENT_BACKEND=local
 
 # ----------------- ASR Model Paths -----------------
-# (Strictly replace with the actual absolute paths of your extracted files)
-MEDIA_AI_SHERPA_MODEL_PATH="/absolute/path/to/sherpa-onnx/model.int8.onnx"
-MEDIA_AI_SHERPA_TOKENS_PATH="/absolute/path/to/sherpa-onnx/tokens.txt"
+# (Strictly replace with the absolute paths of your local extracted files)
+MEDIA_AI_SHERPA_MODEL_PATH="/absolute/path/sherpa-onnx/model.int8.onnx"
+MEDIA_AI_SHERPA_TOKENS_PATH="/absolute/path/sherpa-onnx/tokens.txt"
 
-# ----------------- AI Model Configs (Customizable) -----------------
+# ----------------- AI Model Configuration (Customizable) -----------------
 # Chat model configuration
 LOCAL_CHAT_API_KEY="xxxxxxxxxxxxxxxxxxxxxxxx"
-LOCAL_CHAT_API_BASE="[https://generativelanguage.googleapis.com/v1beta/openai/](https://generativelanguage.googleapis.com/v1beta/openai/)"
+LOCAL_CHAT_API_BASE="https://generativelanguage.googleapis.com/v1beta/openai/"
 LOCAL_CHAT_MODEL="gemini-3.1-flash-lite-preview"
 
 # Vision model configuration
 LOCAL_VISION_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-LOCAL_VISION_API_BASE="[https://dashscope.aliyuncs.com/compatible-mode/v1](https://dashscope.aliyuncs.com/compatible-mode/v1)"
+LOCAL_VISION_API_BASE="https://dashscope.aliyuncs.com/compatible-mode/v1"
 LOCAL_VISION_MODEL="qwen3.5-flash"
 
-# System proxy model configuration
+# System agent model configuration
 LOCAL_AGENT_API_KEY="xxxxxxxxxxxxxxxxxxxxxxxx"
-LOCAL_AGENT_API_BASE="[https://generativelanguage.googleapis.com/v1beta/openai/](https://generativelanguage.googleapis.com/v1beta/openai/)"
+LOCAL_AGENT_API_BASE="https://generativelanguage.googleapis.com/v1beta/openai/"
 LOCAL_AGENT_MODEL="gemini-3.1-flash-lite-preview"
-
 ```
 
-**Start Backend Service**:
-
+**Start the Backend Service**:
 ```bash
 cd backend
-uv run uvicorn app.main:app --host 0.0.0.0 --port 12393 --reload
-
+uv run uvicorn app.main:app --host 0.0.0.0 --port 12393 --reload --reload-dir app --reload-dir scripts
 ```
 
-*Tip: The first startup will automatically initialize the database at `backend/reward.db` and create the necessary default accounts.*
+*Tip: On first start, the database `backend/reward.db` will be automatically initialized and necessary default accounts created.*
 
-**Supplementary Backend Configuration Table** (can override default behaviors in `.env`):
+*Note: Set a fixed `AUTH_SECRET_KEY` in `backend/.env` for local development. Otherwise any backend restart or hot reload invalidates previously issued JWTs and forces the frontend to log in again.*
+
+**Backend Additional Configuration Table** (can override defaults in `.env`):
 
 | Variable Name | Description | Default Value |
-| --- | --- | --- |
+|---|---|---|
 | `DATABASE_URL` | Database file path | `sqlite:///./reward.db` |
-| `AUTH_SECRET_KEY` | Auth JWT Secret | Randomly generated per single restart |
-| `MEDIA_AI_TTS_PROVIDER` | Voice synthesis provider | `qwen-realtime` |
+| `AUTH_SECRET_KEY` | JWT authentication secret | Recommended to set locally; otherwise a development-only fixed fallback is used |
+| `MEDIA_AI_TTS_PROVIDER` | TTS service provider | `qwen-realtime` |
 | `MEDIA_AI_SHERPA_MODEL_TYPE` | Local ASR model type | `sense_voice` |
 
-*Note: If the ASR path is misconfigured or the files cannot be found, the system will not crash at runtime, but every voice input from the user will fallback to blank text.*
+*Note: If the ASR paths are incorrectly configured or files are not found, the system will not crash during runtime, but every voice input from the user will default to blank text.*
 
 ### 3. Frontend Configuration & Startup
 
-Please ensure you have `pnpm` installed.
+Ensure you have `pnpm` installed.
 
 ```bash
 cd frontend
@@ -129,57 +129,25 @@ pnpm install
 
 # Start the development server
 pnpm run dev
-
 ```
+After startup, open the corresponding local address in your browser (default `http://localhost:5173/`). The frontend will automatically connect to the backend via WebSocket at `ws://localhost:12393/ws`.
 
-Once started, open the corresponding local address in your browser (default is `http://localhost:5173/`). The frontend will automatically connect to `ws://localhost:12393/ws` via WebSocket.
-
-> **Quick Start Tip (Dual-end Joint Startup, recommended for Windows users)**:
-> After all dependencies and environments are ready, you can directly run `.\start-dev.cmd` in the project root directory. The script will automatically open dual consoles for joint startup.
+> **Quick Start Tip (Combined Startup, Recommended for Windows Users)**:
+> Once all dependencies and environment configurations are ready, you can simply run `.\start-dev.cmd` in the project root directory. The script will automatically launch console windows for both the frontend and backend for combined startup. Additionally, it will start an extra "Vision Debugger" window, allowing you to view the input images of the visual supervision model in real-time, enhancing debugging efficiency. Backend hot reload watches only `app/` and `scripts/`, so dependency changes under `.venv/` do not trigger spurious restarts.
 
 ---
 
-## 💻 Developer Guide
+## 📚 Detailed Documentation
 
-We strongly welcome developers to contribute. Before submitting a PR, please ensure you follow the coding standards and testing requirements below:
+To delve deeper into the internal mechanisms and protocols of PocketPledge, please refer to the following documents:
 
-### Frontend Development Commands
+- 📄 **API Contract**: [docs/api_contract.md](docs/api_contract.md)
+- 🔌 **Protocol Specification**: [docs/ws_protocol.md](docs/ws_protocol.md)
 
-* **Code standard check**: `pnpm run lint` (Must ensure no errors before submitting a PR)
-* **Run Mock server**: `pnpm run mock` (Used for testing frontend UI independently from the backend)
-* **Build production package**: `pnpm run build`
+## 🤝 Acknowledgements
 
-### Backend Development Commands
+- [Open-LLM-VTuber](https://github.com/Open-LLM-VTuber/Open-LLM-VTuber) provided valuable references for the Live2D and voice interaction functionalities in this project.
+- [Sherpa-ONNX](https://github.com/k2-fsa/sherpa-onnx) offered powerful on-device ASR model support, making low-latency voice interaction possible.
+- [Live2D](https://www.live2d.com/) provided the Live2D Web SDK, enabling the display and interaction of virtual avatars.
 
-* **Code formatting and Linting**: We use `ruff` as the sole formatting and static analysis tool:
-```bash
-cd backend
-uv run ruff check .
-uv run ruff format .
-
-```
-
-
-* **Run unit tests**: Use `pytest` to run all tests:
-```bash
-cd backend
-PYTHONPATH=. uv run pytest
-
-```
-
-
-
----
-
-## 📚 Detailed Documentation & Resources
-
-Want to dive deeper into the internal mechanisms and protocols of PocketPledge? Please refer to the following documents:
-
-* 📄 **API Contract**: [docs/api_contract.md](https://www.google.com/search?q=docs/api_contract.md)
-* 🔌 **Protocol Description**: [docs/ws_protocol.md](https://www.google.com/search?q=docs/ws_protocol.md)
-
-## 🤝 Acknowledgments
-
-* [Open-LLM-VTuber](https://github.com/Open-LLM-VTuber/Open-LLM-VTuber) provided valuable reference for the Live2D and voice interaction features of this project.
-
-> *"Once you make a Pledge, please focus on the present."*
+> *"Once you make a pledge, focus on the present moment."*
