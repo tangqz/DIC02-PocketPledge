@@ -6,6 +6,7 @@ import { useEffect, useRef } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useI18n } from "@/lib/i18n";
 import { formatRmbFromCents, formatSignedRmbFromCents } from "@/lib/currency";
+import CharitySlider from "./CharitySlider";
 
 /** Format seconds to MM:SS */
 function fmt(s: number): string {
@@ -86,27 +87,30 @@ export default function StatusBar() {
       <div className="h-6 w-px bg-slate-100" />
 
       {/* Balance */}
-      <div className="flex items-center gap-2">
-        <span className="text-sm text-slate-500">{t("status.balance")}</span>
-        <span
-          ref={balanceRef}
-          className={`font-mono text-lg font-bold tabular-nums ${
-            isDeducting ? "text-danger" : "text-success"
-          }`}
-        >
-          {formatRmbFromCents(balance)}
-        </span>
-        {lastBalanceChange && (
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-slate-500">{t("status.balance")}</span>
           <span
-            className={`text-xs font-medium ${
-              lastBalanceChange.change < 0
-                ? "text-danger/70"
-                : "text-success/70"
+            ref={balanceRef}
+            className={`font-mono text-lg font-bold tabular-nums ${
+              isDeducting ? "text-danger" : "text-success"
             }`}
           >
-            {formatSignedRmbFromCents(lastBalanceChange.change)}
+            {formatRmbFromCents(balance)}
           </span>
-        )}
+          {lastBalanceChange && (
+            <span
+              className={`text-xs font-medium ${
+                lastBalanceChange.change < 0
+                  ? "text-danger/70"
+                  : "text-success/70"
+              }`}
+            >
+              {formatSignedRmbFromCents(lastBalanceChange.change)}
+            </span>
+          )}
+        </div>
+        <CharitySlider />
       </div>
 
       {/* Divider */}

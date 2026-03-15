@@ -28,3 +28,4 @@ class UserMeResponse(BaseModel):
     balance: int
     is_active: bool
     role: str
+    charity_ratio: int = 40
