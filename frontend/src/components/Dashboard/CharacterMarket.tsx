@@ -30,6 +30,11 @@ export default function CharacterMarket({ onSwitch }: CharacterMarketProps) {
             <button
               key={item.id}
               aria-pressed={isActive}
+              aria-label={
+                locale === "zh"
+                  ? `选择角色: ${item.displayName}`
+                  : `Select character: ${item.displayName}`
+              }
               onClick={() => {
                 if (item.id === selectedCharacterId) {
                   return;
