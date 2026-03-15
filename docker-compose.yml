@@ -1,10 +1,45 @@
 services:
+  model-downloader:
+    image: curlimages/curl:8.7.1
+    container_name: pocketpledge-model-downloader
+    restart: "no"
+    environment:
+      HF_ENDPOINT: ${HF_ENDPOINT}
+      HF_MODEL_REPO: ${HF_MODEL_REPO}
+      HF_MODEL_REVISION: ${HF_MODEL_REVISION}
+    command: >
+      sh -ceu '
+        mkdir -p /models/sherpa;
+        if [ -s /models/sherpa/model.int8.onnx ] && [ -s /models/sherpa/tokens.txt ]; then
+          echo "Sherpa model already exists, skip download.";
+          exit 0;
+        fi;
+
+        base="${HF_ENDPOINT}/${HF_MODEL_REPO}/resolve/${HF_MODEL_REVISION}";
+        echo "Downloading model files from $${base}";
+
+        curl --fail --location --retry 5 --retry-delay 2 --retry-all-errors \
+          "$${base}/model.int8.onnx" \
+          -o /models/sherpa/model.int8.onnx;
+
+        curl --fail --location --retry 5 --retry-delay 2 --retry-all-errors \
+          "$${base}/tokens.txt" \
+          -o /models/sherpa/tokens.txt;
+
+        ls -lh /models/sherpa/model.int8.onnx /models/sherpa/tokens.txt;
+      '
+    volumes:
+      - ${SHERPA_MODEL_DIR}:/models/sherpa
+
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: pocketpledge-backend
     restart: unless-stopped
+    depends_on:
+      model-downloader:
+        condition: service_completed_successfully
     environment:
       APP_ENV: production
       DATABASE_URL: sqlite:///./data/reward.db
