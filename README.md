@@ -10,6 +10,10 @@
   <i>Put your money where your mouth is and end distractions for good!</i>
 </div>
 
+<div align="center">
+  <a href="README-zh.md">简体中文</a>
+</div>
+
 ---
 
 ## 🌟 Core Highlights & Features
