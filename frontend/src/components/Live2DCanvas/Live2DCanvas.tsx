@@ -19,7 +19,7 @@ import { useI18n } from "@/lib/i18n";
 import { useAudioQueue } from "@/components/AudioPlayer/useAudioQueue";
 import { useAvatarStore } from "@/stores/avatarStore";
 import { useSessionStore } from "@/stores/sessionStore";
-import { updateModelConfig } from "@/live2d/WebSDK/src/lappdefine";
+import { updateInteractionConfig, updateModelConfig } from "@/live2d/WebSDK/src/lappdefine";
 
 const IS_DEV = import.meta.env.DEV;
 
@@ -33,6 +33,8 @@ export interface Live2DCanvasHandle {
 const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const lipSyncRafRef = useRef<number | null>(null);
   const sdkRef = useRef<{
     initializeLive2D?: () => void;
     LAppAdapter?: {
@@ -44,6 +46,9 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
         getMotionGroups: () => string[];
         getExpressionName: (index: number) => string;
         setExpression: (name: string) => void;
+        setExternalLipSyncValue: (value: number) => void;
+        getMotionCount: (group: string) => number;
+        startMotion: (group: string, no: number, priority: number) => number;
         setChara: (resourceRoot: string, modelDir: string) => void;
       };
     };
@@ -115,7 +120,84 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
     [config.emotionMap],
   );
 
+  const stopExternalLipSync = useCallback(() => {
+    if (lipSyncRafRef.current != null) {
+      window.cancelAnimationFrame(lipSyncRafRef.current);
+      lipSyncRafRef.current = null;
+    }
+    const adapter = sdkRef.current?.LAppAdapter?.getInstance();
+    adapter?.setExternalLipSyncValue(0);
+  }, []);
+
+  const startExternalLipSync = useCallback(
+    (audio: HTMLAudioElement) => {
+      const adapter = sdkRef.current?.LAppAdapter?.getInstance();
+      if (!adapter) {
+        return;
+      }
+
+      stopExternalLipSync();
+
+      const AudioCtx = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) {
+        return;
+      }
+
+      try {
+        const context = audioContextRef.current ?? new AudioCtx();
+        audioContextRef.current = context;
+        if (context.state === "suspended") {
+          void context.resume();
+        }
+
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 1024;
+        analyser.smoothingTimeConstant = 0.55;
+        const source = context.createMediaElementSource(audio);
+        source.connect(analyser);
+        analyser.connect(context.destination);
+
+        const samples = new Uint8Array(analyser.fftSize);
+        const gain = Math.max(0.1, Number(activeConfig.lipSyncGain) || 1.0);
+
+        const cleanup = () => {
+          stopExternalLipSync();
+          source.disconnect();
+          analyser.disconnect();
+          audio.removeEventListener("ended", cleanup);
+          audio.removeEventListener("pause", cleanup);
+          audio.removeEventListener("error", cleanup);
+        };
+
+        const tick = () => {
+          analyser.getByteTimeDomainData(samples);
+          let sum = 0;
+          for (let i = 0; i < samples.length; i++) {
+            const centered = (samples[i] - 128) / 128;
+            sum += centered * centered;
+          }
+          const rms = Math.sqrt(sum / samples.length);
+          const mapped = Math.min(1.0, rms * gain * 8.0);
+          adapter.setExternalLipSyncValue(mapped);
+
+          if (!audio.paused && !audio.ended) {
+            lipSyncRafRef.current = window.requestAnimationFrame(tick);
+          }
+        };
+
+        audio.addEventListener("ended", cleanup, { once: true });
+        audio.addEventListener("pause", cleanup, { once: true });
+        audio.addEventListener("error", cleanup, { once: true });
+        lipSyncRafRef.current = window.requestAnimationFrame(tick);
+      } catch (err) {
+        console.warn("[Live2DCanvas] external lip sync init failed", err);
+      }
+    },
+    [activeConfig.lipSyncGain, stopExternalLipSync],
+  );
+
   const stopAudio = useCallback(() => {
+    stopExternalLipSync();
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
@@ -140,6 +222,16 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
   };
 
   const playBase64Audio = async (base64Wav: string) => {
+    const adapter = sdkRef.current?.LAppAdapter?.getInstance();
+    const talkGroup = activeConfig.talkMotionGroup ?? "";
+    if (adapter) {
+      const motionCount = adapter.getMotionCount(talkGroup);
+      if (motionCount > 0) {
+        const randomIndex = Math.floor(Math.random() * motionCount);
+        adapter.startMotion(talkGroup, randomIndex, 2);
+      }
+    }
+
     const pureBase64 = base64Wav.includes(",")
       ? base64Wav.split(",")[1]
       : base64Wav;
@@ -186,10 +278,12 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
 
       audio.addEventListener("ended", onEnded);
       audio.addEventListener("error", onError);
+      startExternalLipSync(audio);
 
       audio.play().catch((err) => {
         audio.removeEventListener("ended", onEnded);
         audio.removeEventListener("error", onError);
+        stopExternalLipSync();
         URL.revokeObjectURL(url);
         if (audioRef.current === audio) {
           audioRef.current = null;
@@ -299,6 +393,7 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
 
         const { resourceRoot, modelDir, modelFileName } = parseModelPath(activeConfig.url);
         updateModelConfig(resourceRoot, modelDir, modelFileName, Number(activeConfig.kScale) || undefined);
+        updateInteractionConfig(activeConfig.tapMotions, activeConfig.emotionMap);
         initializeLive2D();
 
         if (disposed) {
@@ -345,8 +440,9 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
         console.warn("[Live2DCanvas] releaseInstance failed", releaseError);
       }
       stopAudio();
+      stopExternalLipSync();
     };
-  }, [activeConfig.url, activeConfig.kScale, config, lastGoodConfig, fallbackToDefault, stopAudio]);
+  }, [activeConfig.url, activeConfig.kScale, config, lastGoodConfig, fallbackToDefault, stopAudio, stopExternalLipSync]);
 
   return (
     <div id="live2d" className="relative h-full w-full">
