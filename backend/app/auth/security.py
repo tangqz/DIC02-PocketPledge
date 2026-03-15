@@ -1,6 +1,7 @@
 """JWT token utilities and password hashing for multi-user authentication."""
 
 import os
+import logging
 from datetime import datetime, timedelta, timezone
 
 import hashlib
@@ -11,7 +12,28 @@ import base64
 
 # ── Configuration ──
 
-SECRET_KEY = os.getenv("AUTH_SECRET_KEY", secrets.token_hex(32))
+logger = logging.getLogger(__name__)
+
+_DEV_FALLBACK_SECRET_KEY = "dic2026-local-dev-secret-change-me"
+
+
+def _resolve_secret_key() -> str:
+    configured = (os.getenv("AUTH_SECRET_KEY") or "").strip()
+    if configured:
+        return configured
+
+    app_env = (os.getenv("APP_ENV") or os.getenv("ENV") or "development").strip().lower()
+    if app_env in {"prod", "production"}:
+        raise RuntimeError("AUTH_SECRET_KEY must be set in production")
+
+    logger.warning(
+        "AUTH_SECRET_KEY is not set; using an insecure local development fallback. "
+        "Set AUTH_SECRET_KEY in backend/.env to keep tokens stable across restarts."
+    )
+    return _DEV_FALLBACK_SECRET_KEY
+
+
+SECRET_KEY = _resolve_secret_key()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(
     os.getenv("AUTH_TOKEN_EXPIRE_MINUTES", "1440")
