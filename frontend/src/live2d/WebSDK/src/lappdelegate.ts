@@ -380,8 +380,9 @@ function onClickBegan(e: MouseEvent): void {
   }
   LAppDelegate.getInstance()._captured = true;
 
-  const posX: number = e.pageX;
-  const posY: number = e.pageY;
+  const rect = (e.target as Element).getBoundingClientRect();
+  const posX: number = e.clientX - rect.left;
+  const posY: number = e.clientY - rect.top;
 
   LAppDelegate.getInstance()._view!.onTouchesBegan(posX, posY);
 }
@@ -443,8 +444,9 @@ function onTouchBegan(e: TouchEvent): void {
 
   LAppDelegate.getInstance()._captured = true;
 
-  const posX = e.changedTouches[0].pageX;
-  const posY = e.changedTouches[0].pageY;
+  const rect = (e.target as Element).getBoundingClientRect();
+  const posX = e.changedTouches[0].clientX - rect.left;
+  const posY = e.changedTouches[0].clientY - rect.top;
 
   LAppDelegate.getInstance()._view!.onTouchesBegan(posX, posY);
 }

@@ -23,7 +23,7 @@ PocketPledge 打破了传统时间管理软件的枯燥与死板，将“陪伴�
 
 > **注：由于我们尚未将该项目部署为云服务，因此目前仅提供本地部署的版本。罚金机制也仅作用于本地的虚拟账户，不会影响真实资金。**
 
-![Web User Interface](UI-zh.jpg)
+![Web User Interface](/imgs/UI-zh.jpg)
 
 ## 📁 目录结构与技术栈概览
 
@@ -149,6 +149,6 @@ pnpm run dev
 
 - [Open-LLM-VTuber](https://github.com/Open-LLM-VTuber/Open-LLM-VTuber) 为本项目的 Live2D 与语音交互功能提供了宝贵的参考。
 - [Sherpa-ONNX](https://github.com/k2-fsa/sherpa-onnx) 提供了强大的本地 ASR 模型支持，使得低延迟的语音交互成为可能。
-- [Live2D](https://www.live2d.com/) 提供了 Live2D Web SDK，使得虚拟形象的展示与交互得以实现。
+- [Live2D](https://www.live2d.com/) 提供了 Live2D Web SDK和模型，使得虚拟形象的展示与交互得以实现。
 
 > *“一旦你许下承诺 (Pledge)，就请专注于当下。”*

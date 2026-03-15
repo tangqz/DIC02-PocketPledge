@@ -117,3 +117,19 @@ export const ModelInteractionDragSensitivity = 0.3;
 export const ModelInteractionWheelScaleStep = 0.05;
 export const ModelInteractionMinScale = 0.15;
 export const ModelInteractionMaxScale = 8.0;
+
+export interface HitAreaTapAction {
+  motion: string;
+  expression: string;
+}
+
+export let TapMotions: Record<string, HitAreaTapAction> = {};
+export let RuntimeEmotionMap: Record<string, number> = {};
+
+export function updateInteractionConfig(
+  tapMotions: Record<string, HitAreaTapAction> | undefined,
+  emotionMap: Record<string, number> | undefined,
+): void {
+  TapMotions = { ...(tapMotions ?? {}) };
+  RuntimeEmotionMap = { ...(emotionMap ?? {}) };
+}

@@ -617,6 +617,7 @@ export class LAppModel extends CubismUserModel {
       this._wavFileHandler.update(deltaTimeSeconds);
       value = this._wavFileHandler.getRms();
       value = Math.min(1.0, value * 1.5);
+      value = Math.max(value, this._externalLipSyncValue);
 
       const lipSyncWeight = 4.0;
 
@@ -627,6 +628,7 @@ export class LAppModel extends CubismUserModel {
           lipSyncWeight
         );
       }
+      this._externalLipSyncValue = Math.max(0.0, this._externalLipSyncValue * 0.72);
     }
 
     // ポーズの設定
@@ -1252,6 +1254,13 @@ export class LAppModel extends CubismUserModel {
     }
   }
 
+  public setExternalLipSyncValue(value: number): void {
+    if (!Number.isFinite(value)) {
+      return;
+    }
+    this._externalLipSyncValue = Math.min(1.0, Math.max(0.0, value));
+  }
+
   /**
    * コンストラクタ
    */
@@ -1312,6 +1321,7 @@ export class LAppModel extends CubismUserModel {
     this._motionCount = 0;
     this._allMotionCount = 0;
     this._wavFileHandler = new LAppWavFileHandler();
+    this._externalLipSyncValue = 0.0;
     this._consistency = false;
   }
 
@@ -1341,5 +1351,6 @@ export class LAppModel extends CubismUserModel {
   _motionCount: number; // モーションデータカウント
   _allMotionCount: number; // モーション総数
   _wavFileHandler: LAppWavFileHandler; //wavファイルハンドラ
+  _externalLipSyncValue: number; // 外部音频驱动的口型值
   _consistency: boolean; // MOC3一貫性チェック管理用
 }

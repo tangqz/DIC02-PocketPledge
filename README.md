@@ -25,7 +25,7 @@ PocketPledge breaks the monotony and rigidity of traditional time-management too
 - 👁️ **Hardcore Visual Distraction Detection**: Casually pick up your phone or lie down to nap during study sessions? The system performs non-linear sparse sampling of your camera and screen, analyzed in **real-time by powerful multimodal AI** to catch every moment of distraction. Thinking of slacking off? Your companion will **proactively** remind you with voice prompts. If you don't want to let them down, just keep studying.
 - 💰 **Economic Supervision (Real Money at Stake)**: Once you're caught distracted and fail to correct after reminders, a penalty fee will be instantly deducted. A real balance settlement mechanism builds the strongest defense for focus through the pain of loss.
 
-![Web User Interface](UI-en.jpg)
+![Web User Interface](/imgs/UI-en.jpg)
 
 > **Note: Since we haven't deployed this project as a cloud service yet, currently only a local deployment version is available. The penalty mechanism only affects a local virtual account and does not involve real funds.**
 
@@ -152,6 +152,6 @@ To delve deeper into the internal mechanisms and protocols of PocketPledge, plea
 
 - [Open-LLM-VTuber](https://github.com/Open-LLM-VTuber/Open-LLM-VTuber) provided valuable references for the Live2D and voice interaction functionalities in this project.
 - [Sherpa-ONNX](https://github.com/k2-fsa/sherpa-onnx) offered powerful on-device ASR model support, making low-latency voice interaction possible.
-- [Live2D](https://www.live2d.com/) provided the Live2D Web SDK, enabling the display and interaction of virtual avatars.
+- [Live2D](https://www.live2d.com/) provided the Live2D Web SDK and models, enabling the display and interaction of virtual avatars.
 
 > *"Once you make a pledge, focus on the present moment."*
