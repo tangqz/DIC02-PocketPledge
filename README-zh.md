@@ -144,6 +144,7 @@ pnpm run dev
 
 - 📄 **接口文档**: [docs/api_contract.md](docs/api_contract.md)
 - 🔌 **协议说明**: [docs/ws_protocol.md](docs/ws_protocol.md)
+- 🐳 **Linux Docker 部署**: [docs/docker-linux-deploy.md](docs/docker-linux-deploy.md)
 
 ## 🤝 致谢
 

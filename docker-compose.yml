@@ -1,0 +1,55 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pocketpledge-backend
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      DATABASE_URL: sqlite:///./data/reward.db
+      TOKEN_LOG_FILE: /app/data/token_usage.json
+      AGENT_BACKEND: local
+      MEDIA_AI_ASR_PROVIDER: sherpa-onnx
+      MEDIA_AI_SHERPA_MODEL_TYPE: sense_voice
+      MEDIA_AI_SHERPA_MODEL_PATH: /models/sherpa/model.int8.onnx
+      MEDIA_AI_SHERPA_TOKENS_PATH: /models/sherpa/tokens.txt
+      MEDIA_AI_TTS_PROVIDER: qwen-realtime
+      LOCAL_CHAT_API_KEY: ${LOCAL_CHAT_API_KEY}
+      LOCAL_CHAT_API_BASE: ${LOCAL_CHAT_API_BASE}
+      LOCAL_CHAT_MODEL: ${LOCAL_CHAT_MODEL}
+      LOCAL_VISION_API_KEY: ${LOCAL_VISION_API_KEY}
+      LOCAL_VISION_API_BASE: ${LOCAL_VISION_API_BASE}
+      LOCAL_VISION_MODEL: ${LOCAL_VISION_MODEL}
+      LOCAL_AGENT_API_KEY: ${LOCAL_AGENT_API_KEY}
+      LOCAL_AGENT_API_BASE: ${LOCAL_AGENT_API_BASE}
+      LOCAL_AGENT_MODEL: ${LOCAL_AGENT_MODEL}
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
+    volumes:
+      - backend-data:/app/data
+      - ${SHERPA_MODEL_DIR}:/models/sherpa:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:12393/health', timeout=3)"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE: ""
+        VITE_WS_URL: ""
+    container_name: pocketpledge-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+
+volumes:
+  backend-data:
