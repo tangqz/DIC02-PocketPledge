@@ -18,5 +18,18 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    proxy: {
+      // Proxy WebSocket connections to local backend in development.
+      // In Docker production the nginx reverse proxy handles this instead.
+      "/ws": {
+        target: "http://localhost:12393",
+        ws: true,
+        changeOrigin: true,
+      },
+      "/api": {
+        target: "http://localhost:12393",
+        changeOrigin: true,
+      },
+    },
   },
 });
