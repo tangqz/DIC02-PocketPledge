@@ -255,6 +255,28 @@ export default function DailyPlanCalendar({ plan, onStartFocusDay }: DailyPlanCa
     setSelectedDateKey(dateKeyOf(firstOccurrenceDate));
   }, [firstOccurrenceDate]);
 
+  // Stable today key for ring styling.
+  const todayKey = dateKeyOf(new Date());
+
+  // Preserve accumulated focus minutes across plan changes.
+  // Values only ever increase — switching to a new plan never erases history.
+  const [localActuals, setLocalActuals] = useState<Record<string, number>>({});
+  useEffect(() => {
+    if (!plan?.tasks) return;
+    setLocalActuals((prev) => {
+      const next = { ...prev };
+      for (const task of plan.tasks) {
+        const t = task as PlanTask & { actualMinutesByDate?: Record<string, number> };
+        if (t.actualMinutesByDate && typeof t.actualMinutesByDate === "object") {
+          for (const [dk, mins] of Object.entries(t.actualMinutesByDate)) {
+            next[dk] = Math.max(next[dk] ?? 0, Number(mins) || 0);
+          }
+        }
+      }
+      return next;
+    });
+  }, [plan]);
+
   const monthGrid = useMemo(() => buildMonthGrid(displayMonth), [displayMonth]);
 
   const deadlineDate = useMemo(() => {
@@ -322,6 +344,7 @@ export default function DailyPlanCalendar({ plan, onStartFocusDay }: DailyPlanCa
           const isDone = Boolean(summary?.allDone);
           const isSelected = selectedDateKey === key;
           const isDeadline = deadlineDate ? dateKeyOf(deadlineDate) === key : false;
+          const isToday = key === todayKey;
 
           return (
             <div
@@ -338,12 +361,14 @@ export default function DailyPlanCalendar({ plan, onStartFocusDay }: DailyPlanCa
               className={`relative flex aspect-square cursor-pointer flex-col items-start justify-between rounded-lg border p-1.5 text-[11px] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 ${
                 inMonth ? "text-slate-700" : "text-slate-400"
               } ${
-                items.length === 0
+                items.length === 0 && !localActuals[key]
                   ? "border-slate-200 bg-white/65"
-                  : isDone
-                    ? "border-emerald-300 bg-emerald-100/65 text-emerald-800"
-                    : "border-rose-300 bg-rose-100/70 text-rose-800"
-              } ${isDeadline ? "ring-1 ring-warning" : ""} ${isSelected ? "ring-2 ring-accent" : ""}`}
+                  : items.length === 0
+                    ? "border-slate-300 bg-slate-100/70 text-slate-600"
+                    : isDone
+                      ? "border-emerald-300 bg-emerald-100/65 text-emerald-800"
+                      : "border-rose-300 bg-rose-100/70 text-rose-800"
+              } ${isDeadline ? "ring-1 ring-warning" : ""} ${isSelected ? "ring-2 ring-accent" : isToday ? "ring-2 ring-sky-400 ring-offset-1" : ""}`}
             >
               <div className="flex w-full items-center justify-between">
                 <span className="font-medium">{day.getDate()}</span>
@@ -357,7 +382,7 @@ export default function DailyPlanCalendar({ plan, onStartFocusDay }: DailyPlanCa
                 {items.length > 0 ? (
                   <div className="w-full">
                     <div className="mb-0.5 flex justify-between text-[9px] opacity-80">
-                      <span>{summary?.completedMinutes || 0}m</span>
+                      <span>{Math.max(summary?.completedMinutes || 0, localActuals[key] || 0)}m</span>
                       <span>{summary?.totalMinutes || 0}m</span>
                     </div>
                     <div className="h-1 w-full overflow-hidden rounded-full bg-black/10">
@@ -366,13 +391,15 @@ export default function DailyPlanCalendar({ plan, onStartFocusDay }: DailyPlanCa
                         style={{
                           width: `${
                             (summary?.totalMinutes || 0) > 0
-                              ? Math.min(100, ((summary?.completedMinutes || 0) / (summary?.totalMinutes || 1)) * 100)
-                              : ((summary?.completedMinutes || 0) > 0 ? 100 : 0)
+                              ? Math.min(100, (Math.max(summary?.completedMinutes || 0, localActuals[key] || 0) / (summary?.totalMinutes || 1)) * 100)
+                              : (Math.max(summary?.completedMinutes || 0, localActuals[key] || 0) > 0 ? 100 : 0)
                           }%`,
                         }}
                       />
                     </div>
                   </div>
+                ) : localActuals[key] ? (
+                  <p className="text-[9px] font-medium opacity-75">{localActuals[key]}m</p>
                 ) : (
                   <p className="opacity-60">-</p>
                 )}

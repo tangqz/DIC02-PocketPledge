@@ -196,6 +196,7 @@ def _build_character_block(character_id: str) -> str:
             "- Tone: calm, concise, mentor-like\n"
             "- Style: rational encouragement, clear boundaries, low drama\n"
             "- Preferred expressions: [neutral] [encouraging] [proud]"
+                    "- Preferred expressions: [neutral] [encouraging] [proud] [shy]"
         )
     return (
         "\n角色人设：\n"
@@ -203,6 +204,7 @@ def _build_character_block(character_id: str) -> str:
         "- 风格：温柔但有压迫感，允许小脾气\n"
         "- 表达：短句、口语化、陪伴感强\n"
         "- 优先表情：[neutral] [happy] [encouraging] [angry] [proud]"
+        "- 优先表情：[neutral] [happy] [encouraging] [angry] [proud] [shy]"
     )
 
 

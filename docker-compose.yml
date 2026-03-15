@@ -1,0 +1,90 @@
+services:
+  model-downloader:
+    image: curlimages/curl:8.7.1
+    container_name: pocketpledge-model-downloader
+    restart: "no"
+    environment:
+      HF_ENDPOINT: ${HF_ENDPOINT}
+      HF_MODEL_REPO: ${HF_MODEL_REPO}
+      HF_MODEL_REVISION: ${HF_MODEL_REVISION}
+    command: >
+      sh -ceu '
+        mkdir -p /models/sherpa;
+        if [ -s /models/sherpa/model.int8.onnx ] && [ -s /models/sherpa/tokens.txt ]; then
+          echo "Sherpa model already exists, skip download.";
+          exit 0;
+        fi;
+
+        base="${HF_ENDPOINT}/${HF_MODEL_REPO}/resolve/${HF_MODEL_REVISION}";
+        echo "Downloading model files from $${base}";
+
+        curl --fail --location --retry 5 --retry-delay 2 --retry-all-errors \
+          "$${base}/model.int8.onnx" \
+          -o /models/sherpa/model.int8.onnx;
+
+        curl --fail --location --retry 5 --retry-delay 2 --retry-all-errors \
+          "$${base}/tokens.txt" \
+          -o /models/sherpa/tokens.txt;
+
+        ls -lh /models/sherpa/model.int8.onnx /models/sherpa/tokens.txt;
+      '
+    volumes:
+      - ${SHERPA_MODEL_DIR}:/models/sherpa
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pocketpledge-backend
+    restart: unless-stopped
+    depends_on:
+      model-downloader:
+        condition: service_completed_successfully
+    environment:
+      APP_ENV: production
+      DATABASE_URL: sqlite:///./data/reward.db
+      TOKEN_LOG_FILE: /app/data/token_usage.json
+      AGENT_BACKEND: local
+      MEDIA_AI_ASR_PROVIDER: sherpa-onnx
+      MEDIA_AI_SHERPA_MODEL_TYPE: sense_voice
+      MEDIA_AI_SHERPA_MODEL_PATH: /models/sherpa/model.int8.onnx
+      MEDIA_AI_SHERPA_TOKENS_PATH: /models/sherpa/tokens.txt
+      MEDIA_AI_TTS_PROVIDER: qwen-realtime
+      LOCAL_CHAT_API_KEY: ${LOCAL_CHAT_API_KEY}
+      LOCAL_CHAT_API_BASE: ${LOCAL_CHAT_API_BASE}
+      LOCAL_CHAT_MODEL: ${LOCAL_CHAT_MODEL}
+      LOCAL_VISION_API_KEY: ${LOCAL_VISION_API_KEY}
+      LOCAL_VISION_API_BASE: ${LOCAL_VISION_API_BASE}
+      LOCAL_VISION_MODEL: ${LOCAL_VISION_MODEL}
+      LOCAL_AGENT_API_KEY: ${LOCAL_AGENT_API_KEY}
+      LOCAL_AGENT_API_BASE: ${LOCAL_AGENT_API_BASE}
+      LOCAL_AGENT_MODEL: ${LOCAL_AGENT_MODEL}
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
+    volumes:
+      - backend-data:/app/data
+      - ${SHERPA_MODEL_DIR}:/models/sherpa:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:12393/health', timeout=3)"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE: ""
+        VITE_WS_URL: ""
+    container_name: pocketpledge-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+
+volumes:
+  backend-data:

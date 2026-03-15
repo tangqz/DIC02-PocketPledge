@@ -36,7 +36,28 @@ export interface UseWebSocketOptions {
   autoConnect?: boolean;
 }
 
-const DEFAULT_URL = "ws://localhost:12393/ws";
+const resolveDefaultWsUrl = (): string => {
+  const envUrl = import.meta.env.VITE_WS_URL as string | undefined;
+  if (envUrl && envUrl.trim().length > 0) {
+    return envUrl.trim();
+  }
+
+  // In dev mode (Vite dev server) connect directly to the backend port.
+  // In production builds (Docker + nginx) follow the current host so the
+  // nginx reverse proxy can handle the /ws path.
+  if (import.meta.env.DEV) {
+    return "ws://localhost:12393/ws";
+  }
+
+  if (typeof window !== "undefined") {
+    const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${wsProtocol}//${window.location.host}/ws`;
+  }
+
+  return "ws://localhost:12393/ws";
+};
+
+const DEFAULT_URL = resolveDefaultWsUrl();
 const RECONNECT_DELAY = 3000;
 const MAX_RECONNECT_ATTEMPTS = 5;
 

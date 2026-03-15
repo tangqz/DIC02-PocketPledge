@@ -55,6 +55,8 @@ export const MAO_PRO_CONFIG: ModelConfig = {
     proud: 7, // exp_08
     serious: 2, // exp_03 (reuse anger set)
     playful: 3, // exp_04 (reuse joy set)
+     shy: 5, // exp_06 — blush (ParamCheek=1) + worried brows
+     embarrassed: 5, // exp_06
   },
   idleMotionGroup: "Idle",
   talkMotionGroup: "", // default group for mao_pro
@@ -86,6 +88,8 @@ export const REN_PRO_CONFIG: ModelConfig = {
     proud: 4,
     serious: 0,
     playful: 1,
+     shy: 1, // Blushing.exp3.json — ParamCheek=1
+     embarrassed: 1, // Blushing.exp3.json
   },
   idleMotionGroup: "Idle",
   talkMotionGroup: "Tap",
@@ -103,7 +107,7 @@ export const CHARACTER_MARKET: CharacterProfile[] = [
     displayName: "Milly",
     shortDescription: "Warm but strict study companion",
     personality: "Emotional, playful, and sharp when you slack. She pushes you with pressure and care.",
-    supportedExpressions: ["neutral", "happy", "encouraging", "angry", "proud"],
+    supportedExpressions: ["neutral", "happy", "encouraging", "angry", "proud", "shy"],
     model: MAO_PRO_CONFIG,
   },
   {
@@ -111,7 +115,7 @@ export const CHARACTER_MARKET: CharacterProfile[] = [
     displayName: "Natori",
     shortDescription: "Calm mentor companion",
     personality: "Steady and concise. Keeps boundaries and gives clear, rational guidance.",
-    supportedExpressions: ["neutral", "encouraging", "proud", "angry", "happy"],
+    supportedExpressions: ["neutral", "encouraging", "proud", "angry", "happy", "shy"],
     model: REN_PRO_CONFIG,
   },
 ];
