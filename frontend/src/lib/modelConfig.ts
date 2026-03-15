@@ -107,8 +107,7 @@ export const CHARACTER_MARKET: CharacterProfile[] = [
     displayName: "Milly",
     shortDescription: "Warm but strict study companion",
     personality: "Emotional, playful, and sharp when you slack. She pushes you with pressure and care.",
-    supportedExpressions: ["neutral", "happy", "encouraging", "angry", "proud"],
-      supportedExpressions: ["neutral", "happy", "encouraging", "angry", "proud", "shy"],
+    supportedExpressions: ["neutral", "happy", "encouraging", "angry", "proud", "shy"],
     model: MAO_PRO_CONFIG,
   },
   {
@@ -116,8 +115,7 @@ export const CHARACTER_MARKET: CharacterProfile[] = [
     displayName: "Natori",
     shortDescription: "Calm mentor companion",
     personality: "Steady and concise. Keeps boundaries and gives clear, rational guidance.",
-    supportedExpressions: ["neutral", "encouraging", "proud", "angry", "happy"],
-      supportedExpressions: ["neutral", "encouraging", "proud", "angry", "happy", "shy"],
+    supportedExpressions: ["neutral", "encouraging", "proud", "angry", "happy", "shy"],
     model: REN_PRO_CONFIG,
   },
 ];

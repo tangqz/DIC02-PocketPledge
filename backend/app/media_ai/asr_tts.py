@@ -22,6 +22,13 @@ _WHISPER_MODELS: dict[tuple[str, str, str], object] = {}
 _SHERPA_RECOGNIZERS: dict[tuple[str, str, str, int, bool, str], object] = {}
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _default_sherpa_model_dir() -> Path:
     repo_root = Path(__file__).resolve().parents[3]
     candidates = [
@@ -300,6 +307,9 @@ class EdgeTTSService:
 
     def __init__(self, voice: str | None = None) -> None:
         self.voice = voice or os.getenv("MEDIA_AI_TTS_VOICE", "zh-CN-XiaoxiaoNeural")
+        self.allow_synth_fallback = _env_bool(
+            "MEDIA_AI_TTS_ALLOW_SYNTH_FALLBACK", False
+        )
 
     async def synthesize(
         self, text: str, expression: str = "neutral", character_id: str = "milly"
@@ -317,7 +327,9 @@ class EdgeTTSService:
                 if isinstance(data, bytes):
                     audio_chunks.append(data)
         if not audio_chunks:
-            return synthetic_wav_bytes(text=text, expression=expression)
+            if self.allow_synth_fallback:
+                return synthetic_wav_bytes(text=text, expression=expression)
+            raise RuntimeError("edge-tts returned no audio")
         return b"".join(audio_chunks)
 
 
@@ -382,6 +394,17 @@ class QwenRealtimeTTSService:
             "MEDIA_AI_TTS_INSTRUCTIONS",
             "语气自然亲切，节奏偏快，停顿短，适合实时陪伴对话。",
         )
+        self.max_retries = max(1, int(os.getenv("MEDIA_AI_TTS_MAX_RETRIES", "2")))
+        self.retry_backoff_ms = max(
+            50, int(os.getenv("MEDIA_AI_TTS_RETRY_BACKOFF_MS", "250"))
+        )
+        self.max_parallel = max(
+            1, int(os.getenv("MEDIA_AI_TTS_MAX_PARALLEL", "1"))
+        )
+        self.allow_synth_fallback = _env_bool(
+            "MEDIA_AI_TTS_ALLOW_SYNTH_FALLBACK", False
+        )
+        self._synthesize_semaphore = asyncio.Semaphore(self.max_parallel)
         self.api_key = (
             os.getenv("MEDIA_AI_TTS_API_KEY")
             or os.getenv("DASHSCOPE_API_KEY")
@@ -457,14 +480,34 @@ class QwenRealtimeTTSService:
         self, text: str, expression: str = "neutral", character_id: str = "milly"
     ) -> bytes:
         if not text.strip():
-            return synthetic_wav_bytes(text="...", expression=expression)
-        try:
-            return await asyncio.to_thread(
-                self._synthesize_sync, text, expression, character_id
-            )
-        except Exception:
+            return b""
+
+        last_error: Exception | None = None
+        async with self._synthesize_semaphore:
+            for attempt in range(1, self.max_retries + 1):
+                try:
+                    return await asyncio.to_thread(
+                        self._synthesize_sync, text, expression, character_id
+                    )
+                except Exception as exc:
+                    last_error = exc
+                    logger.warning(
+                        "qwen realtime TTS attempt %s/%s failed chars=%s: %s",
+                        attempt,
+                        self.max_retries,
+                        len(text),
+                        exc,
+                    )
+                    if attempt < self.max_retries:
+                        await asyncio.sleep((self.retry_backoff_ms * attempt) / 1000.0)
+
+        if self.allow_synth_fallback:
             logger.exception("qwen realtime TTS failed; falling back to synthetic wav")
             return synthetic_wav_bytes(text=text, expression=expression)
+
+        if last_error is not None:
+            raise RuntimeError("qwen realtime TTS failed after retries") from last_error
+        raise RuntimeError("qwen realtime TTS failed after retries")
 
 
 def get_asr_service() -> ASRService:
@@ -474,6 +517,35 @@ def get_asr_service() -> ASRService:
     if provider in {"faster-whisper", "whisper", "local"}:
         return FasterWhisperASRService()
     return MockASRService()
+
+
+async def warmup_asr_service() -> bool:
+    """Warm up ASR model/runtime at startup to reduce first-utterance latency."""
+    enabled = _env_bool("MEDIA_AI_ASR_WARMUP_ENABLED", True)
+    if not enabled:
+        logger.info("ASR warmup skipped (MEDIA_AI_ASR_WARMUP_ENABLED=false)")
+        return False
+
+    provider = os.getenv("MEDIA_AI_ASR_PROVIDER", "sherpa-onnx").lower()
+    warmup_ms = max(100, int(os.getenv("MEDIA_AI_ASR_WARMUP_MS", "500")))
+    sample_count = max(1, int(DEFAULT_SAMPLE_RATE * (warmup_ms / 1000.0)))
+    warmup_samples = [0.0] * sample_count
+
+    started = asyncio.get_running_loop().time()
+    try:
+        asr_service = get_asr_service()
+        await asr_service.audio_samples_to_text(warmup_samples)
+        elapsed_ms = (asyncio.get_running_loop().time() - started) * 1000
+        logger.info(
+            "ASR warmup done provider=%s warmup_ms=%s elapsed_ms=%.1f",
+            provider,
+            warmup_ms,
+            elapsed_ms,
+        )
+        return True
+    except Exception:
+        logger.exception("ASR warmup failed provider=%s", provider)
+        return False
 
 
 def get_tts_service() -> TTSService:
