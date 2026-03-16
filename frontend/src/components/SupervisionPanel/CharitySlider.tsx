@@ -65,6 +65,7 @@ export default function CharitySlider() {
         min="0"
         max="100"
         value={localRatio}
+        aria-label={t("status.charityRatio")}
         onChange={handleChange}
         onMouseUp={handleMouseUp}
         onTouchEnd={handleMouseUp}
