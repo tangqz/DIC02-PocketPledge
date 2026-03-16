@@ -72,7 +72,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         loading: false,
       });
       return true;
-    } catch (err) {
+    } catch {
       set({ loading: false, error: "Network error" });
       return false;
     }
@@ -100,7 +100,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         loading: false,
       });
       return true;
-    } catch (err) {
+    } catch {
       set({ loading: false, error: "Network error" });
       return false;
     }

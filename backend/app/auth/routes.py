@@ -55,8 +55,16 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
+    # Sentinel: To mitigate User Enumeration Timing Attacks, perform a dummy hash
+    # verification when a user is not found to normalize response times.
+    DUMMY_HASH = "pbkdf2:sha256:260000$00000000000000000000000000000000$0000000000000000000000000000000000000000000000000000000000000000"
+
     user = db.query(User).filter(User.username == payload.username).first()
     if not user or not user.password_hash:
+        try:
+            verify_password(payload.password, DUMMY_HASH)
+        except Exception:
+            pass
         raise HTTPException(status_code=401, detail="Invalid credentials")
     if not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
