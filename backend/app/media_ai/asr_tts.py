@@ -398,9 +398,7 @@ class QwenRealtimeTTSService:
         self.retry_backoff_ms = max(
             50, int(os.getenv("MEDIA_AI_TTS_RETRY_BACKOFF_MS", "250"))
         )
-        self.max_parallel = max(
-            1, int(os.getenv("MEDIA_AI_TTS_MAX_PARALLEL", "1"))
-        )
+        self.max_parallel = max(1, int(os.getenv("MEDIA_AI_TTS_MAX_PARALLEL", "1")))
         self.allow_synth_fallback = _env_bool(
             "MEDIA_AI_TTS_ALLOW_SYNTH_FALLBACK", False
         )

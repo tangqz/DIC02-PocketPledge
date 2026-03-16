@@ -196,7 +196,7 @@ def _build_character_block(character_id: str) -> str:
             "- Tone: calm, concise, mentor-like\n"
             "- Style: rational encouragement, clear boundaries, low drama\n"
             "- Preferred expressions: [neutral] [encouraging] [proud]"
-                    "- Preferred expressions: [neutral] [encouraging] [proud] [shy]"
+            "- Preferred expressions: [neutral] [encouraging] [proud] [shy]"
         )
     return (
         "\n角色人设：\n"
@@ -740,8 +740,7 @@ class LocalLLMClient:
 
         existing_profile = str(inputs.get("existing_profile", "")).strip()
         context_text = (
-            f"rotated_chat:\n{rotated_chat}\n\n"
-            f"existing_profile:\n{existing_profile}\n"
+            f"rotated_chat:\n{rotated_chat}\n\nexisting_profile:\n{existing_profile}\n"
         )
 
         try:
@@ -763,9 +762,7 @@ class LocalLLMClient:
             if not isinstance(memory_lines, list):
                 memory_lines = []
             normalized_lines = [
-                str(line).strip()
-                for line in memory_lines
-                if str(line).strip()
+                str(line).strip() for line in memory_lines if str(line).strip()
             ][:3]
             return {
                 "should_update": bool(parsed.get("should_update", False))

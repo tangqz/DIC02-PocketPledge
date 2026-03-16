@@ -309,6 +309,7 @@ def update_charity_ratio(db: Session, user_id: int, new_ratio: int) -> Wallet:
     db.refresh(wallet)
     return wallet
 
+
 def get_user_status(db: Session, user_id: int) -> dict:
     if user_id in (0, 1):
         wallet = _require_wallet(db, user_id)

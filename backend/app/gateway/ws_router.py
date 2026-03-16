@@ -409,7 +409,10 @@ def _build_completion_summary(session: SessionState) -> tuple[str, dict[str, Any
     return summary_text, meta
 
 
-async def _persist_active_plan(
+# ⚡ Bolt: Offload synchronous SQLAlchemy database operations (SessionLocal) to a separate thread
+# 🎯 Why: Synchronous I/O within async functions blocks the main asyncio event loop, causing all concurrent tasks (like other WebSocket events) to stall until the DB query returns.
+# 📊 Impact: Significantly increases concurrent throughput and responsiveness, especially critical in this high-throughput WebSocket router context.
+def _sync_persist_active_plan(
     user_id: str, plan: dict[str, Any]
 ) -> dict[str, Any] | None:
     try:
@@ -426,21 +429,31 @@ async def _persist_active_plan(
         db.close()
 
 
-async def _hydrate_session_plan(user_id: str, session: SessionState) -> None:
-    if session.current_plan_data is not None:
-        return
+async def _persist_active_plan(
+    user_id: str, plan: dict[str, Any]
+) -> dict[str, Any] | None:
+    return await asyncio.to_thread(_sync_persist_active_plan, user_id, plan)
+
+
+def _sync_hydrate_session_plan(user_id: str) -> dict[str, Any] | None:
     try:
         uid = int(user_id)
     except ValueError:
-        return
+        return None
     db = SessionLocal()
     try:
-        stored_plan = db_get_active_plan(db=db, user_id=uid)
+        return db_get_active_plan(db=db, user_id=uid)
     except Exception:
         logger.exception("failed to load active plan, user_id=%s", user_id)
-        return
+        return None
     finally:
         db.close()
+
+
+async def _hydrate_session_plan(user_id: str, session: SessionState) -> None:
+    if session.current_plan_data is not None:
+        return
+    stored_plan = await asyncio.to_thread(_sync_hydrate_session_plan, user_id)
 
     if stored_plan and stored_plan.get("plan"):
         session.current_plan_data = stored_plan["plan"]
@@ -450,13 +463,14 @@ async def _hydrate_session_plan(user_id: str, session: SessionState) -> None:
             session.suggested_focus_seconds = resolved_focus_seconds
 
 
-async def _record_pause_request(
+def _sync_record_pause_request(
     user_id: str,
-    session: SessionState,
     requested_text: str,
     approved: bool,
     pause_seconds: int | None,
     decision_reason: str,
+    session_ref: str | None,
+    meta: dict[str, Any],
 ) -> None:
     try:
         uid = int(user_id)
@@ -471,11 +485,8 @@ async def _record_pause_request(
             approved=approved,
             pause_seconds=pause_seconds,
             decision_reason=decision_reason,
-            session_ref=session.session_ref,
-            meta={
-                "supervision_state": session.supervision_state,
-                "pause_requests_count": session.pause_requests_count,
-            },
+            session_ref=session_ref,
+            meta=meta,
         )
     except Exception:
         logger.exception("failed to record pause request, user_id=%s", user_id)
@@ -483,23 +494,52 @@ async def _record_pause_request(
         db.close()
 
 
-async def _persist_session_summary(user_id: str, session: SessionState) -> None:
+async def _record_pause_request(
+    user_id: str,
+    session: SessionState,
+    requested_text: str,
+    approved: bool,
+    pause_seconds: int | None,
+    decision_reason: str,
+) -> None:
+    meta = {
+        "supervision_state": session.supervision_state,
+        "pause_requests_count": session.pause_requests_count,
+    }
+    await asyncio.to_thread(
+        _sync_record_pause_request,
+        user_id,
+        requested_text,
+        approved,
+        pause_seconds,
+        decision_reason,
+        session.session_ref,
+        meta,
+    )
+
+
+def _sync_persist_session_summary(
+    user_id: str,
+    summary_text: str,
+    session_ref: str | None,
+    meta: dict[str, Any],
+    current_plan: str | None,
+) -> None:
     try:
         uid = int(user_id)
     except ValueError:
         return
-    summary_text, meta = _build_completion_summary(session)
     db = SessionLocal()
     try:
         db_create_session_summary(
             db=db,
             user_id=uid,
             summary_text=summary_text,
-            session_ref=session.session_ref,
+            session_ref=session_ref,
             meta=meta,
         )
         profile_line = (
-            f"- session_ref={session.session_ref or 'n/a'}; task={session.current_plan or 'untitled'}; "
+            f"- session_ref={session_ref or 'n/a'}; task={current_plan or 'untitled'}; "
             f"focused_minutes={meta.get('focused_seconds', 0) // 60}; "
             f"pause_requests={meta.get('pause_requests_count', 0)}; "
             f"bankrupt={meta.get('is_bankrupt', False)}"
@@ -511,7 +551,19 @@ async def _persist_session_summary(user_id: str, session: SessionState) -> None:
         db.close()
 
 
-async def _persist_chat_message(
+async def _persist_session_summary(user_id: str, session: SessionState) -> None:
+    summary_text, meta = _build_completion_summary(session)
+    await asyncio.to_thread(
+        _sync_persist_session_summary,
+        user_id,
+        summary_text,
+        session.session_ref,
+        meta,
+        session.current_plan,
+    )
+
+
+def _sync_persist_chat_message(
     user_id: str, role: str, content: str, session_ref: str | None
 ) -> None:
     try:
@@ -534,6 +586,14 @@ async def _persist_chat_message(
         )
     finally:
         db.close()
+
+
+async def _persist_chat_message(
+    user_id: str, role: str, content: str, session_ref: str | None
+) -> None:
+    await asyncio.to_thread(
+        _sync_persist_chat_message, user_id, role, content, session_ref
+    )
 
 
 async def _append_chat(
@@ -566,6 +626,37 @@ def _format_chat_messages_for_profile_rollover(
     return "\n".join(lines)
 
 
+def _sync_get_existing_profile(uid: int, user_id: str) -> str | None:
+    db = SessionLocal()
+    try:
+        return str(db_get_user_profile_document(db=db, user_id=uid).get("content", ""))
+    except Exception:
+        logger.exception("failed to load profile for rollover, user_id=%s", user_id)
+        return None
+    finally:
+        db.close()
+
+
+def _sync_append_profile_memories(
+    uid: int, user_id: str, memory_lines: list[str]
+) -> None:
+    db = SessionLocal()
+    try:
+        for line in memory_lines:
+            db_append_user_profile_memory(db=db, user_id=uid, memory_line=line)
+        logger.info(
+            "profile rollover appended %s memory lines, user_id=%s",
+            len(memory_lines),
+            user_id,
+        )
+    except Exception:
+        logger.exception(
+            "failed to append profile rollover memory, user_id=%s", user_id
+        )
+    finally:
+        db.close()
+
+
 async def _process_profile_rollover(session: SessionState, user_id: str) -> None:
     batch = session.pop_profile_rollover_batch()
     if not batch:
@@ -582,16 +673,9 @@ async def _process_profile_rollover(session: SessionState, user_id: str) -> None
     if not rotated_chat.strip():
         return
 
-    db = SessionLocal()
-    try:
-        existing_profile = str(
-            db_get_user_profile_document(db=db, user_id=uid).get("content", "")
-        )
-    except Exception:
-        logger.exception("failed to load profile for rollover, user_id=%s", user_id)
+    existing_profile = await asyncio.to_thread(_sync_get_existing_profile, uid, user_id)
+    if existing_profile is None:
         return
-    finally:
-        db.close()
 
     memory_lines = await system_agent.extract_profile_memories(
         session_id=user_id,
@@ -602,17 +686,18 @@ async def _process_profile_rollover(session: SessionState, user_id: str) -> None
         logger.info("profile rollover had no new memory, user_id=%s", user_id)
         return
 
+    await asyncio.to_thread(_sync_append_profile_memories, uid, user_id, memory_lines)
+
+
+def _sync_hydrate_chat_history(
+    uid: int, user_id: str, limit: int
+) -> dict[str, Any] | None:
     db = SessionLocal()
     try:
-        for line in memory_lines:
-            db_append_user_profile_memory(db=db, user_id=uid, memory_line=line)
-        logger.info(
-            "profile rollover appended %s memory lines, user_id=%s",
-            len(memory_lines),
-            user_id,
-        )
+        return db_list_recent_chat_messages(db=db, user_id=uid, limit=limit)
     except Exception:
-        logger.exception("failed to append profile rollover memory, user_id=%s", user_id)
+        logger.exception("failed to load chat history, user_id=%s", user_id)
+        return None
     finally:
         db.close()
 
@@ -625,16 +710,11 @@ async def _hydrate_chat_history(user_id: str, session: SessionState) -> None:
     except ValueError:
         return
 
-    db = SessionLocal()
-    try:
-        result = db_list_recent_chat_messages(
-            db=db, user_id=uid, limit=session.MAX_HISTORY_TURNS
-        )
-    except Exception:
-        logger.exception("failed to load chat history, user_id=%s", user_id)
+    result = await asyncio.to_thread(
+        _sync_hydrate_chat_history, uid, user_id, session.MAX_HISTORY_TURNS
+    )
+    if result is None:
         return
-    finally:
-        db.close()
 
     for item in result.get("items", []):
         role = str(item.get("role", "")).strip().lower()
@@ -711,12 +791,7 @@ def _profile_has_minimum_basics(profile_content: str) -> bool:
     return has_calling_hint and has_education_hint
 
 
-async def _is_profile_ready_for_start(user_id: str) -> bool:
-    try:
-        uid = int(user_id)
-    except ValueError:
-        return False
-
+def _sync_is_profile_ready_for_start(uid: int, user_id: str) -> bool:
     db = SessionLocal()
     try:
         profile_doc = db_get_user_profile_document(db=db, user_id=uid)
@@ -729,6 +804,15 @@ async def _is_profile_ready_for_start(user_id: str) -> bool:
         db.close()
 
     return _profile_has_minimum_basics(str(profile_doc.get("content", "")))
+
+
+async def _is_profile_ready_for_start(user_id: str) -> bool:
+    try:
+        uid = int(user_id)
+    except ValueError:
+        return False
+
+    return await asyncio.to_thread(_sync_is_profile_ready_for_start, uid, user_id)
 
 
 def _truncate_log_text(value: Any, limit: int = LOG_PREVIEW_LIMIT) -> str:
@@ -788,12 +872,7 @@ def _normalize_system_events(events: list[str]) -> list[str]:
     return normalized
 
 
-async def get_user_balance(user_id: str) -> dict[str, int | bool]:
-    """Query real balance from the database via business CRUD."""
-    try:
-        uid = int(user_id)
-    except ValueError:
-        return {"balance": 0, "is_bankrupt": True}
+def _sync_get_user_balance(uid: int) -> dict[str, int | bool]:
     db = SessionLocal()
     try:
         result = db_get_user_status(db, uid)
@@ -804,12 +883,16 @@ async def get_user_balance(user_id: str) -> dict[str, int | bool]:
         db.close()
 
 
-async def deduct_penalty(user_id: str, amount: int) -> dict[str, int | bool]:
-    """Execute penalty via real database transaction."""
+async def get_user_balance(user_id: str) -> dict[str, int | bool]:
+    """Query real balance from the database via business CRUD."""
     try:
         uid = int(user_id)
     except ValueError:
         return {"balance": 0, "is_bankrupt": True}
+    return await asyncio.to_thread(_sync_get_user_balance, uid)
+
+
+def _sync_deduct_penalty(uid: int, amount: int) -> dict[str, int | bool]:
     db = SessionLocal()
     try:
         result = db_execute_penalty(
@@ -827,6 +910,15 @@ async def deduct_penalty(user_id: str, amount: int) -> dict[str, int | bool]:
         return {"balance": 0, "is_bankrupt": True}
     finally:
         db.close()
+
+
+async def deduct_penalty(user_id: str, amount: int) -> dict[str, int | bool]:
+    """Execute penalty via real database transaction."""
+    try:
+        uid = int(user_id)
+    except ValueError:
+        return {"balance": 0, "is_bankrupt": True}
+    return await asyncio.to_thread(_sync_deduct_penalty, uid, amount)
 
 
 async def process_pause_negotiation(event_text: str) -> str:
