@@ -46,6 +46,14 @@ INITIAL_BALANCE = int(os.getenv("AUTH_INITIAL_BALANCE", "3000"))
 _PBKDF2_ITERATIONS = 260_000
 _SALT_BYTES = 16
 
+# Pre-computed dummy hash to mitigate timing attacks during login when user is not found.
+# Computed from hash_password("dummy")
+DUMMY_PASSWORD_HASH = (
+    f"pbkdf2:sha256:{_PBKDF2_ITERATIONS}$"
+    "00000000000000000000000000000000$"
+    "0000000000000000000000000000000000000000000000000000000000000000"
+)
+
 
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(_SALT_BYTES)

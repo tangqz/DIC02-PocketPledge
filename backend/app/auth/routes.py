@@ -10,6 +10,7 @@ from .deps import get_current_user
 from .schemas import LoginRequest, RegisterRequest, TokenResponse, UserMeResponse
 from .security import (
     INITIAL_BALANCE,
+    DUMMY_PASSWORD_HASH,
     create_access_token,
     hash_password,
     verify_password,
@@ -56,10 +57,17 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == payload.username).first()
+
+    # 🛡️ Sentinel: Mitigate User Enumeration Timing Attack
+    # If the user is not found, verify against a dummy hash to ensure the response time
+    # is consistent with a valid user's failed login attempt.
     if not user or not user.password_hash:
+        verify_password(payload.password, DUMMY_PASSWORD_HASH)
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
     if not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Account disabled")
 
