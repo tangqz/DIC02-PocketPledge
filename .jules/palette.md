@@ -1,0 +1,3 @@
+## 2024-03-17 - [Micro-UX: Accessibility and State Indicators]
+**Learning:** Incorporating `disabled:cursor-not-allowed` provides better implicit communication alongside `disabled:opacity-50`, and adding animated SVGs to submit buttons effectively communicates async state delays (like mock login operations). Furthermore, many interactive elements (like custom language toggles and range sliders) lack baseline keyboard accessibility (`focus-visible`) and screen-reader context (`aria-label`) in default Tailwind components.
+**Action:** Always verify `aria-label` and `focus-visible` states for semantic buttons (`<button>`, `<input>`) that rely on icons, text abbreviations (like EN/中), or sliders, and consistently use `disabled:cursor-not-allowed` for inactive elements.

@@ -124,7 +124,8 @@ export default function SetupLayout() {
               setLocale(nextLocale);
               send({ type: "set-locale", locale: nextLocale });
             }}
-            className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200"
+            aria-label={locale === "zh" ? "Switch to English" : "切换到中文"}
+            className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             {locale === "zh" ? "EN" : "中"}
           </button>

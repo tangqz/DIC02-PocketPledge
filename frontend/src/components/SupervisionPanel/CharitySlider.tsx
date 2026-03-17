@@ -69,7 +69,8 @@ export default function CharitySlider() {
         onMouseUp={handleMouseUp}
         onTouchEnd={handleMouseUp}
         disabled={isUpdating}
-        className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-400 disabled:opacity-50"
+        aria-label={t("status.charity")}
+        className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-400 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-1 focus-visible:ring-offset-surface-elevated"
       />
     </div>
   );
