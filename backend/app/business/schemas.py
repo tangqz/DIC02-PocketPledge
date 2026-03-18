@@ -45,7 +45,9 @@ class UserStatusResponse(BaseModel):
 
 
 class CharityRatioUpdateRequest(BaseModel):
-    charity_ratio: int = Field(..., ge=0, le=100, description="Percentage (0-100) of penalty to go to charity")
+    charity_ratio: int = Field(
+        ..., ge=0, le=100, description="Percentage (0-100) of penalty to go to charity"
+    )
 
 
 class WalletTopupRequest(BaseModel):
