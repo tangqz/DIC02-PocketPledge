@@ -70,8 +70,11 @@ export default function VoiceInput() {
     <div className="flex flex-col items-center gap-1.5">
       {/* Main button */}
       <button
+        type="button"
         onClick={handleClick}
-        className="group relative flex items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+        disabled={isPaused}
+        aria-pressed={state !== "off" && state !== "muted"}
+        className="group relative flex items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:cursor-not-allowed disabled:opacity-50"
         title={label}
         aria-label={label}
       >
