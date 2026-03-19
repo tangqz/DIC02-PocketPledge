@@ -46,6 +46,11 @@ INITIAL_BALANCE = int(os.getenv("AUTH_INITIAL_BALANCE", "3000"))
 _PBKDF2_ITERATIONS = 260_000
 _SALT_BYTES = 16
 
+# 🛡️ Sentinel: Mitigate User Enumeration Timing Attacks during login
+# Pre-computed dummy hash matching the application's hashing algorithm format.
+# When a user is not found, verify against this so the verifier still does the expensive PBKDF2 hash.
+DUMMY_HASH = f"pbkdf2:sha256:{_PBKDF2_ITERATIONS}${0:032x}${0:064x}"
+
 
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(_SALT_BYTES)
