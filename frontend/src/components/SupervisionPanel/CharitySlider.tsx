@@ -69,6 +69,8 @@ export default function CharitySlider() {
         onMouseUp={handleMouseUp}
         onTouchEnd={handleMouseUp}
         disabled={isUpdating}
+        aria-label={t("status.charityRatio")}
+        aria-valuetext={`${localRatio}% ${t("status.charity")}`}
         className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-400 disabled:opacity-50"
       />
     </div>
