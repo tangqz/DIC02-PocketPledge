@@ -1627,7 +1627,11 @@ async def handle_screenshot(
     images = msg.get("images", [])
 
     if images:
-        images_for_vision = _build_temporal_stitched_image(session, images)
+        # ⚡ Bolt: Offload synchronous CPU-heavy image stitching to a worker thread
+        # to prevent blocking the main asyncio event loop during WebSocket handling.
+        images_for_vision = await asyncio.to_thread(
+            _build_temporal_stitched_image, session, images
+        )
     else:
         images_for_vision = []
 
