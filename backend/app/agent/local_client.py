@@ -196,7 +196,7 @@ def _build_character_block(character_id: str) -> str:
             "- Tone: calm, concise, mentor-like\n"
             "- Style: rational encouragement, clear boundaries, low drama\n"
             "- Preferred expressions: [neutral] [encouraging] [proud]"
-                    "- Preferred expressions: [neutral] [encouraging] [proud] [shy]"
+            "- Preferred expressions: [neutral] [encouraging] [proud] [shy]"
         )
     return (
         "\n角色人设：\n"
@@ -653,7 +653,10 @@ class LocalLLMClient:
                         fn_args,
                         user_id,
                     )
-                    result_str = execute_tool(fn_name, fn_args, user_id)
+                    # ⚡ Bolt: execute synchronous database I/O in a separate thread to avoid blocking the main asyncio event loop during tool execution
+                    result_str = await asyncio.to_thread(
+                        execute_tool, fn_name, fn_args, user_id
+                    )
                     messages.append(
                         {
                             "role": "tool",
@@ -740,8 +743,7 @@ class LocalLLMClient:
 
         existing_profile = str(inputs.get("existing_profile", "")).strip()
         context_text = (
-            f"rotated_chat:\n{rotated_chat}\n\n"
-            f"existing_profile:\n{existing_profile}\n"
+            f"rotated_chat:\n{rotated_chat}\n\nexisting_profile:\n{existing_profile}\n"
         )
 
         try:
@@ -763,9 +765,7 @@ class LocalLLMClient:
             if not isinstance(memory_lines, list):
                 memory_lines = []
             normalized_lines = [
-                str(line).strip()
-                for line in memory_lines
-                if str(line).strip()
+                str(line).strip() for line in memory_lines if str(line).strip()
             ][:3]
             return {
                 "should_update": bool(parsed.get("should_update", False))

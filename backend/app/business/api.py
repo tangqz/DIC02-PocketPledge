@@ -81,6 +81,7 @@ def start_session_api(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @router.put("/me/settings/charity-ratio", response_model=UserStatusResponse)
 def update_charity_ratio_api(
     payload: CharityRatioUpdateRequest,
@@ -88,7 +89,9 @@ def update_charity_ratio_api(
     current_user_id: int = Depends(get_current_user_id),
 ):
     try:
-        update_charity_ratio(db=db, user_id=current_user_id, new_ratio=payload.charity_ratio)
+        update_charity_ratio(
+            db=db, user_id=current_user_id, new_ratio=payload.charity_ratio
+        )
         return get_user_status(db=db, user_id=current_user_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

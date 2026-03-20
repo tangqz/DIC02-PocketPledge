@@ -612,7 +612,9 @@ async def _process_profile_rollover(session: SessionState, user_id: str) -> None
             user_id,
         )
     except Exception:
-        logger.exception("failed to append profile rollover memory, user_id=%s", user_id)
+        logger.exception(
+            "failed to append profile rollover memory, user_id=%s", user_id
+        )
     finally:
         db.close()
 

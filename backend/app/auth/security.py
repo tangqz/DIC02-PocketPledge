@@ -22,7 +22,9 @@ def _resolve_secret_key() -> str:
     if configured:
         return configured
 
-    app_env = (os.getenv("APP_ENV") or os.getenv("ENV") or "development").strip().lower()
+    app_env = (
+        (os.getenv("APP_ENV") or os.getenv("ENV") or "development").strip().lower()
+    )
     if app_env in {"prod", "production"}:
         raise RuntimeError("AUTH_SECRET_KEY must be set in production")
 

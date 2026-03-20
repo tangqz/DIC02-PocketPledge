@@ -15,12 +15,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from fastapi import WebSocketDisconnect
+from fastapi import WebSocketDisconnect  # noqa: E402
 
-from app.auth.security import create_access_token
-from app.business.models import SessionLocal, User, Wallet, init_db
-from app.gateway.session import SessionState
-from app.gateway.ws_router import (
+from app.auth.security import create_access_token  # noqa: E402
+from app.business.models import SessionLocal, User, Wallet, init_db  # noqa: E402
+from app.gateway.session import SessionState  # noqa: E402
+from app.gateway.ws_router import (  # noqa: E402
     DISTRACTION_THRESHOLD,
     _stream_and_detect_sys,
     audio_buffers,
