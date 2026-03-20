@@ -51,6 +51,7 @@ const zh: TranslationDict = {
   "status.state.completed": "已完成",
   "status.connected": "已连接",
   "status.disconnected": "未连接",
+  "status.charityRatio": "慈善捐赠比例",
 
   // Summary
   "summary.title": "专注报告",
@@ -143,6 +144,7 @@ const en: TranslationDict = {
   "status.disconnected": "Disconnected",
     "status.charity": "Charity",
     "status.pool": "Pool",
+  "status.charityRatio": "Charity Donation Ratio",
 
   "summary.title": "Focus Report",
   "summary.totalTime": "Total Time",
