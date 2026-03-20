@@ -9,6 +9,7 @@ from app.business.models import User, Wallet, get_db
 from .deps import get_current_user
 from .schemas import LoginRequest, RegisterRequest, TokenResponse, UserMeResponse
 from .security import (
+    DUMMY_HASH,
     INITIAL_BALANCE,
     create_access_token,
     hash_password,
@@ -56,8 +57,14 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == payload.username).first()
+
+    # 🛡️ Sentinel: Mitigate User Enumeration Timing Attack
+    # If the user doesn't exist, we still hash the password against a dummy hash
+    # to avoid timing attacks that leak whether a username is valid.
     if not user or not user.password_hash:
+        verify_password(payload.password, DUMMY_HASH)
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
     if not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     if not user.is_active:
