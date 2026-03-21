@@ -10,3 +10,8 @@
 **Vulnerability:** A race condition existed where concurrent requests could perform conflicting modifications to wallet balances because they were fetched without row-level database locks. Furthermore, fetching multiple locks without consistent ordering could lead to deadlocks (e.g., Session A locks Wallet 1 then Wallet 2; Session B locks Wallet 2 then Wallet 1).
 **Learning:** In a financial system or any environment involving shared numerical balances modified by multiple sources simultaneously, pessimistic locking (e.g., `SELECT ... FOR UPDATE` via SQLAlchemy's `with_for_update()`) is strictly necessary. Multiple locks MUST be acquired in a deterministic order (like ascending primary key IDs) to prevent deadlock states across concurrent transactions.
 **Prevention:** Implement a helper like `_require_wallet_for_update(db, user_id)` and manually ensure that in methods updating multiple accounts (like `execute_penalty`), the calls always retrieve locks starting from ID 0 upwards (System IDs `0`, `1`, then the User ID `user_id > 1`).
+
+## 2024-03-21 - [CRITICAL] Prevent User Enumeration Timing Attack
+**Vulnerability:** The login endpoint returns a 401 error early if a user is not found, skipping the costly `pbkdf2` password hash verification. This timing difference allows attackers to enumerate valid usernames.
+**Learning:** This existed because fast-failing is a standard development practice, but it leaked whether a user existed via timing differences.
+**Prevention:** Pre-computed a DUMMY_HASH using the exact same PBKDF2 parameters as standard passwords. When a user is not found, perform a dummy verification with this hash before returning the 401 error.

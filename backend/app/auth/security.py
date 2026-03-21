@@ -53,6 +53,11 @@ def hash_password(password: str) -> str:
     return f"pbkdf2:sha256:{_PBKDF2_ITERATIONS}${salt.hex()}${dk.hex()}"
 
 
+# 🛡️ Sentinel: Pre-computed dummy hash using the exact same format and settings
+# as actual passwords. Used to mitigate User Enumeration Timing Attacks by ensuring
+# the same amount of time is spent hashing even when a user doesn't exist.
+DUMMY_HASH = hash_password("dummy_password")
+
 def verify_password(password: str, hashed: str) -> bool:
     try:
         header, salt_hex, dk_hex = hashed.split("$")
