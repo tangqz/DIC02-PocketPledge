@@ -1,9 +1,9 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, memo } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useI18n } from "@/lib/i18n";
 import { API_BASE } from "@/stores/authStore";
 
-export default function CharitySlider() {
+export default memo(function CharitySlider() {
   const { charityRatio, setCharityRatio } = useSessionStore();
   const { t } = useI18n();
   const [localRatio, setLocalRatio] = useState(charityRatio);
@@ -73,4 +73,4 @@ export default function CharitySlider() {
       />
     </div>
   );
-}
+});

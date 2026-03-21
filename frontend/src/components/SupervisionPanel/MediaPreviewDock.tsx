@@ -2,7 +2,7 @@ import { useEffect, useRef, memo } from "react";
 import { useI18n } from "@/lib/i18n";
 import { useMediaStore } from "@/stores/mediaStore";
 
-export default function MediaPreviewDock({ className = "" }: { className?: string }) {
+export default memo(function MediaPreviewDock({ className = "" }: { className?: string }) {
   const { t } = useI18n();
   const cameraStream = useMediaStore((s) => s.cameraStream);
   const screenStream = useMediaStore((s) => s.screenStream);
@@ -15,7 +15,7 @@ export default function MediaPreviewDock({ className = "" }: { className?: strin
       </div>
     </section>
   );
-}
+});
 
 // ⚡ Bolt: memoize to prevent unnecessary re-renders of video elements when unrelated store changes trigger dock re-renders
 const PreviewTile = memo(function PreviewTile({
