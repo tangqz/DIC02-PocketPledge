@@ -78,3 +78,31 @@
     transform: scale(1);
   }
 }
+
+@keyframes ribbon-fall {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -14vh, 0) rotate(0deg);
+  }
+  15% {
+    opacity: 0.95;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--ribbon-sway, 12px), 112vh, 0) rotate(640deg);
+  }
+}
+
+@layer utilities {
+  .summary-ribbon {
+    position: absolute;
+    top: -12vh;
+    border-radius: 9999px;
+    filter: saturate(0.95) brightness(1.04);
+    box-shadow: 0 0 0 1px oklch(1 0 0 / 0.22);
+    animation-name: ribbon-fall;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    will-change: transform, opacity;
+  }
+}
