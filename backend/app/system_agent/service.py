@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from app.gateway.session import SessionState
-from app.media_ai.dify_proxy import get_dify_client
+from app.media_ai.client_factory import get_agent_client
 
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ class SystemAgentService:
         text: str,
         session: SessionState,
     ) -> SystemDirective:
-        client = get_dify_client()
+        client = get_agent_client()
         try:
             logger.info(
                 "system agent request started, session_id=%s text=%s", session_id, text
@@ -93,7 +93,7 @@ class SystemAgentService:
         existing_profile: str,
     ) -> list[str]:
         """Extract profile-worthy memory lines from rotated chat chunks."""
-        client = get_dify_client()
+        client = get_agent_client()
         extract_method = getattr(client, "extract_profile_memories", None)
         if extract_method is None:
             return []

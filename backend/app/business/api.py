@@ -50,7 +50,9 @@ _internal_bearer = HTTPBearer(auto_error=False)
 def require_internal_tool_access(
     creds: HTTPAuthorizationCredentials | None = Depends(_internal_bearer),
 ) -> None:
-    configured_token = os.getenv("DIFY_TOOL_BEARER_TOKEN", "").strip()
+    configured_token = os.getenv("INTERNAL_TOOL_BEARER_TOKEN", "").strip() or os.getenv(
+        "DIFY_TOOL_BEARER_TOKEN", ""
+    ).strip()
     if not configured_token:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -128,7 +130,7 @@ def user_status_api(
     db: Session = Depends(get_db),
     _: None = Depends(require_internal_tool_access),
 ):
-    """Internal endpoint secured for Dify tool callbacks."""
+    """Internal endpoint secured for server-side tool callbacks."""
     try:
         return get_user_status(db=db, user_id=user_id)
     except ValueError as e:
@@ -158,7 +160,7 @@ def internal_update_user_plan_api(
         db=db,
         user_id=user_id,
         plan=payload.model_dump(),
-        source="dify_tool",
+        source="internal_tool",
     )
 
 

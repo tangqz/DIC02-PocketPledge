@@ -15,6 +15,8 @@ import CharacterMarket from "@/components/Dashboard/CharacterMarket";
 import UserProfileDocument from "@/components/Dashboard/UserProfileDocument";
 import MediaPreviewDock from "@/components/SupervisionPanel/MediaPreviewDock";
 
+const RESTART_ENCOURAGEMENT_KEY = "pp_restart_encouragement_prompt";
+
 export default function SetupLayout() {
   const live2dRef = useRef<Live2DCanvasHandle>(null);
   const send = useSend();
@@ -70,6 +72,22 @@ export default function SetupLayout() {
       setProfileLoading(false);
     });
   }, [token]);
+
+  useEffect(() => {
+    const restartPrompt = sessionStorage.getItem(RESTART_ENCOURAGEMENT_KEY);
+    if (!restartPrompt) {
+      return;
+    }
+
+    sessionStorage.removeItem(RESTART_ENCOURAGEMENT_KEY);
+    const timer = window.setTimeout(() => {
+      send({ type: "text-input", text: restartPrompt });
+    }, 320);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [send]);
 
   const interruptAgentOutput = useCallback(() => {
     const chat = useChatStore.getState();

@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from .asr_tts import get_asr_service, get_tts_service
-from .dify_proxy import get_dify_client
+from .client_factory import get_agent_client
 from .parser import SentenceBuffer, extract_expression_and_clean
 
 
@@ -56,12 +56,12 @@ async def process_text_chat(
     character_id: str = "milly",
 ) -> AsyncIterator[dict[str, Any]]:
     """Stream chat response chunks as text, expression, and base64 audio."""
-    dify_client = get_dify_client()
+    agent_client = get_agent_client()
     tts_service = get_tts_service()
     buffer = SentenceBuffer()
 
     try:
-        async for token in dify_client.stream_chat(
+        async for token in agent_client.stream_chat(
             user_text=user_text,
             session_id=session_id,
             images=images,
@@ -175,9 +175,9 @@ async def evaluate_vision(
     session_id: str = "anonymous",
 ) -> tuple[bool, str]:
     """Evaluate distraction verdict through the configured vision provider."""
-    dify_client = get_dify_client()
+    agent_client = get_agent_client()
     try:
-        return await dify_client.evaluate_vision(
+        return await agent_client.evaluate_vision(
             images=images,
             current_task=current_task,
             session_id=session_id,
@@ -193,9 +193,9 @@ async def evaluate_start_readiness(
     session_id: str = "anonymous",
 ) -> dict[str, Any]:
     """Evaluate whether camera/screen setup is sufficient to start supervision."""
-    dify_client = get_dify_client()
+    agent_client = get_agent_client()
     try:
-        return await dify_client.evaluate_start_readiness(
+        return await agent_client.evaluate_start_readiness(
             images=images,
             current_task=current_task,
             session_id=session_id,

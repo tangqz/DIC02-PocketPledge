@@ -1,6 +1,6 @@
 """Local LLM client using OpenAI-compatible API.
 
-Implements the same interface as MockDifyClient / DifyClient so it can be
+Implements the same interface as the runtime chat provider clients so it can be
 swapped in via the AGENT_BACKEND environment variable.
 """
 
@@ -250,7 +250,7 @@ def _strip_code_fences(text: str) -> str:
 
 
 class LocalLLMClient:
-    """Local LLM client implementing the same interface as DifyClient."""
+    """Local LLM client implementing the runtime provider interface."""
 
     def __init__(self) -> None:
         self._chat_model = os.getenv("LOCAL_CHAT_MODEL", "")
@@ -312,7 +312,7 @@ class LocalLLMClient:
         language_mode: str = "zh",
         character_id: str = "milly",
     ) -> AsyncIterator[str]:
-        """Stream chat response tokens, matching DifyClient.stream_chat interface."""
+        """Stream chat response tokens using the shared provider interface."""
         profile_content = await _load_profile_content(session_id)
         system_prompt = _build_runtime_chat_system_prompt(
             profile_content=profile_content,

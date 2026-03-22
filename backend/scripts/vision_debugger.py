@@ -2,7 +2,9 @@ import cv2
 import time
 import os
 
-IMAGE_PATH = "../latest_vision_input.jpg"  # backend/latest_vision_input.jpg
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+IMAGE_PATH = os.path.join(SCRIPT_DIR, "..", "latest_vision_input.jpg")
+IMAGE_PATH = os.path.abspath(IMAGE_PATH)
 
 print(f"Watching {IMAGE_PATH} for changes...")
 
