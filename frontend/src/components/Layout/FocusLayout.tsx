@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useSend } from "@/App";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useChatStore } from "@/stores/chatStore";
@@ -17,6 +17,7 @@ export default function FocusLayout() {
 
   const supervisionState = useSessionStore((s) => s.supervisionState);
   const timerSeconds = useSessionStore((s) => s.timerSeconds);
+  const totalDuration = useSessionStore((s) => s.totalDuration);
   const pauseRemaining = useSessionStore((s) => s.pauseRemaining);
   const degradedMode = useSessionStore((s) => s.degradedMode);
   const activeToolCall = useSessionStore((s) => s.activeToolCall);
@@ -24,7 +25,6 @@ export default function FocusLayout() {
   const tickPause = useSessionStore((s) => s.tickPause);
 
   const isPaused = supervisionState === "paused";
-  const [compactHint, setCompactHint] = useState(false);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -37,15 +37,6 @@ export default function FocusLayout() {
     }, 1000);
     return () => window.clearInterval(timer);
   }, [pauseRemaining, supervisionState, tickPause, tickTimer, timerSeconds]);
-
-  useEffect(() => {
-    const onResize = () => {
-      setCompactHint(window.innerWidth < 1300 || window.innerHeight < 760);
-    };
-    onResize();
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
 
   const interruptAgentOutput = useCallback(() => {
     const chat = useChatStore.getState();
@@ -88,11 +79,35 @@ export default function FocusLayout() {
           </>
         ) : null}
 
-        {compactHint ? (
-          <div className="absolute right-3 top-3 z-20 rounded-lg bg-slate-200 px-2 py-1 text-[11px] text-slate-600">
-            {locale === "zh" ? "角落小窗已适配" : "Corner-window mode optimized"}
+        {/* Countdown timer in top-left, below logout button */}
+        <div className="absolute left-4 top-16 z-50 flex items-center gap-3 rounded-2xl bg-surface-elevated/90 px-4 py-3 shadow-lg backdrop-blur-lg">
+          <svg className="h-10 w-10 -rotate-90" viewBox="0 0 36 36">
+            <circle
+              cx="18"
+              cy="18"
+              r="15"
+              fill="none"
+              className="stroke-white/20"
+              strokeWidth="3"
+            />
+            <circle
+              cx="18"
+              cy="18"
+              r="15"
+              fill="none"
+              className="stroke-green-500 transition-all duration-1000"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeDasharray={`${(totalDuration > 0 ? 1 - timerSeconds / totalDuration : 0) * 94.25} 94.25`}
+            />
+          </svg>
+          <div className="flex flex-col leading-tight">
+            <span className="text-xs text-slate-500">{locale === "zh" ? "专注剩余" : "Focus time"}</span>
+            <span className="font-mono text-xl font-semibold tabular-nums tracking-tight text-slate-800">
+              {Math.floor(timerSeconds / 60)}:{String(timerSeconds % 60).padStart(2, "0")}
+            </span>
           </div>
-        ) : null}
+        </div>
 
         {activeToolCall ? (
           <div className="absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-full bg-accent/20 px-4 py-1.5 text-xs font-medium text-accent">

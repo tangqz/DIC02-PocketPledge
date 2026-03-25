@@ -21,8 +21,6 @@ import { useAvatarStore } from "@/stores/avatarStore";
 import { useSessionStore } from "@/stores/sessionStore";
 import { updateModelConfig } from "@/live2d/WebSDK/src/lappdefine";
 
-const IS_DEV = import.meta.env.DEV;
-
 /** Imperative API exposed to parent via ref */
 export interface Live2DCanvasHandle {
   setExpression: (emotionKeyword: string) => void;
@@ -73,7 +71,6 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
   );
   const { t } = useI18n();
 
-  const [debugText, setDebugText] = useState("init");
   const [isLoaded, setIsLoaded] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [lastGoodConfig, setLastGoodConfig] = useState<ModelConfig | null>(null);
@@ -205,37 +202,6 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
     stopAudio,
     onQueueEmpty: () => undefined,
   });
-
-  // Runtime diagnostics overlay
-  useEffect(() => {
-    if (!IS_DEV) {
-      return;
-    }
-
-    const timer = setInterval(() => {
-      try {
-        const adapter = sdkRef.current?.LAppAdapter?.getInstance();
-        if (!adapter) {
-          setDebugText(`loaded=${isLoaded ? 1 : 0} sdk=0`);
-          return;
-        }
-        const model = adapter.getModel();
-        if (!model || !model._modelSetting) {
-          setDebugText(`loaded=${isLoaded ? 1 : 0} model=0 ready=0`);
-          return;
-        }
-        const expressionCount = adapter.getExpressionCount();
-        const motionGroups = adapter.getMotionGroups();
-        setDebugText(
-          `loaded=${isLoaded ? 1 : 0} model=${model ? 1 : 0} exp=${expressionCount} motGroups=${motionGroups.length}`,
-        );
-      } catch (e) {
-        setDebugText(`debug-error=${(e as Error).message}`);
-      }
-    }, 500);
-
-    return () => clearInterval(timer);
-  }, [isLoaded]);
 
   // Expose imperative methods to parent
   useImperativeHandle(
@@ -373,13 +339,6 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
             <p className="font-semibold">{t("live2d.error")}</p>
             <p className="mt-1 text-xs opacity-80">{error.message}</p>
           </div>
-        </div>
-      )}
-
-      {/* Debug overlay (dev only) */}
-      {IS_DEV && (
-        <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-slate-800/55 px-2 py-1 font-mono text-[10px] leading-tight text-slate-200">
-          {debugText}
         </div>
       )}
     </div>

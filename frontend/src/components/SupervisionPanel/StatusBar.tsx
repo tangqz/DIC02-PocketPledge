@@ -1,5 +1,5 @@
 /* ────────────────────────────────────────────────
- *  StatusBar  –  Timer, Balance, Current Task
+ *  StatusBar  –  Balance, Current Task
  *  Renders at the top of the Focus layout.
  * ──────────────────────────────────────────────── */
 import { useEffect, useRef } from "react";
@@ -7,17 +7,8 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { useI18n } from "@/lib/i18n";
 import { formatRmbFromCents, formatSignedRmbFromCents } from "@/lib/currency";
 
-/** Format seconds to MM:SS */
-function fmt(s: number): string {
-  const m = String(Math.floor(s / 60)).padStart(2, "0");
-  const sec = String(s % 60).padStart(2, "0");
-  return `${m}:${sec}`;
-}
-
 export default function StatusBar() {
   const {
-    timerSeconds,
-    totalDuration,
     balance,
     lastBalanceChange,
     currentTask,
@@ -40,10 +31,6 @@ export default function StatusBar() {
     prevBalance.current = balance;
   }, [balance]);
 
-  // Timer progress (0 → 1)
-  const progress =
-    totalDuration > 0 ? 1 - timerSeconds / totalDuration : 0;
-
   const isDeducting = lastBalanceChange && lastBalanceChange.change < 0;
 
   return (
@@ -53,37 +40,6 @@ export default function StatusBar() {
         className={`h-2 w-2 rounded-full ${isConnected ? "bg-success" : "bg-danger animate-breathing"}`}
         title={isConnected ? t("status.connected") : t("status.disconnected")}
       />
-
-      {/* Timer */}
-      <div className="flex items-center gap-3">
-        {/* Mini progress ring */}
-        <svg className="h-9 w-9 -rotate-90" viewBox="0 0 36 36">
-          <circle
-            cx="18"
-            cy="18"
-            r="15"
-            fill="none"
-            className="stroke-white/10"
-            strokeWidth="3"
-          />
-          <circle
-            cx="18"
-            cy="18"
-            r="15"
-            fill="none"
-            className="stroke-accent transition-all duration-1000"
-            strokeWidth="3"
-            strokeLinecap="round"
-            strokeDasharray={`${progress * 94.25} 94.25`}
-          />
-        </svg>
-        <span className="font-mono text-xl font-semibold tabular-nums tracking-tight">
-          {fmt(timerSeconds)}
-        </span>
-      </div>
-
-      {/* Divider */}
-      <div className="h-6 w-px bg-slate-100" />
 
       {/* Balance */}
       <div className="flex items-center gap-2">
