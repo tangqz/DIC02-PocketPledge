@@ -14,6 +14,7 @@ interface CalendarOccurrence {
   completed: boolean;
   estimatedMinutes?: number;
   actualMinutes?: number;
+  rewardCents?: number;
 }
 
 interface DaySummary {
@@ -22,6 +23,7 @@ interface DaySummary {
   completedMinutes: number;
   completedCount: number;
   allDone: boolean;
+  totalRewardCents: number;
 }
 
 function dateKeyOf(date: Date): string {
@@ -143,6 +145,7 @@ function buildOccurrences(plan: PlanData | null): CalendarOccurrence[] {
         completed: isDone,
         estimatedMinutes: task.estimatedMinutes,
         actualMinutes: dateActual,
+        rewardCents: task.rewardCents,
       });
     };
 
@@ -228,12 +231,14 @@ export default function DailyPlanCalendar({ plan, onStartFocusDay }: DailyPlanCa
         return acc + actual;
       }, 0);
       const completedCount = items.filter((item) => item.completed).length;
+      const totalRewardCents = items.reduce((acc, item) => acc + (item.rewardCents || 0), 0);
       map.set(dateKey, {
         items,
         totalMinutes,
         completedMinutes,
         completedCount,
         allDone: items.length > 0 && completedCount === items.length,
+        totalRewardCents,
       });
     }
     return map;
@@ -372,11 +377,16 @@ export default function DailyPlanCalendar({ plan, onStartFocusDay }: DailyPlanCa
             >
               <div className="flex w-full items-center justify-between">
                 <span className="font-medium">{day.getDate()}</span>
-                {items.length > 0 ? (
-                  <span className="text-[12px] leading-none drop-shadow-sm">
-                    {isDone ? "✅" : "❌"}
-                  </span>
-                ) : null}
+                <span className="flex items-center gap-0.5">
+                  {(summary?.totalRewardCents ?? 0) > 0 && (
+                    <span className="text-[9px] font-semibold text-amber-600 drop-shadow-sm">🏆</span>
+                  )}
+                  {items.length > 0 ? (
+                    <span className="text-[12px] leading-none drop-shadow-sm">
+                      {isDone ? "✅" : "❌"}
+                    </span>
+                  ) : null}
+                </span>
               </div>
               <div className="mt-1 w-full text-[10px] leading-tight">
                 {items.length > 0 ? (
@@ -415,7 +425,14 @@ export default function DailyPlanCalendar({ plan, onStartFocusDay }: DailyPlanCa
             <p className="text-slate-500">{selectedDateKey}</p>
             {selectedDateItems.map((item) => (
               <div key={`${item.taskId}-${item.dateKey}`} className="flex items-center justify-between rounded-lg bg-slate-50 px-2 py-1.5">
-                <p className="truncate pr-2">{item.taskTitle}</p>
+                <div className="flex items-center gap-1.5 truncate pr-2">
+                  <p className="truncate">{item.taskTitle}</p>
+                  {(item.rewardCents ?? 0) > 0 && (
+                    <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700">
+                      🏆 ¥{((item.rewardCents ?? 0) / 100).toFixed(2)}
+                    </span>
+                  )}
+                </div>
                 <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium flex items-center gap-1 ${item.completed ? "text-emerald-700 bg-emerald-100/50" : "text-rose-700 bg-rose-100/50"}`}>
                   {item.completed ? "✅ " + (locale === "zh" ? "已完成" : "Done") : "❌ " + (locale === "zh" ? "未完成" : "Pending")}
                 </span>

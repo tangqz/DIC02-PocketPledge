@@ -6,7 +6,6 @@ import { useEffect, useRef } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useI18n } from "@/lib/i18n";
 import { formatRmbFromCents, formatSignedRmbFromCents } from "@/lib/currency";
-import CharitySlider from "./CharitySlider";
 
 /** Format seconds to MM:SS */
 function fmt(s: number): string {
@@ -58,26 +57,28 @@ export default function StatusBar() {
       {/* Timer */}
       <div className="flex items-center gap-3">
         {/* Mini progress ring */}
-        <svg className="h-9 w-9 -rotate-90" viewBox="0 0 36 36">
-          <circle
-            cx="18"
-            cy="18"
-            r="15"
-            fill="none"
-            className="stroke-white/10"
-            strokeWidth="3"
-          />
-          <circle
-            cx="18"
-            cy="18"
-            r="15"
-            fill="none"
-            className="stroke-accent transition-all duration-1000"
-            strokeWidth="3"
-            strokeLinecap="round"
-            strokeDasharray={`${progress * 94.25} 94.25`}
-          />
-        </svg>
+        <div className="relative flex items-center justify-center">
+          <svg className="h-9 w-9 -rotate-90" viewBox="0 0 36 36">
+            <circle
+              cx="18"
+              cy="18"
+              r="15"
+              fill="none"
+              className="stroke-white/10"
+              strokeWidth="3"
+            />
+            <circle
+              cx="18"
+              cy="18"
+              r="15"
+              fill="none"
+              className="stroke-accent transition-all duration-1000"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeDasharray={`${progress * 94.25} 94.25`}
+            />
+          </svg>
+        </div>
         <span className="font-mono text-xl font-semibold tabular-nums tracking-tight">
           {fmt(timerSeconds)}
         </span>
@@ -87,30 +88,27 @@ export default function StatusBar() {
       <div className="h-6 w-px bg-slate-100" />
 
       {/* Balance */}
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-slate-500">{t("status.balance")}</span>
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-slate-500">{t("status.balance")}</span>
+        <span
+          ref={balanceRef}
+          className={`font-mono text-lg font-bold tabular-nums ${
+            isDeducting ? "text-danger" : "text-success"
+          }`}
+        >
+          {formatRmbFromCents(balance)}
+        </span>
+        {lastBalanceChange && (
           <span
-            ref={balanceRef}
-            className={`font-mono text-lg font-bold tabular-nums ${
-              isDeducting ? "text-danger" : "text-success"
+            className={`text-xs font-medium ${
+              lastBalanceChange.change < 0
+                ? "text-danger/70"
+                : "text-success/70"
             }`}
           >
-            {formatRmbFromCents(balance)}
+            {formatSignedRmbFromCents(lastBalanceChange.change)}
           </span>
-          {lastBalanceChange && (
-            <span
-              className={`text-xs font-medium ${
-                lastBalanceChange.change < 0
-                  ? "text-danger/70"
-                  : "text-success/70"
-              }`}
-            >
-              {formatSignedRmbFromCents(lastBalanceChange.change)}
-            </span>
-          )}
-        </div>
-        <CharitySlider />
+        )}
       </div>
 
       {/* Divider */}

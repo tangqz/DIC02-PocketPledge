@@ -22,6 +22,7 @@ class SessionState:
     focus_time_remaining: int | None = None
     total_focus_seconds: int | None = None
     distraction_streak: int = 0
+    total_distraction_count: int = 0
     is_bankrupt: bool = False
     current_plan: str | None = None
     current_plan_data: dict[str, Any] | None = None

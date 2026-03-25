@@ -8,17 +8,65 @@ interface UserProfileDocumentProps {
   loading?: boolean;
 }
 
-function buildHighlights(content: string): string[] {
-  const normalized = content
+interface ProfileSection {
+  label: string;
+  icon: string;
+  lines: string[];
+}
+
+const SECTION_KEYWORDS_ZH: [string, RegExp][] = [
+  ["身份背景", /学校|年级|专业|大学|高中|初中|班级|学历|姓名|名字|称呼|叫|岁|性别|身份/],
+  ["学习习惯", /习惯|作息|时间|起床|睡觉|早上|晚上|日程|每天|每周|复习|预习|偏好|喜欢.*学|方式|方法|风格/],
+  ["困难与挑战", /困难|难|走神|分心|拖延|焦虑|压力|挑战|弱点|不擅长|容易/],
+  ["激励偏好", /激励|奖励|鼓励|动力|目标|惩罚|罚|喜欢被|讨厌被|称赞|夸/],
+];
+
+const SECTION_ICONS: Record<string, string> = {
+  "身份背景": "👤",
+  "学习习惯": "📖",
+  "困难与挑战": "⚡",
+  "激励偏好": "🎯",
+  "其他": "📝",
+  "Identity": "👤",
+  "Study Habits": "📖",
+  "Challenges": "⚡",
+  "Motivation": "🎯",
+  "Other": "📝",
+};
+
+function classifyLines(content: string, locale: "zh" | "en"): ProfileSection[] {
+  const raw = content
     .split(/\r?\n/)
-    .map((line) => line.trim())
+    .map((l) => l.replace(/^[-•]\s*/, "").trim())
     .filter(Boolean);
 
-  if (normalized.length === 0) {
-    return [];
+  if (raw.length === 0) return [];
+
+  const buckets = new Map<string, string[]>();
+  const otherLabel = locale === "zh" ? "其他" : "Other";
+
+  for (const line of raw) {
+    let matched = false;
+    for (const [label, re] of SECTION_KEYWORDS_ZH) {
+      if (re.test(line)) {
+        const displayLabel = locale === "zh" ? label : { "身份背景": "Identity", "学习习惯": "Study Habits", "困难与挑战": "Challenges", "激励偏好": "Motivation" }[label] ?? label;
+        if (!buckets.has(displayLabel)) buckets.set(displayLabel, []);
+        buckets.get(displayLabel)!.push(line);
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      if (!buckets.has(otherLabel)) buckets.set(otherLabel, []);
+      buckets.get(otherLabel)!.push(line);
+    }
   }
 
-  return normalized.slice(0, 4);
+  return Array.from(buckets.entries()).map(([label, lines]) => ({
+    label,
+    icon: SECTION_ICONS[label] ?? "📝",
+    lines,
+  }));
 }
 
 export default function UserProfileDocument({
@@ -28,7 +76,7 @@ export default function UserProfileDocument({
   maxChars = 4000,
   loading = false,
 }: UserProfileDocumentProps) {
-  const highlights = useMemo(() => buildHighlights(content), [content]);
+  const sections = useMemo(() => classifyLines(content, locale), [content, locale]);
   const usedChars = content.length;
   const usageRatio = Math.min(100, Math.round((usedChars / Math.max(maxChars, 1)) * 100));
 
@@ -51,27 +99,31 @@ export default function UserProfileDocument({
         </div>
       ) : (
         <>
-          {highlights.length > 0 ? (
-            <div className="mb-3 flex flex-wrap gap-1.5">
-              {highlights.map((line, index) => (
-                <span
-                  key={`${line}-${index}`}
-                  className="max-w-full truncate rounded-full border border-slate-200 bg-white/85 px-2.5 py-1 text-[11px] text-slate-600"
-                  title={line}
-                >
-                  {line}
-                </span>
+          {sections.length > 0 ? (
+            <div className="max-h-48 space-y-2.5 overflow-y-auto rounded-xl border border-slate-200 bg-white/80 p-3">
+              {sections.map((sec) => (
+                <div key={sec.label}>
+                  <p className="mb-1 flex items-center gap-1 text-[11px] font-semibold text-slate-500">
+                    <span>{sec.icon}</span>
+                    <span>{sec.label}</span>
+                  </p>
+                  <ul className="space-y-0.5 pl-4">
+                    {sec.lines.map((line, idx) => (
+                      <li key={idx} className="list-disc text-xs leading-relaxed text-slate-600">
+                        {line}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               ))}
             </div>
-          ) : null}
-
-          <div className="max-h-40 overflow-y-auto rounded-xl border border-slate-200 bg-white/80 p-3 text-xs leading-relaxed text-slate-600">
-            {content.trim().length > 0
-              ? content
-              : locale === "zh"
+          ) : (
+            <div className="rounded-xl border border-slate-200 bg-white/80 p-3 text-xs leading-relaxed text-slate-600">
+              {locale === "zh"
                 ? "暂无画像内容。开始几轮专注后，系统会逐步补全你的学习习惯、偏好和有效激励方式。"
                 : "No profile content yet. After several focus sessions, the system will gradually infer your habits, preferences, and effective motivation style."}
-          </div>
+            </div>
+          )}
 
           <div className="mt-3 space-y-1.5">
             <div className="flex items-center justify-between text-[11px] text-slate-500">

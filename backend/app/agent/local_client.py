@@ -555,35 +555,58 @@ class LocalLLMClient:
                 _truncate_text(current_task or ""),
                 len(images),
             )
-            response = await _get_vision_client().chat.completions.create(
-                model=self._vision_model,
-                messages=cast(Any, [{"role": "user", "content": content}]),
-                temperature=0,
-                max_tokens=160,
-                extra_body=vision_extra,
-            )
-            if getattr(response, "usage", None):
-                track_token_usage(self._vision_model, response.usage, session_id)
 
-            text = _strip_code_fences(
-                (response.choices[0].message.content or "").strip()
-            )
-            data = json.loads(text)
-            if not isinstance(data, dict):
-                raise ValueError("start readiness response is not a JSON object")
-            result = {
-                "approved": bool(data.get("approved", False)),
-                "camera_ok": bool(data.get("camera_ok", False)),
-                "screen_ok": bool(data.get("screen_ok", False)),
-                "reason": str(data.get("reason", "环境检查未通过") or "环境检查未通过"),
-            }
-            logger.info(
-                "local start-readiness response session_id=%s model=%s text=%s",
-                session_id,
-                self._vision_model,
-                _truncate_text(text),
-            )
-            return result
+            max_attempts = 2
+            last_error: Exception | None = None
+            for attempt in range(max_attempts):
+                try:
+                    response = await _get_vision_client().chat.completions.create(
+                        model=self._vision_model,
+                        messages=cast(Any, [{"role": "user", "content": content}]),
+                        temperature=0,
+                        max_tokens=160,
+                        extra_body=vision_extra,
+                    )
+                    if getattr(response, "usage", None):
+                        track_token_usage(self._vision_model, response.usage, session_id)
+
+                    text = _strip_code_fences(
+                        (response.choices[0].message.content or "").strip()
+                    )
+                    # Try direct parse first, then extract JSON object from text
+                    try:
+                        data = json.loads(text)
+                    except json.JSONDecodeError:
+                        json_match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
+                        if json_match:
+                            data = json.loads(json_match.group())
+                        else:
+                            raise
+                    if not isinstance(data, dict):
+                        raise ValueError("start readiness response is not a JSON object")
+                    result = {
+                        "approved": bool(data.get("approved", False)),
+                        "camera_ok": bool(data.get("camera_ok", False)),
+                        "screen_ok": bool(data.get("screen_ok", False)),
+                        "reason": str(data.get("reason", "环境检查未通过") or "环境检查未通过"),
+                    }
+                    logger.info(
+                        "local start-readiness response session_id=%s model=%s text=%s",
+                        session_id,
+                        self._vision_model,
+                        _truncate_text(text),
+                    )
+                    return result
+                except (json.JSONDecodeError, ValueError, KeyError) as parse_err:
+                    last_error = parse_err
+                    logger.warning(
+                        "start-readiness JSON parse failed (attempt %d/%d): %s",
+                        attempt + 1, max_attempts, parse_err,
+                    )
+                    continue
+
+            logger.error("start-readiness exhausted %d attempts", max_attempts)
+            raise last_error or ValueError("JSON parse failed")  # noqa: TRY301
         except Exception:
             logger.exception("local start readiness evaluation failed")
             return {

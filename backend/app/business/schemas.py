@@ -76,6 +76,7 @@ class PlanTaskPayload(BaseModel):
     startDate: str | None = Field(default=None, max_length=32)
     endDate: str | None = Field(default=None, max_length=32)
     recurrence: str | None = Field(default=None, max_length=32)
+    rewardCents: int | None = Field(default=None, ge=0, le=100000)
     priority: str | None = Field(default=None, max_length=16)
     notes: str | None = Field(default=None, max_length=500)
 

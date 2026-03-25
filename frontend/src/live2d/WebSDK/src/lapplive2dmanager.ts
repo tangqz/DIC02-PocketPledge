@@ -166,6 +166,7 @@ export class LAppLive2DManager {
         if (!usedConfig) {
           model.setRandomExpression();
         }
+        LAppDefine.fireModelTapped('Head');
       } else if (hitAreaId === 'HitAreaBody' || model.hitTest(LAppDefine.HitAreaNameBody, x, y)) {
         if (LAppDefine.DebugLogEnable) {
           LAppPal.printMessage(
@@ -180,6 +181,7 @@ export class LAppLive2DManager {
             this._finishedMotion
           );
         }
+        LAppDefine.fireModelTapped('Body');
       }
     }
   }
