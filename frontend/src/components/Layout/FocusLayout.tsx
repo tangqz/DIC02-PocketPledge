@@ -83,10 +83,10 @@ export default function FocusLayout() {
 
         {!degradedMode ? (
           <>
-            <div className="absolute bottom-[36%] left-1/2 z-20 -translate-x-1/2">
+            <div className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2">
               <VoiceInput />
             </div>
-            <MediaPreviewDock className="absolute bottom-[36%] right-4 z-20" />
+            <MediaPreviewDock className="absolute bottom-4 right-4 z-20" />
           </>
         ) : null}
 
