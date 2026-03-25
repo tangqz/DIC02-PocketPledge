@@ -23,6 +23,7 @@ from app.agent.prompts import (
     START_READINESS_PROMPT,
     SYSTEM_AGENT_PROMPT,
     VISION_EVALUATION_PROMPT,
+    get_character_card,
 )
 from app.agent.token_tracker import track_token_usage
 from app.agent.tools import TOOL_DEFINITIONS, execute_tool
@@ -187,27 +188,6 @@ def _build_language_block(language_mode: str) -> str:
     return "\n当前语言模式：zh。你必须只用自然中文回复。"
 
 
-def _build_character_block(character_id: str) -> str:
-    normalized = character_id.strip().lower()
-    if normalized == "ren":
-        return (
-            "\nCharacter profile:\n"
-            "- Name: Ren\n"
-            "- Tone: calm, concise, mentor-like\n"
-            "- Style: rational encouragement, clear boundaries, low drama\n"
-            "- Preferred expressions: [neutral] [encouraging] [proud]"
-                    "- Preferred expressions: [neutral] [encouraging] [proud] [shy]"
-        )
-    return (
-        "\n角色人设：\n"
-        "- 名字：米莉\n"
-        "- 风格：温柔但有压迫感，允许小脾气\n"
-        "- 表达：短句、口语化、陪伴感强\n"
-        "- 优先表情：[neutral] [happy] [encouraging] [angry] [proud]"
-        "- 优先表情：[neutral] [happy] [encouraging] [angry] [proud] [shy]"
-    )
-
-
 def _build_runtime_chat_system_prompt(
     profile_content: str,
     current_task: str | None,
@@ -216,7 +196,8 @@ def _build_runtime_chat_system_prompt(
     character_id: str,
 ) -> str:
     base = _build_chat_system_prompt(profile_content, current_task, focus_status)
-    return f"{base}{_build_language_block(language_mode)}{_build_character_block(character_id)}"
+    character_card = get_character_card(character_id)
+    return f"{character_card}\n{base}{_build_language_block(language_mode)}"
 
 
 def _build_user_content(

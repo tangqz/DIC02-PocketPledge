@@ -6,9 +6,15 @@ import re
 from collections.abc import AsyncIterator
 from typing import Any
 
-from .asr_tts import get_asr_service, get_tts_service
+from .asr_tts import (
+    QWEN_TTS_SAMPLE_RATE,
+    create_streaming_tts_session,
+    get_asr_service,
+    get_tts_service,
+    pcm16_bytes_to_wav_bytes,
+)
 from .client_factory import get_agent_client
-from .parser import SentenceBuffer, extract_expression_and_clean
+from .parser import SentenceBuffer, extract_expression_and_clean, prepare_tts_text, strip_unpronounceable_for_tts
 
 
 logger = logging.getLogger(__name__)
@@ -40,8 +46,13 @@ async def _build_audio_chunk_with_service(
     tts_service: Any,
     character_id: str = "milly",
 ) -> str:
+    # ``text`` is expected to be the pre-expression-stripped sentence (clean_sentence).
+    # prepare_tts_text strips both [expression] tags and {kaomoji} entirely.
+    tts_text = prepare_tts_text(text)
+    if not tts_text:
+        return ""
     audio_bytes = await tts_service.synthesize(
-        text=text, expression=expression, character_id=character_id
+        text=tts_text, expression=expression, character_id=character_id
     )
     return base64.b64encode(audio_bytes).decode("ascii")
 
@@ -54,10 +65,15 @@ async def process_text_chat(
     focus_status: str | None = None,
     language_mode: str = "zh",
     character_id: str = "milly",
+    skip_audio: bool = False,
 ) -> AsyncIterator[dict[str, Any]]:
-    """Stream chat response chunks as text, expression, and base64 audio."""
+    """Stream chat response chunks as text, expression, and base64 audio.
+
+    When *skip_audio* is ``True``, ``audio_coro`` is always ``None`` — the
+    caller is expected to handle TTS externally (e.g. via a streaming session).
+    """
     agent_client = get_agent_client()
-    tts_service = get_tts_service()
+    tts_service = None if skip_audio else get_tts_service()
     buffer = SentenceBuffer()
 
     try:
@@ -75,20 +91,23 @@ async def process_text_chat(
                 expression, clean_text = extract_expression_and_clean(clean_sentence)
                 if not clean_text and not has_sys:
                     continue
+                # tts_text: expression tags + kaomoji stripped entirely (for TTS and streaming TTS).
+                tts_text = prepare_tts_text(clean_sentence)
                 yield {
                     "text": clean_text,
+                    "tts_text": tts_text,
                     "raw_text": sentence,
                     "expression": expression,
                     "sys_triggered": has_sys,
                     "capture_triggered": is_capture,
                     "audio_coro": (
                         _build_audio_chunk_with_service(
-                            clean_text,
+                            clean_sentence,
                             expression,
                             tts_service,
                             character_id,
                         )
-                        if clean_text
+                        if clean_text and tts_service is not None
                         else None
                     ),
                 }
@@ -98,20 +117,22 @@ async def process_text_chat(
             has_sys, is_capture, clean_remainder = _analyze_markers(remainder)
             expression, clean_text = extract_expression_and_clean(clean_remainder)
             if clean_text or has_sys:
+                tts_text = prepare_tts_text(clean_remainder)
                 yield {
                     "text": clean_text,
+                    "tts_text": tts_text,
                     "raw_text": remainder,
                     "expression": expression,
                     "sys_triggered": has_sys,
                     "capture_triggered": is_capture,
                     "audio_coro": (
                         _build_audio_chunk_with_service(
-                            clean_text,
+                            clean_remainder,
                             expression,
                             tts_service,
                             character_id,
                         )
-                        if clean_text
+                        if clean_text and tts_service is not None
                         else None
                     ),
                 }
