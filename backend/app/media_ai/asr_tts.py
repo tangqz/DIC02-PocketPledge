@@ -394,15 +394,15 @@ class QwenRealtimeTTSService:
             "MEDIA_AI_TTS_INSTRUCTIONS",
             "语气自然亲切，节奏偏快，停顿短，适合实时陪伴对话。",
         )
-        self.max_retries = max(1, int(os.getenv("MEDIA_AI_TTS_MAX_RETRIES", "2")))
+        self.max_retries = max(1, int(os.getenv("MEDIA_AI_TTS_MAX_RETRIES", "3")))
         self.retry_backoff_ms = max(
-            50, int(os.getenv("MEDIA_AI_TTS_RETRY_BACKOFF_MS", "250"))
+            50, int(os.getenv("MEDIA_AI_TTS_RETRY_BACKOFF_MS", "200"))
         )
         self.max_parallel = max(
             1, int(os.getenv("MEDIA_AI_TTS_MAX_PARALLEL", "1"))
         )
         self.allow_synth_fallback = _env_bool(
-            "MEDIA_AI_TTS_ALLOW_SYNTH_FALLBACK", False
+            "MEDIA_AI_TTS_ALLOW_SYNTH_FALLBACK", True
         )
         self._synthesize_semaphore = asyncio.Semaphore(self.max_parallel)
         self.api_key = (
@@ -442,7 +442,11 @@ class QwenRealtimeTTSService:
         elif expression == "sad":
             instructions = f"{self.instructions} 语气更柔和一点。"
 
-        client.connect()
+        try:
+            client.connect()
+        except Exception as exc:
+            raise RuntimeError(f"qwen realtime TTS websocket connect failed: {exc}") from exc
+
         selected_voice = self._select_voice_for_character(character_id)
         client.update_session(
             voice=selected_voice,

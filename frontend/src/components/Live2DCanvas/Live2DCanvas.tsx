@@ -19,7 +19,7 @@ import { useI18n } from "@/lib/i18n";
 import { useAudioQueue } from "@/components/AudioPlayer/useAudioQueue";
 import { useAvatarStore } from "@/stores/avatarStore";
 import { useSessionStore } from "@/stores/sessionStore";
-import { updateInteractionConfig, updateModelConfig } from "@/live2d/WebSDK/src/lappdefine";
+import { updateInteractionConfig, updateModelConfig, setOnModelTapped } from "@/live2d/WebSDK/src/lappdefine";
 
 const IS_DEV = import.meta.env.DEV;
 
@@ -30,7 +30,11 @@ export interface Live2DCanvasHandle {
   stopAudio: () => void;
 }
 
-const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
+export interface Live2DCanvasProps {
+  onModelTapped?: (hitArea: string) => void;
+}
+
+const Live2DCanvas = forwardRef<Live2DCanvasHandle, Live2DCanvasProps>(({ onModelTapped }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -94,6 +98,12 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
   useEffect(() => {
     setFallbackToDefault(false);
   }, [config.url]);
+
+  /* Register the Live2D tap → React callback bridge */
+  useEffect(() => {
+    setOnModelTapped(onModelTapped ?? null);
+    return () => setOnModelTapped(null);
+  }, [onModelTapped]);
 
   const setExpression = useCallback(
     (emotionKeyword: string) => {
@@ -472,12 +482,7 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
         </div>
       )}
 
-      {/* Debug overlay (dev only) */}
-      {IS_DEV && (
-        <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-slate-800/55 px-2 py-1 font-mono text-[10px] leading-tight text-slate-200">
-          {debugText}
-        </div>
-      )}
+
     </div>
   );
 });

@@ -133,3 +133,17 @@ export function updateInteractionConfig(
   TapMotions = { ...(tapMotions ?? {}) };
   RuntimeEmotionMap = { ...(emotionMap ?? {}) };
 }
+
+/**
+ * Callback invoked when the user taps on the Live2D model's hit area.
+ * Set by the React layer to bridge into the chat system.
+ */
+let _onModelTapped: ((hitArea: string) => void) | null = null;
+
+export function setOnModelTapped(cb: ((hitArea: string) => void) | null): void {
+  _onModelTapped = cb;
+}
+
+export function fireModelTapped(hitArea: string): void {
+  _onModelTapped?.(hitArea);
+}

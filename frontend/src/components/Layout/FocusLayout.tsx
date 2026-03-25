@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useSend } from "@/App";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useChatStore } from "@/stores/chatStore";
@@ -12,6 +12,7 @@ import MediaPreviewDock from "@/components/SupervisionPanel/MediaPreviewDock";
 
 export default function FocusLayout() {
   const live2dRef = useRef<Live2DCanvasHandle>(null);
+  const lastTapRef = useRef(0);
   const send = useSend();
   const { locale } = useI18n();
 
@@ -24,7 +25,6 @@ export default function FocusLayout() {
   const tickPause = useSessionStore((s) => s.tickPause);
 
   const isPaused = supervisionState === "paused";
-  const [compactHint, setCompactHint] = useState(false);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -37,15 +37,6 @@ export default function FocusLayout() {
     }, 1000);
     return () => window.clearInterval(timer);
   }, [pauseRemaining, supervisionState, tickPause, tickTimer, timerSeconds]);
-
-  useEffect(() => {
-    const onResize = () => {
-      setCompactHint(window.innerWidth < 1300 || window.innerHeight < 760);
-    };
-    onResize();
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
 
   const interruptAgentOutput = useCallback(() => {
     const chat = useChatStore.getState();
@@ -68,6 +59,17 @@ export default function FocusLayout() {
     send({ type: "text-input", text });
   }, [interruptAgentOutput, send]);
 
+  const handleModelTapped = useCallback((hitArea: string) => {
+    if (isPaused) return;
+    const now = Date.now();
+    if (now - lastTapRef.current < 5000) return; // throttle: 5s cooldown
+    lastTapRef.current = now;
+    const chat = useChatStore.getState();
+    if (chat.isAgentSpeaking) return;
+    const msg = hitArea === "Head" ? "[用户摸了摸你的头]" : "[用户戳了戳你]";
+    send({ type: "text-input", text: msg });
+  }, [isPaused, send]);
+
   return (
     <div className="relative flex h-full min-h-0 flex-col animate-fade-in">
       <div className="z-20 shrink-0 p-3">
@@ -76,23 +78,19 @@ export default function FocusLayout() {
 
       <div className="relative min-h-0 flex-1">
         <div id="live2d-container" className="absolute inset-0">
-          {degradedMode ? <DowngradeTimerCard timerSeconds={timerSeconds} locale={locale} /> : <Live2DCanvas ref={live2dRef} />}
+          {degradedMode ? <DowngradeTimerCard timerSeconds={timerSeconds} locale={locale} /> : <Live2DCanvas ref={live2dRef} onModelTapped={handleModelTapped} />}
         </div>
 
         {!degradedMode ? (
           <>
-            <div className="absolute bottom-[26%] left-1/2 z-20 -translate-x-1/2">
+            <div className="absolute bottom-[36%] left-1/2 z-20 -translate-x-1/2">
               <VoiceInput />
             </div>
-            <MediaPreviewDock className="absolute bottom-[26%] right-4 z-20" />
+            <MediaPreviewDock className="absolute bottom-[36%] right-4 z-20" />
           </>
         ) : null}
 
-        {compactHint ? (
-          <div className="absolute right-3 top-3 z-20 rounded-lg bg-slate-200 px-2 py-1 text-[11px] text-slate-600">
-            {locale === "zh" ? "角落小窗已适配" : "Corner-window mode optimized"}
-          </div>
-        ) : null}
+
 
         {activeToolCall ? (
           <div className="absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-full bg-accent/20 px-4 py-1.5 text-xs font-medium text-accent">

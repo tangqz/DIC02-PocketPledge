@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PocketPledge Sequence Diagram</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8fafc; margin: 0; padding: 1rem; }
+        .mermaid-container { 
+            background: white; 
+            padding: 1.5rem; 
+            border-radius: 12px; 
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); 
+            border: 1px solid #e2e8f0; 
+            width: 100%; 
+            margin: 0 auto; 
+            overflow: visible;
+        }
+        .mermaid { display: flex; justify-content: center; width: 100%; }
+        /* 让 SVG 占满容器宽度 */
+        .mermaid svg { width: 100% !important; max-width: 100% !important; height: auto !important; }
+        /*
+         * 三步补偿法：只压缩间距，文字/圆形/箭头形状保持不变
+         *
+         * 步骤1：整个 SVG 纵向压缩到 68%  → 行间距缩小
+         * 步骤2：text 做反向 scaleY(1.47)  → 字体高度还原
+         * 步骤3：circle 做反向 scaleY(1.47) → 圆形还原为正圆
+         * 步骤4：marker 内箭头路径做反向 scaleY(1.47) → 箭头形状还原
+         *
+         * 若要调整压缩力度，三处 0.68 和 1.47 需同步修改（互为倒数）
+         */
+        .mermaid svg {
+            transform: scaleY(0.68);
+            transform-origin: top center;
+        }
+        /* 文字还原 */
+        .mermaid svg text {
+            transform: scaleY(1.47);
+            transform-box: fill-box;
+            transform-origin: center center;
+        }
+        /* 序号圆形还原 */
+        .mermaid svg circle {
+            transform: scaleY(1.47);
+            transform-box: fill-box;
+            transform-origin: center center;
+        }
+        /* 箭头 marker 内形状还原（polygon / path） */
+        .mermaid svg marker > path,
+        .mermaid svg marker > polygon {
+            transform: scaleY(1.47);
+            transform-box: fill-box;
+            transform-origin: center center;
+        }
+
+        /* ====== 以下 CSS 是真正控制字体大小的手段 ====== */
+        /* 你可以手动调整下面的 px 数值来精确控制每类文字大小 */
+
+        /* 参与者（顶部 Actor 框）文字 */
+        .mermaid .actor { font-size: 20px !important; font-weight: 900 !important; }
+        /* 连线上的消息文字 */
+        .mermaid .messageText { font-size: 22px !important; font-weight: 800 !important; }
+        /* Note 框内文字 */
+        .mermaid .noteText > tspan { font-size: 22px !important; font-weight: 800 !important; }
+        /* loop / alt / rect 标签文字 */
+        .mermaid .loopText > tspan, .mermaid .labelText > tspan { font-size: 20px !important; font-weight: 800 !important; }
+        /* 编号圆圈内数字 */
+        .mermaid .sequenceNumber { font-size: 18px !important; font-weight: 900 !important; }
+        /* 全局字体兜底 */
+        .mermaid text, .mermaid tspan { font-family: 'Segoe UI', Tahoma, sans-serif !important; }
+    </style>
+</head>
+<body>
+
+<div class="text-center mb-6">
+    <h1 class="text-4xl font-bold text-slate-800">System Execution Flow</h1>
+    <p class="text-slate-500 mt-2 text-xl">Chat Agent vs. Vision Supervisor</p>
+</div>
+
+<div class="mermaid-container">
+    <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    
+    %% 这里精简了参与者的名字，减少每列的宽度占用，从而让整体连线不那么稀疏
+    participant U as User
+    participant FE as Frontend
+    participant WS as Gateway(WS)
+    participant Media as Media AI
+    participant CA as Chat Agent
+    participant SA as Sys Agent
+    participant VS as Supervisor
+    participant Biz as Business
+
+    rect rgb(240, 253, 244)
+    Note over U,Biz: Phase 1 — Voice Session Start
+    U->>FE: Speak
+    FE->>WS: Audio Stream
+    WS->>Media: ASR()
+    Media-->>WS: Text
+    WS-->>FE: Transcript
+    
+    WS->>CA: Chat Stream
+    Note right of CA: Detect Start Intent
+    CA-->>WS: Res + [SYS]
+    WS-->>FE: Text Chunk
+    
+    WS->>WS: Pause Stream
+    WS-->>FE: Req Visual Context
+    FE->>FE: Capture Screen+Cam
+    FE->>WS: Images
+    
+    WS->>SA: Parse: "start"
+    SA->>Media: Eval Readiness
+    Media-->>SA: Ready
+    
+    SA->>Biz: Start Session (25m)
+    Biz->>Biz: Deduct Upfront
+    Biz-->>SA: Session Ref
+    
+    SA-->>WS: [SYS: Started]
+    WS->>CA: Inject Result
+    CA-->>WS: Empathic Reply
+    
+    WS->>Media: TTS Synthesis
+    Media-->>WS: Audio + Lip-Sync
+    WS-->>FE: Play Audio & State: active
+    end
+
+    rect rgb(254, 242, 242)
+    Note over U,Biz: Phase 2 — Active Supervision Loop
+    loop Every N seconds
+        FE->>WS: Screenshots
+        WS->>VS: Evaluate Vision
+        Note right of VS: Analysis
+        VS-->>WS: {distracted, reason}
+        
+        alt Streak < 3
+            WS-->>FE: Alert (severity)
+        else Streak >= 3
+            WS->>Biz: Penalty
+            Biz->>Biz: Split (charity/reward)
+            Biz-->>WS: New Balance
+            WS-->>FE: Penalty UI
+            WS->>CA: Prompt: "Distracted"
+            CA-->>WS: Redirect Response
+            WS-->>FE: Avatar Redirects User
+        else OK
+            WS->>WS: Reset Streak
+        end
+    end
+    end
+
+    rect rgb(255, 251, 235)
+    Note over U,Biz: Phase 3 — Pause
+    U->>FE: "Pause"
+    FE->>WS: Input
+    WS->>CA: Detect Pause
+    CA-->>WS: Res + [SYS]
+    WS->>SA: Parse: "pause"
+    SA->>Biz: Record Request
+    SA-->>WS: [SYS: Approved]
+    
+    WS-->>FE: State: paused
+    WS->>CA: Inject Result
+    CA-->>WS: "Sure..." → TTS
+    WS-->>FE: Play Response
+    end
+    </pre>
+</div>
+
+<script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ 
+        startOnLoad: true, 
+        theme: 'base',
+        themeVariables: {
+            primaryColor: '#f8fafc',
+            primaryTextColor: '#0f172a',
+            primaryBorderColor: '#cbd5e1',
+            lineColor: '#334155',    /* 加深线条颜色 */
+            secondaryColor: '#f1f5f9',
+            tertiaryColor: '#fff',
+            actorBkg: '#e0f2fe',
+            actorBorder: '#0284c7',
+            actorTextColor: '#0c4a6e',
+            noteBkg: '#fef3c7',
+            noteBorder: '#d97706',
+            noteTextColor: '#78350f',
+            fontFamily: 'Segoe UI, Tahoma, sans-serif'
+        },
+        sequence: {
+            /* ====== v10 中这些字体参数实际无效 ====== */
+            /* 字体大小请去上方 <style> CSS 中调整，那里才是真正生效的 */
+            /* 以下只控制布局间距 */
+            actorMargin: 5,
+            messageMargin: 0,
+            boxTextMargin: 2,
+            noteMargin: 4,
+            boxMargin: 4,
+            rightAngles: true,
+            wrap: false
+        }
+    });
+</script>
+
+</body>
+</html>

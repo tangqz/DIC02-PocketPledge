@@ -206,6 +206,7 @@ export interface PlanTask {
   recurrence?: "daily" | "weekly" | "custom";
   priority?: "low" | "medium" | "high";
   notes?: string;
+  rewardCents?: number;
 }
 
 export interface PlanData {
