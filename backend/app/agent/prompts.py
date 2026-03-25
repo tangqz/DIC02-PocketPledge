@@ -338,9 +338,9 @@ START_READINESS_PROMPT = """\
 
 审核标准：
 1. 只要能看到用户的脸，camera_ok=true。
-3. 屏幕共享必须是完整桌面/整块显示器的全屏共享。若是单个窗口共享、局部截图、黑屏、不可读，screen_ok=false。
-4. 注意区分用户的分享页面是窗口最大化下的全屏共享还是只捕获了一个窗口。前者 screen_ok=true，后者 screen_ok=false。一般来说，只要下面有明显的操作系统任务栏或 dock 栏，且能看见多个窗口的边框，就可以判断是全屏共享,此时 screen_ok=true。
-5. 任何一项不满足，都 approved=false。
+2. 屏幕共享必须是整块显示器的全屏共享。若是单个窗口共享、局部截图、黑屏、不可读，screen_ok=false。
+3. 注意区分用户的分享页面是窗口最大化下的全屏共享还是只捕获了一个窗口。前者 screen_ok=true，后者 screen_ok=false。一般来说，只要下面有明显的操作系统任务栏或 dock 栏，且能看见多个窗口的边框，就可以判断是全屏共享,此时 screen_ok=true。
+4. 任何一项不满足，都 approved=false。
 
 只输出 JSON：
 {"approved":true|false,"camera_ok":true|false,"screen_ok":true|false,"reason":"简短中文原因"}

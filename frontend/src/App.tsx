@@ -50,6 +50,7 @@ function AuthenticatedApp() {
   const screenStream = useMediaStore((s) => s.screenStream);
   const requestCamera = useMediaStore((s) => s.requestCamera);
   const requestScreenShare = useMediaStore((s) => s.requestScreenShare);
+  const requestMicrophone = useMediaStore((s) => s.requestMicrophone);
   const logout = useAuthStore((s) => s.logout);
   const user = useAuthStore((s) => s.user);
   const setBalance = useSessionStore((s) => s.setBalance);
@@ -58,6 +59,22 @@ function AuthenticatedApp() {
   const setSelectedCharacterId = useCharacterStore((s) => s.setSelectedCharacterId);
   const { locale, t } = useI18n();
   const lastSentCharacterRef = useRef<string>("");
+  const mediaAutoGrantedRef = useRef(false);
+
+  // ── Auto re-grant mic + camera on session resume after page refresh ──
+  useEffect(() => {
+    const inFocus = supervisionState === "active" || supervisionState === "paused";
+    if (!inFocus) {
+      mediaAutoGrantedRef.current = false;
+      return;
+    }
+    if (mediaAutoGrantedRef.current) return;
+    mediaAutoGrantedRef.current = true;
+
+    const ms = useMediaStore.getState();
+    if (!ms.micGranted) void ms.requestMicrophone();
+    if (!ms.cameraGranted) void ms.requestCamera();
+  }, [supervisionState]);
 
   // ── WebSocket (global, persistent) ──
   const captureVisualContext = useCallback(async (
@@ -227,13 +244,15 @@ function AuthenticatedApp() {
   return (
     <SendContext.Provider value={sendValue}>
       <div className="h-full w-full bg-slate-50">
-        {/* Logout button */}
-        <button
-          onClick={logout}
-          className="fixed left-4 top-4 z-50 rounded-lg bg-slate-100/92 px-3 py-1 text-sm text-slate-600 backdrop-blur-sm hover:bg-slate-200"
-        >
-          {t("auth.logout")}
-        </button>
+        {/* Logout button — only visible outside focus mode */}
+        {supervisionState !== "active" && supervisionState !== "paused" && (
+          <button
+            onClick={logout}
+            className="fixed left-4 top-4 z-50 rounded-lg bg-slate-100/92 px-3 py-1 text-sm text-slate-600 backdrop-blur-sm hover:bg-slate-200"
+          >
+            {t("auth.logout")}
+          </button>
+        )}
 
         {supervisionState === "setup" && <SetupLayout />}
         {(supervisionState === "active" || supervisionState === "paused") && (
