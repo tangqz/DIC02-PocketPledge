@@ -25,6 +25,9 @@ interface MediaState {
   snapshotInterval: number; // seconds
   snapshotActive: boolean;
 
+  // VAD sensitivity (positive speech threshold, lower = more sensitive)
+  vadSensitivity: number;
+
   // Actions
   setCameraGranted: (granted: boolean) => void;
   setScreenGranted: (granted: boolean) => void;
@@ -37,6 +40,7 @@ interface MediaState {
   setMicAudioLevel: (level: number) => void;
   setSnapshotInterval: (seconds: number) => void;
   setSnapshotActive: (active: boolean) => void;
+  setVadSensitivity: (sensitivity: number) => void;
   requestCamera: () => Promise<boolean>;
 
   /** Request screen share via getDisplayMedia. Returns true if granted. */
@@ -65,6 +69,7 @@ export const useMediaStore = create<MediaState>((set, get) => ({
   micAudioLevel: 0,
   snapshotInterval: 20,
   snapshotActive: false,
+  vadSensitivity: 0.35,
 
   setCameraGranted: (granted) => set({ cameraGranted: granted }),
   setScreenGranted: (granted) => set({ screenGranted: granted }),
@@ -78,6 +83,7 @@ export const useMediaStore = create<MediaState>((set, get) => ({
   setMicAudioLevel: (level) => set({ micAudioLevel: level }),
   setSnapshotInterval: (seconds) => set({ snapshotInterval: seconds }),
   setSnapshotActive: (active) => set({ snapshotActive: active }),
+  setVadSensitivity: (sensitivity) => set({ vadSensitivity: sensitivity }),
 
   requestCamera: async () => {
     const existingStream = get().cameraStream;

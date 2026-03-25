@@ -116,6 +116,10 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                                     "description": "优先级: low/medium/high",
                                 },
                                 "notes": {"type": "string"},
+                                "rewardCents": {
+                                    "type": "integer",
+                                    "description": "任务完成奖励金额（分）。完成此任务后从奖池发放给用户。",
+                                },
                             },
                             "required": ["id", "title"],
                         },

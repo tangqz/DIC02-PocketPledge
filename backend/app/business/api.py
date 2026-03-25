@@ -10,6 +10,7 @@ from .crud import (
     create_session_summary,
     execute_penalty,
     get_active_plan,
+    update_charity_ratio,
     get_user_profile_document,
     get_user_status,
     list_pause_requests,
@@ -39,6 +40,7 @@ from .schemas import (
     UserStatusResponse,
     WalletTopupRequest,
     WalletTopupResponse,
+    CharityRatioUpdateRequest,
 )
 
 router = APIRouter(prefix="/api/business", tags=["business"])
@@ -48,7 +50,9 @@ _internal_bearer = HTTPBearer(auto_error=False)
 def require_internal_tool_access(
     creds: HTTPAuthorizationCredentials | None = Depends(_internal_bearer),
 ) -> None:
-    configured_token = os.getenv("DIFY_TOOL_BEARER_TOKEN", "").strip()
+    configured_token = os.getenv("INTERNAL_TOOL_BEARER_TOKEN", "").strip() or os.getenv(
+        "DIFY_TOOL_BEARER_TOKEN", ""
+    ).strip()
     if not configured_token:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -76,6 +80,18 @@ def start_session_api(
             user_id=current_user_id,
             planned_focus_minutes=payload.planned_focus_minutes,
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.put("/me/settings/charity-ratio", response_model=UserStatusResponse)
+def update_charity_ratio_api(
+    payload: CharityRatioUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id),
+):
+    try:
+        update_charity_ratio(db=db, user_id=current_user_id, new_ratio=payload.charity_ratio)
+        return get_user_status(db=db, user_id=current_user_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -114,7 +130,7 @@ def user_status_api(
     db: Session = Depends(get_db),
     _: None = Depends(require_internal_tool_access),
 ):
-    """Internal endpoint secured for Dify tool callbacks."""
+    """Internal endpoint secured for server-side tool callbacks."""
     try:
         return get_user_status(db=db, user_id=user_id)
     except ValueError as e:
@@ -144,7 +160,7 @@ def internal_update_user_plan_api(
         db=db,
         user_id=user_id,
         plan=payload.model_dump(),
-        source="dify_tool",
+        source="internal_tool",
     )
 
 

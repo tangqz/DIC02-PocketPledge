@@ -101,6 +101,16 @@ function AuthenticatedApp() {
         return;
       }
 
+      if (msg.type === "audio-stream-chunk") {
+        useAvatarStore.getState().enqueueStreamChunk(msg.audio, msg.expression);
+        return;
+      }
+
+      if (msg.type === "audio-stream-end") {
+        useAvatarStore.getState().endAudioStream();
+        return;
+      }
+
       if (msg.type === "model-info") {
         useAvatarStore.getState().setModelInfo(msg.model_info);
         if (msg.character_id && msg.character_id !== useCharacterStore.getState().selectedCharacterId) {
@@ -259,6 +269,15 @@ export default function App() {
       fetchMe();
     }
   }, [fetchMe, token, user]);
+
+  useEffect(() => {
+    if (user?.balance !== undefined) {
+      useSessionStore.setState({ balance: user.balance });
+    }
+    if (user?.charity_ratio !== undefined) {
+      useSessionStore.setState({ charityRatio: user.charity_ratio });
+    }
+  }, [user?.balance, user?.charity_ratio]);
 
   if (!ready) {
     return (

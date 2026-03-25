@@ -15,7 +15,7 @@ type TranslationDict = Record<string, string>;
 // ── Chinese translations ──
 const zh: TranslationDict = {
   // App
-  "app.title": "Study Buddy",
+  "app.title": "PocketPledge",
   "app.loading": "加载中…",
 
   // Setup
@@ -77,7 +77,7 @@ const zh: TranslationDict = {
   "chat.user": "我",
 
   // Auth
-  "auth.loginTitle": "登录 Study Buddy",
+  "auth.loginTitle": "登录 PocketPledge",
   "auth.registerTitle": "创建账号",
   "auth.username": "用户名",
   "auth.emailOptional": "邮箱（可选）",
@@ -108,7 +108,7 @@ const zh: TranslationDict = {
 
 // ── English translations ──
 const en: TranslationDict = {
-  "app.title": "Study Buddy",
+  "app.title": "PocketPledge",
   "app.loading": "Loading…",
 
   "setup.title": "Environment Calibration",
@@ -123,7 +123,7 @@ const en: TranslationDict = {
   "setup.start": "Start Focus",
   "setup.duration": "Focus Duration",
   "setup.minutes": "min",
-  "setup.chatHint": "Chat with your study buddy about today's plan",
+  "setup.chatHint": "Chat with your study companion about today's plan",
   "setup.agentStartHint": "Your agent will start the session once you agree on a plan",
 
   "focus.pause": "Pause",
@@ -141,6 +141,8 @@ const en: TranslationDict = {
   "status.state.completed": "Completed",
   "status.connected": "Connected",
   "status.disconnected": "Disconnected",
+    "status.charity": "Charity",
+    "status.pool": "Pool",
 
   "summary.title": "Focus Report",
   "summary.totalTime": "Total Time",
@@ -162,7 +164,7 @@ const en: TranslationDict = {
   "chat.agent": "Agent",
   "chat.user": "Me",
 
-  "auth.loginTitle": "Sign In to Study Buddy",
+  "auth.loginTitle": "Sign In to PocketPledge",
   "auth.registerTitle": "Create Account",
   "auth.username": "Username",
   "auth.emailOptional": "Email (optional)",

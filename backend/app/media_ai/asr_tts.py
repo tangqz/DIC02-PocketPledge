@@ -22,6 +22,13 @@ _WHISPER_MODELS: dict[tuple[str, str, str], object] = {}
 _SHERPA_RECOGNIZERS: dict[tuple[str, str, str, int, bool, str], object] = {}
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _default_sherpa_model_dir() -> Path:
     repo_root = Path(__file__).resolve().parents[3]
     candidates = [
@@ -300,6 +307,9 @@ class EdgeTTSService:
 
     def __init__(self, voice: str | None = None) -> None:
         self.voice = voice or os.getenv("MEDIA_AI_TTS_VOICE", "zh-CN-XiaoxiaoNeural")
+        self.allow_synth_fallback = _env_bool(
+            "MEDIA_AI_TTS_ALLOW_SYNTH_FALLBACK", False
+        )
 
     async def synthesize(
         self, text: str, expression: str = "neutral", character_id: str = "milly"
@@ -317,7 +327,9 @@ class EdgeTTSService:
                 if isinstance(data, bytes):
                     audio_chunks.append(data)
         if not audio_chunks:
-            return synthetic_wav_bytes(text=text, expression=expression)
+            if self.allow_synth_fallback:
+                return synthetic_wav_bytes(text=text, expression=expression)
+            raise RuntimeError("edge-tts returned no audio")
         return b"".join(audio_chunks)
 
 
@@ -382,6 +394,17 @@ class QwenRealtimeTTSService:
             "MEDIA_AI_TTS_INSTRUCTIONS",
             "语气自然亲切，节奏偏快，停顿短，适合实时陪伴对话。",
         )
+        self.max_retries = max(1, int(os.getenv("MEDIA_AI_TTS_MAX_RETRIES", "3")))
+        self.retry_backoff_ms = max(
+            50, int(os.getenv("MEDIA_AI_TTS_RETRY_BACKOFF_MS", "200"))
+        )
+        self.max_parallel = max(
+            1, int(os.getenv("MEDIA_AI_TTS_MAX_PARALLEL", "1"))
+        )
+        self.allow_synth_fallback = _env_bool(
+            "MEDIA_AI_TTS_ALLOW_SYNTH_FALLBACK", True
+        )
+        self._synthesize_semaphore = asyncio.Semaphore(self.max_parallel)
         self.api_key = (
             os.getenv("MEDIA_AI_TTS_API_KEY")
             or os.getenv("DASHSCOPE_API_KEY")
@@ -419,7 +442,11 @@ class QwenRealtimeTTSService:
         elif expression == "sad":
             instructions = f"{self.instructions} 语气更柔和一点。"
 
-        client.connect()
+        try:
+            client.connect()
+        except Exception as exc:
+            raise RuntimeError(f"qwen realtime TTS websocket connect failed: {exc}") from exc
+
         selected_voice = self._select_voice_for_character(character_id)
         client.update_session(
             voice=selected_voice,
@@ -457,14 +484,235 @@ class QwenRealtimeTTSService:
         self, text: str, expression: str = "neutral", character_id: str = "milly"
     ) -> bytes:
         if not text.strip():
-            return synthetic_wav_bytes(text="...", expression=expression)
-        try:
-            return await asyncio.to_thread(
-                self._synthesize_sync, text, expression, character_id
-            )
-        except Exception:
+            return b""
+
+        last_error: Exception | None = None
+        async with self._synthesize_semaphore:
+            for attempt in range(1, self.max_retries + 1):
+                try:
+                    return await asyncio.to_thread(
+                        self._synthesize_sync, text, expression, character_id
+                    )
+                except Exception as exc:
+                    last_error = exc
+                    logger.warning(
+                        "qwen realtime TTS attempt %s/%s failed chars=%s: %s",
+                        attempt,
+                        self.max_retries,
+                        len(text),
+                        exc,
+                    )
+                    if attempt < self.max_retries:
+                        await asyncio.sleep((self.retry_backoff_ms * attempt) / 1000.0)
+
+        if self.allow_synth_fallback:
             logger.exception("qwen realtime TTS failed; falling back to synthetic wav")
             return synthetic_wav_bytes(text=text, expression=expression)
+
+        if last_error is not None:
+            raise RuntimeError("qwen realtime TTS failed after retries") from last_error
+        raise RuntimeError("qwen realtime TTS failed after retries")
+
+
+class QwenStreamingTTSSession:
+    """Single-connection streaming TTS using Qwen Realtime API server_commit mode.
+
+    Instead of one WebSocket connection per sentence, this keeps a single
+    persistent connection.  Text is streamed in via ``append_text()``; audio
+    PCM chunks are emitted to an ``asyncio.Queue`` as they arrive and can be
+    read via ``read_audio_chunk()``.  The caller wraps PCM in WAV and sends
+    to the frontend.
+    """
+
+    # Flush accumulated PCM when buffer reaches ~0.4s at 24kHz/16bit/mono
+    _MIN_FLUSH_BYTES = int(QWEN_TTS_SAMPLE_RATE * 2 * 0.4)
+    # Append ~80 ms of silence after the final audio delta so the last
+    # phoneme's release / decay is not cut off abruptly.
+    _TAIL_PAD_BYTES = int(QWEN_TTS_SAMPLE_RATE * 2 * 0.08)
+
+    def __init__(
+        self,
+        expression: str = "neutral",
+        character_id: str = "milly",
+    ) -> None:
+        self._model = os.getenv(
+            "MEDIA_AI_TTS_MODEL", "qwen3-tts-instruct-flash-realtime"
+        )
+        self._default_voice = os.getenv("MEDIA_AI_TTS_VOICE", "Cherry")
+        self._male_voice = os.getenv("MEDIA_AI_TTS_VOICE_MALE", "Ethan")
+        self._base_instructions = os.getenv(
+            "MEDIA_AI_TTS_INSTRUCTIONS",
+            "语气自然亲切，节奏偏快，停顿短，适合实时陪伴对话。",
+        )
+        self._expression = expression
+        self._character_id = character_id
+        self._speech_rate = float(os.getenv("MEDIA_AI_TTS_SPEECH_RATE", "1.05"))
+        self._pitch_rate = float(os.getenv("MEDIA_AI_TTS_PITCH_RATE", "1.0"))
+        self._volume = int(os.getenv("MEDIA_AI_TTS_VOLUME", "50"))
+        self._enable_tn = os.getenv("MEDIA_AI_TTS_ENABLE_TN", "true").lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        self._api_key = (
+            os.getenv("MEDIA_AI_TTS_API_KEY")
+            or os.getenv("DASHSCOPE_API_KEY")
+            or os.getenv("LOCAL_AGENT_API_KEY")
+            or os.getenv("LOCAL_CHAT_API_KEY")
+        )
+
+        self._client: Any = None
+        self._audio_queue: asyncio.Queue[bytes | None] | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._pcm_buffer = bytearray()
+        self._done_sent = False  # guards against double-None in the queue
+
+    # ── helpers ──────────────────────────────────────────────────
+
+    def _select_voice(self) -> str:
+        normalized = (self._character_id or "").strip().lower()
+        if normalized in {"ren", "natori"}:
+            return self._male_voice
+        return self._default_voice
+
+    def _build_instructions(self) -> str:
+        base = self._base_instructions
+        if self._expression == "encouraging":
+            return f"{base} 语气更鼓励一些。"
+        if self._expression == "proud":
+            return f"{base} 语气更得意一点。"
+        if self._expression == "angry":
+            return f"{base} 语气更严厉一点，但不要过激。"
+        if self._expression == "sad":
+            return f"{base} 语气更柔和一点。"
+        return base
+
+    def _flush_pcm_buffer(self) -> None:
+        """Push buffered PCM into the asyncio queue (called from WS thread)."""
+        if self._pcm_buffer and self._audio_queue is not None and self._loop is not None:
+            # Ensure even byte boundary (16-bit samples = 2 bytes each)
+            flush_len = len(self._pcm_buffer) & ~1
+            if flush_len == 0:
+                return
+            chunk = bytes(self._pcm_buffer[:flush_len])
+            del self._pcm_buffer[:flush_len]
+            self._loop.call_soon_threadsafe(self._audio_queue.put_nowait, chunk)
+
+    def _send_sentinel(self) -> None:
+        """Push the end-of-stream ``None`` exactly once (called from WS thread)."""
+        if self._done_sent:
+            return
+        self._done_sent = True
+        if self._audio_queue is not None and self._loop is not None:
+            self._loop.call_soon_threadsafe(self._audio_queue.put_nowait, None)
+
+    # ── sync connect (runs in worker thread) ─────────────────────
+
+    def _connect_sync(self) -> None:
+        import dashscope
+        from dashscope.audio.qwen_tts_realtime import AudioFormat, QwenTtsRealtime
+
+        if not self._api_key:
+            raise RuntimeError("No DashScope API key for streaming TTS")
+
+        dashscope.api_key = self._api_key
+        session = self
+
+        class _Callback:
+            def on_open(self_cb) -> None:  # noqa: N805
+                return None
+
+            def on_close(self_cb, code, msg) -> None:  # noqa: N805
+                # Safety net for abnormal disconnects — flush whatever
+                # remains in the buffer, then push sentinel (once only).
+                session._flush_pcm_buffer()
+                session._send_sentinel()
+
+            def on_event(self_cb, response: dict) -> None:  # noqa: N805
+                try:
+                    import base64 as _b64
+
+                    evt = response.get("type")
+                    if evt == "response.audio.delta":
+                        delta = response.get("delta", "")
+                        if isinstance(delta, str) and delta:
+                            session._pcm_buffer.extend(_b64.b64decode(delta))
+                            if len(session._pcm_buffer) >= session._MIN_FLUSH_BYTES:
+                                session._flush_pcm_buffer()
+                    elif evt == "session.finished":
+                        # Pad with silence so the tail of the last phoneme
+                        # rings out naturally before the stream ends.
+                        session._pcm_buffer.extend(
+                            b"\x00" * session._TAIL_PAD_BYTES
+                        )
+                        session._flush_pcm_buffer()
+                        session._send_sentinel()
+                except Exception:
+                    logger.exception("streaming TTS callback error")
+                    session._flush_pcm_buffer()
+                    session._send_sentinel()
+
+        client = QwenTtsRealtime(
+            model=self._model,
+            callback=cast(Any, _Callback()),
+        )
+        client.connect()
+        client.update_session(
+            voice=self._select_voice(),
+            response_format=AudioFormat.PCM_24000HZ_MONO_16BIT,
+            mode="server_commit",
+            speech_rate=self._speech_rate,
+            pitch_rate=self._pitch_rate,
+            volume=self._volume,
+            enable_tn=self._enable_tn,
+            instructions=self._build_instructions(),
+        )
+        self._client = client
+
+    # ── public async interface ───────────────────────────────────
+
+    async def start(self) -> None:
+        """Open the TTS WebSocket connection (call once)."""
+        self._loop = asyncio.get_running_loop()
+        self._audio_queue = asyncio.Queue()
+        await asyncio.to_thread(self._connect_sync)
+
+    async def append_text(self, text: str) -> None:
+        """Stream a text chunk to the TTS server."""
+        if self._client is not None and text.strip():
+            await asyncio.to_thread(self._client.append_text, text)
+
+    async def finish(self) -> None:
+        """Signal no more text.  The audio queue will eventually receive ``None``."""
+        if self._client is not None:
+            await asyncio.to_thread(self._client.finish)
+
+    async def read_audio_chunk(self) -> bytes | None:
+        """Read next PCM audio chunk.  Returns ``None`` when the stream ends."""
+        if self._audio_queue is None:
+            return None
+        return await self._audio_queue.get()
+
+    def set_expression(self, expression: str) -> None:
+        """Update expression hint (best called before ``start()``)."""
+        self._expression = expression
+
+
+def create_streaming_tts_session(
+    expression: str = "neutral",
+    character_id: str = "milly",
+) -> QwenStreamingTTSSession | None:
+    """Create a streaming TTS session if the TTS provider supports it.
+
+    Returns ``None`` when the provider is mock or edge-tts (not streamable).
+    """
+    provider = os.getenv("MEDIA_AI_TTS_PROVIDER", "mock").lower()
+    if provider in {"qwen", "qwen-realtime", "qwen_tts", "dashscope", "dashscope-qwen"}:
+        return QwenStreamingTTSSession(
+            expression=expression,
+            character_id=character_id,
+        )
+    return None
 
 
 def get_asr_service() -> ASRService:
@@ -474,6 +722,35 @@ def get_asr_service() -> ASRService:
     if provider in {"faster-whisper", "whisper", "local"}:
         return FasterWhisperASRService()
     return MockASRService()
+
+
+async def warmup_asr_service() -> bool:
+    """Warm up ASR model/runtime at startup to reduce first-utterance latency."""
+    enabled = _env_bool("MEDIA_AI_ASR_WARMUP_ENABLED", True)
+    if not enabled:
+        logger.info("ASR warmup skipped (MEDIA_AI_ASR_WARMUP_ENABLED=false)")
+        return False
+
+    provider = os.getenv("MEDIA_AI_ASR_PROVIDER", "sherpa-onnx").lower()
+    warmup_ms = max(100, int(os.getenv("MEDIA_AI_ASR_WARMUP_MS", "500")))
+    sample_count = max(1, int(DEFAULT_SAMPLE_RATE * (warmup_ms / 1000.0)))
+    warmup_samples = [0.0] * sample_count
+
+    started = asyncio.get_running_loop().time()
+    try:
+        asr_service = get_asr_service()
+        await asr_service.audio_samples_to_text(warmup_samples)
+        elapsed_ms = (asyncio.get_running_loop().time() - started) * 1000
+        logger.info(
+            "ASR warmup done provider=%s warmup_ms=%s elapsed_ms=%.1f",
+            provider,
+            warmup_ms,
+            elapsed_ms,
+        )
+        return True
+    except Exception:
+        logger.exception("ASR warmup failed provider=%s", provider)
+        return False
 
 
 def get_tts_service() -> TTSService:

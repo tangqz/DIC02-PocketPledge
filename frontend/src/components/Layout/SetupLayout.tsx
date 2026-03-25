@@ -14,9 +14,13 @@ import DailyPlanCalendar from "@/components/Dashboard/DailyPlanCalendar";
 import CharacterMarket from "@/components/Dashboard/CharacterMarket";
 import UserProfileDocument from "@/components/Dashboard/UserProfileDocument";
 import MediaPreviewDock from "@/components/SupervisionPanel/MediaPreviewDock";
+import CharitySlider from "@/components/SupervisionPanel/CharitySlider";
+
+const RESTART_ENCOURAGEMENT_KEY = "pp_restart_encouragement_prompt";
 
 export default function SetupLayout() {
   const live2dRef = useRef<Live2DCanvasHandle>(null);
+  const lastTapRef = useRef(0);
   const send = useSend();
   const { t, locale, setLocale } = useI18n();
   const token = useAuthStore((s) => s.token);
@@ -40,6 +44,8 @@ export default function SetupLayout() {
   const requestScreenShare = useMediaStore((s) => s.requestScreenShare);
   const snapshotInterval = useMediaStore((s) => s.snapshotInterval);
   const setSnapshotInterval = useMediaStore((s) => s.setSnapshotInterval);
+  const vadSensitivity = useMediaStore((s) => s.vadSensitivity);
+  const setVadSensitivity = useMediaStore((s) => s.setVadSensitivity);
 
   useEffect(() => {
     const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:12393";
@@ -71,6 +77,22 @@ export default function SetupLayout() {
     });
   }, [token]);
 
+  useEffect(() => {
+    const restartPrompt = sessionStorage.getItem(RESTART_ENCOURAGEMENT_KEY);
+    if (!restartPrompt) {
+      return;
+    }
+
+    sessionStorage.removeItem(RESTART_ENCOURAGEMENT_KEY);
+    const timer = window.setTimeout(() => {
+      send({ type: "text-input", text: restartPrompt });
+    }, 320);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [send]);
+
   const interruptAgentOutput = useCallback(() => {
     const chat = useChatStore.getState();
     const avatar = useAvatarStore.getState();
@@ -91,6 +113,16 @@ export default function SetupLayout() {
     useChatStore.getState().addMessage("user", text);
     send({ type: "text-input", text });
   }, [interruptAgentOutput, send]);
+
+  const handleModelTapped = useCallback((hitArea: string) => {
+    const now = Date.now();
+    if (now - lastTapRef.current < 5000) return;
+    lastTapRef.current = now;
+    const chat = useChatStore.getState();
+    if (chat.isAgentSpeaking) return;
+    const msg = hitArea === "Head" ? "[用户摸了摸你的头]" : "[用户戳了戳你]";
+    send({ type: "text-input", text: msg });
+  }, [send]);
 
   const handleSwitchCharacter = useCallback((_characterId: string) => {
     useChatStore.getState().clearMessages();
@@ -153,6 +185,10 @@ export default function SetupLayout() {
               <span className="font-mono text-success">{formatRmbFromCents(balance)}</span>
             </div>
             <div className="mt-2 rounded-lg bg-slate-50 px-3 py-2">
+              <p className="mb-1 text-xs text-slate-500">{locale === "zh" ? "罚金分配比例" : "Penalty Distribution"}</p>
+              <CharitySlider />
+            </div>
+            <div className="mt-2 rounded-lg bg-slate-50 px-3 py-2">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-slate-600">
                   {locale === "zh" ? "监督流请求频率(秒)" : "Supervision Stream Interval (s)"}
@@ -175,6 +211,27 @@ export default function SetupLayout() {
                   ? "仅在非专注模式可调整，用于临时演示调试。"
                   : "Editable in non-focus mode for temporary demo tuning."}
               </p>
+            </div>
+            <div className="mt-2 rounded-lg bg-slate-50 px-3 py-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-slate-600">
+                  {locale === "zh" ? "语音灵敏度" : "VAD Sensitivity"}
+                </span>
+                <span className="font-mono text-xs text-slate-500">{vadSensitivity.toFixed(2)}</span>
+              </div>
+              <input
+                type="range"
+                min={0.1}
+                max={0.9}
+                step={0.05}
+                value={vadSensitivity}
+                onChange={(e) => setVadSensitivity(Number(e.target.value))}
+                className="mt-1 w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-accent"
+              />
+              <div className="mt-1 flex justify-between text-[10px] text-slate-400">
+                <span>{locale === "zh" ? "更灵敏" : "Sensitive"}</span>
+                <span>{locale === "zh" ? "更严格" : "Strict"}</span>
+              </div>
             </div>
           </div>
         </section>
@@ -239,7 +296,7 @@ export default function SetupLayout() {
       <main className="relative flex flex-1 min-w-0 flex-col bg-gradient-to-b from-surface/20 to-transparent">
         <div className="relative min-h-0 flex-1">
           <div id="live2d-container" className="absolute inset-0">
-            {degradedMode ? <DowngradePanel locale={locale} /> : <Live2DCanvas ref={live2dRef} />}
+            {degradedMode ? <DowngradePanel locale={locale} /> : <Live2DCanvas ref={live2dRef} onModelTapped={handleModelTapped} />}
           </div>
 
           {!degradedMode ? (

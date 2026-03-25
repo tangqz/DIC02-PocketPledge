@@ -34,6 +34,7 @@ interface SessionState {
   // ── Core state ──
   supervisionState: SupervisionState;
   balance: number;
+  charityRatio: number;
   degradedMode: boolean;
   timerSeconds: number; // remaining seconds
   totalDuration: number; // total session duration in seconds
@@ -99,11 +100,13 @@ interface SessionState {
 
   /** Full reset (used on session restart from Summary) */
   reset: () => void;
+  setCharityRatio: (ratio: number) => void;
 }
 
 export const useSessionStore = create<SessionState>((set, get) => ({
   supervisionState: "setup",
   balance: 3000,
+  charityRatio: 40,
   degradedMode: false,
   timerSeconds: 0,
   totalDuration: 0,
@@ -144,7 +147,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       patch.pauseRemaining = opts.pauseDuration ?? undefined;
       patch.pauseReason = opts.reason ?? "";
     }
-    set(patch as any);
+    set(patch);
   },
 
   applyBalanceUpdate: (balance, change, reason) => {
@@ -197,6 +200,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   setIsConnected: (connected) => set({ isConnected: connected }),
+
+  setCharityRatio: (ratio) => set({ charityRatio: ratio }),
 
   togglePlanTask: (taskId) => {
     const plan = get().plan;

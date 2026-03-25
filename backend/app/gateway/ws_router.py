@@ -15,6 +15,7 @@ from app.business.models import SessionLocal
 from app.business.crud import (
     PENALTY_PER_DISTRACTION,
     append_user_profile_memory as db_append_user_profile_memory,
+    complete_focus_session as db_complete_focus_session,
     create_chat_message as db_create_chat_message,
     create_session_summary as db_create_session_summary,
     execute_penalty as db_execute_penalty,
@@ -28,9 +29,13 @@ from app.business.crud import (
 )
 from app.gateway.session import SessionState
 from app.media_ai import (
+    QWEN_TTS_SAMPLE_RATE,
+    create_streaming_tts_session,
     evaluate_start_readiness,
     evaluate_vision,
+    pcm16_bytes_to_wav_bytes,
     process_text_chat,
+    strip_unpronounceable_for_tts,
     transcribe_audio,
 )
 from app.system_agent import SystemAgentService
@@ -280,11 +285,35 @@ def _build_fallback_system_events(
 
 
 def _first_task_title(plan: dict[str, Any] | None) -> str | None:
+    """Return the most relevant task title for *today*, falling back to the
+    first task or the plan-level ``goal`` field."""
     if not plan:
         return None
     tasks = plan.get("tasks") or []
     if not tasks:
-        return None
+        return str(plan.get("goal") or "").strip() or None
+
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
+    weekday_today = datetime.now(UTC).isoweekday() % 7  # 0=Sun .. 6=Sat
+
+    for task in tasks:
+        # Exact date match
+        task_date = task.get("date") or task.get("dueDate")
+        if task_date and str(task_date).strip() == today:
+            return str(task.get("title") or "").strip() or None
+        # dates array match
+        dates_list = task.get("dates")
+        if isinstance(dates_list, list) and today in [str(d).strip() for d in dates_list]:
+            return str(task.get("title") or "").strip() or None
+        # weekdays match (0=Sun convention used by frontend)
+        weekdays = task.get("weekdays")
+        if isinstance(weekdays, list) and weekday_today in weekdays:
+            return str(task.get("title") or "").strip() or None
+
+    # No date-specific match — return first incomplete task or first task
+    for task in tasks:
+        if not task.get("completed"):
+            return str(task.get("title") or "").strip() or None
     return str(tasks[0].get("title") or "").strip() or None
 
 
@@ -1539,14 +1568,19 @@ def _build_temporal_stitched_image(
             ts_ms = relative_now_ms
         grouped_images[int(ts_ms)].append(img)
 
-    # Sort groups descending by timestamp (newest first)
-    sorted_groups = sorted(grouped_images.items(), key=lambda x: x[0], reverse=True)
+    # Sort groups descending by timestamp (newest first), cap to 6 to avoid oversized images
+    sorted_groups = sorted(grouped_images.items(), key=lambda x: x[0], reverse=True)[:6]
 
-    ROW_HEIGHT = 360
+    # Each source image is first capped at MAX_SRC_HEIGHT before stitching.
+    # This controls token cost without distorting the final composite via a
+    # second-pass downscale.  All images in a group are then scaled to the same
+    # row height (the tallest capped image in that group).
+    MAX_SRC_HEIGHT = 240   # hard cap per source frame
+    MIN_ROW_HEIGHT = 200   # floor in case sources are very small
     row_images = []
 
     try:
-        font = ImageFont.load_default(size=36)
+        font = ImageFont.load_default(size=24)
     except Exception:
         font = ImageFont.load_default()
 
@@ -1558,23 +1592,38 @@ def _build_temporal_stitched_image(
                 continue
             try:
                 img_data = base64.b64decode(b64)
-                pil_imgs.append(Image.open(io.BytesIO(img_data)).convert("RGB"))
+                img = Image.open(io.BytesIO(img_data)).convert("RGB")
+                # Cap source height so the stitched image stays small
+                if img.height > MAX_SRC_HEIGHT:
+                    scale = MAX_SRC_HEIGHT / img.height
+                    img = img.resize(
+                        (int(img.width * scale), MAX_SRC_HEIGHT),
+                        Image.Resampling.LANCZOS,
+                    )
+                pil_imgs.append(img)
             except Exception:
                 pass
 
         if not pil_imgs:
             continue
 
+        # Row height = tallest capped image in this group (≥ MIN_ROW_HEIGHT)
+        row_height = max(max(img.height for img in pil_imgs), MIN_ROW_HEIGHT)
+
         scaled_imgs = []
         total_w = 0
         for pimg in pil_imgs:
             w, h = pimg.size
-            new_w = int(w * (ROW_HEIGHT / h))
-            scaled = pimg.resize((new_w, ROW_HEIGHT), Image.Resampling.LANCZOS)
-            scaled_imgs.append(scaled)
-            total_w += new_w
+            if h == row_height:
+                scaled_imgs.append(pimg)
+                total_w += w
+            else:
+                new_w = int(w * (row_height / h))
+                scaled = pimg.resize((new_w, row_height), Image.Resampling.LANCZOS)
+                scaled_imgs.append(scaled)
+                total_w += new_w
 
-        group_img = Image.new("RGB", (total_w, ROW_HEIGHT))
+        group_img = Image.new("RGB", (total_w, row_height))
         x_offset = 0
         for sc in scaled_imgs:
             group_img.paste(sc, (x_offset, 0))
@@ -1582,7 +1631,7 @@ def _build_temporal_stitched_image(
 
         dt = int((relative_now_ms - ts_ms) / 1000)
         label = "T" if dt <= 1 else f"T-{dt}s"
-        txt_height = 48
+        txt_height = 30
 
         row_final = Image.new(
             "RGB", (group_img.width, group_img.height + txt_height), color=(30, 30, 30)
@@ -1595,6 +1644,8 @@ def _build_temporal_stitched_image(
     if not row_images:
         return current_images
 
+    # Vertical stacking — total height grows with row count; individual rows
+    # are never downscaled so per-frame resolution stays constant.
     final_w = max(r.width for r in row_images)
     final_h = sum(r.height for r in row_images)
 
@@ -1605,7 +1656,7 @@ def _build_temporal_stitched_image(
         y_offset += r.height
 
     buf = io.BytesIO()
-    final_img.save(buf, format="JPEG", quality=75)
+    final_img.save(buf, format="JPEG", quality=80)
     final_b64 = base64.b64encode(buf.getvalue()).decode()
 
     return [
@@ -1642,6 +1693,7 @@ async def handle_screenshot(
         return
 
     session.distraction_streak += 1
+    session.total_distraction_count += 1
 
     # 附加上 reason 帮助聊天模型给出具体提醒
     reason_str = f"走神原因: {reason}。" if reason else ""
@@ -1817,6 +1869,7 @@ async def handle_complete(user_id: str, session: SessionState) -> None:
             focus_time_remaining=session.focus_time_remaining,
             total_focus_seconds=session.total_focus_seconds,
             distraction_streak=session.distraction_streak,
+            total_distraction_count=session.total_distraction_count,
             is_bankrupt=session.is_bankrupt,
             current_plan=session.current_plan,
             current_plan_data=session.current_plan_data,
@@ -1855,8 +1908,103 @@ async def handle_complete(user_id: str, session: SessionState) -> None:
             user_id, "supervision.complete", "success", "session completed"
         )
         await _persist_session_summary(user_id, summary_snapshot)
+
+        # Award focus completion reward
+        reward_amount = 0
+        try:
+            uid = int(user_id)
+            planned = summary_snapshot.total_focus_seconds or 0
+
+            # Extract rewardCents from the active task in the plan
+            task_reward_cents = 0
+            plan_data = summary_snapshot.current_plan_data
+            if isinstance(plan_data, dict):
+                plan_tasks = plan_data.get("tasks") or []
+                task_title = (summary_snapshot.current_plan or "").strip()
+                for pt in plan_tasks:
+                    if isinstance(pt, dict) and str(pt.get("title", "")).strip() == task_title:
+                        task_reward_cents = int(pt.get("rewardCents") or 0)
+                        break
+
+            db = SessionLocal()
+            try:
+                reward_result = db_complete_focus_session(
+                    db=db,
+                    user_id=uid,
+                    session_ref=summary_snapshot.session_ref or "",
+                    focused_seconds=focused_seconds,
+                    planned_seconds=planned,
+                    distraction_count=summary_snapshot.total_distraction_count,
+                    task_reward_cents=task_reward_cents,
+                )
+                reward_amount = reward_result.get("reward", 0)
+                if reward_amount > 0:
+                    await send_balance_update(
+                        user_id,
+                        balance=reward_result["balance_after"],
+                        change=reward_amount,
+                        reason="专注完成奖励",
+                    )
+            finally:
+                db.close()
+        except Exception:
+            logger.exception("failed to award focus reward, user_id=%s", user_id)
+
+        # Send post-completion encouragement via white brain
+        try:
+            focused_min = focused_seconds // 60
+            reward_info = (
+                f"，获得奖励 {reward_amount / 100:.2f} 元"
+                if reward_amount > 0
+                else ""
+            )
+            summary_prompt = (
+                f"[SYSTEM_EVENT: SESSION_COMPLETED, TASK: {summary_snapshot.current_plan or '未命名'}, "
+                f"FOCUSED_MINUTES: {focused_min}, "
+                f"DISTRACTIONS: {summary_snapshot.total_distraction_count}, "
+                f"PAUSES: {summary_snapshot.pause_requests_count}"
+                f"{reward_info}]\n"
+                f"专注结束了，请用 1-2 句话简短鼓励/总结，语气轻松，符合人设。"
+            )
+            await _handle_user_turn(
+                user_id=user_id,
+                session=session,
+                text=summary_prompt,
+                images=None,
+                is_tool_result=True,
+                append_user_message=False,
+                emit_user_transcript=False,
+                stage_depth=1,
+            )
+        except Exception:
+            logger.exception("failed to send post-completion summary, user_id=%s", user_id)
     except ValueError as exc:
         await send_tool_call_status(user_id, "supervision.complete", "error", str(exc))
+
+
+async def _run_streaming_audio_reader(
+    tts_session: Any,
+    user_id: str,
+    expression: str,
+) -> None:
+    """Background task: read PCM chunks from a streaming TTS session, wrap in WAV, send to frontend."""
+    import base64 as _b64
+
+    while True:
+        pcm_chunk = await tts_session.read_audio_chunk()
+        if pcm_chunk is None:
+            break
+        if not pcm_chunk:
+            continue
+        try:
+            wav_bytes = pcm16_bytes_to_wav_bytes(pcm_chunk, sample_rate=QWEN_TTS_SAMPLE_RATE)
+            audio_b64 = _b64.b64encode(wav_bytes).decode("ascii")
+            await send_audio_stream_chunk(user_id, audio=audio_b64, expression=expression)
+        except Exception:
+            logger.exception("streaming TTS audio send failed, user_id=%s", user_id)
+
+    # Signal frontend that the streaming audio is complete
+    await send_audio_stream_end(user_id, expression=expression)
 
 
 async def stream_agent_reply(
@@ -1873,9 +2021,24 @@ async def stream_agent_reply(
 
     Returns the collected reply text.
     """
+    # --- Try to use streaming TTS (single WS connection) ---
+    tts_session = create_streaming_tts_session(character_id=character_id) if include_audio else None
+    use_streaming = tts_session is not None
+    audio_reader_task: asyncio.Task[Any] | None = None
+
+    if use_streaming:
+        try:
+            await tts_session.start()
+        except Exception:
+            logger.warning("streaming TTS session start failed, falling back to per-sentence TTS", exc_info=True)
+            tts_session = None
+            use_streaming = False
+
     parts: list[str] = []
     sent_text = False
-    audio_tasks = []
+    last_expression = "neutral"
+    audio_tasks: list[tuple[asyncio.Task[Any], str, str]] = []
+
     async for chunk in process_text_chat(
         user_text=user_text,
         session_id=user_id,
@@ -1884,6 +2047,7 @@ async def stream_agent_reply(
         focus_status=focus_status,
         language_mode=language_mode,
         character_id=character_id,
+        skip_audio=use_streaming,
     ):
         chunk_text = _sanitize_agent_text(str(chunk.get("text", "")))
         expression = str(chunk.get("expression", "neutral"))
@@ -1891,6 +2055,7 @@ async def stream_agent_reply(
         if chunk_text:
             parts.append(chunk_text)
             sent_text = True
+            last_expression = expression
             await send_agent_text_chunk(user_id, chunk_text)
             if expression:
                 await send_control(
@@ -1898,10 +2063,36 @@ async def stream_agent_reply(
                     "set-expression",
                     {"expression": expression},
                 )
-        if include_audio and audio_coro is not None and chunk_text:
+
+        # -- streaming path: feed text to TTS session --
+        if use_streaming and chunk_text:
+            # Use pre-computed tts_text (both expression tags and kaomoji stripped)
+            tts_feed = str(chunk.get("tts_text", ""))
+            if tts_feed:
+                if audio_reader_task is None:
+                    audio_reader_task = asyncio.create_task(
+                        _run_streaming_audio_reader(tts_session, user_id, last_expression)
+                    )
+                await tts_session.append_text(tts_feed)
+
+        # -- fallback path: per-sentence audio coro --
+        if not use_streaming and include_audio and audio_coro is not None and chunk_text:
             audio_task = asyncio.create_task(audio_coro)
             audio_tasks.append((audio_task, expression, chunk_text))
 
+    # -- finish streaming TTS --
+    if use_streaming and tts_session is not None:
+        try:
+            await tts_session.finish()
+        except Exception:
+            logger.exception("streaming TTS finish failed, user_id=%s", user_id)
+        if audio_reader_task is not None:
+            try:
+                await audio_reader_task
+            except Exception:
+                logger.exception("streaming TTS reader task failed, user_id=%s", user_id)
+
+    # -- fallback: send per-sentence audio --
     for task, expression, chunk_text in audio_tasks:
         try:
             audio_data = await task
@@ -1944,13 +2135,27 @@ async def _stream_and_detect_sys(
 
     Returns (collected_clean_text, sys_detected, capture_detected, directive_task).
     """
+    # --- Try to use streaming TTS (single WS connection) ---
+    tts_session = create_streaming_tts_session(character_id=character_id) if include_audio else None
+    use_streaming = tts_session is not None
+    audio_reader_task: asyncio.Task[Any] | None = None
+
+    if use_streaming:
+        try:
+            await tts_session.start()
+        except Exception:
+            logger.warning("streaming TTS session start failed, falling back to per-sentence TTS", exc_info=True)
+            tts_session = None
+            use_streaming = False
+
     parts: list[str] = []
     sys_detected = False
     capture_detected = False
     sent_text = False
     sys_task: asyncio.Task[Any] | None = None
+    last_expression = "neutral"
 
-    audio_tasks = []
+    audio_tasks: list[tuple[asyncio.Task[Any], str, str]] = []
 
     async for chunk in process_text_chat(
         user_text=user_text,
@@ -1960,6 +2165,7 @@ async def _stream_and_detect_sys(
         focus_status=focus_status,
         language_mode=language_mode,
         character_id=character_id,
+        skip_audio=use_streaming,
     ):
         chunk_text = _sanitize_agent_text(str(chunk.get("text", "")))
         raw_text = str(chunk.get("raw_text", ""))
@@ -1976,6 +2182,7 @@ async def _stream_and_detect_sys(
         if chunk_text:
             parts.append(chunk_text)
             sent_text = True
+            last_expression = expression
             await send_agent_text_chunk(user_id, chunk_text)
             if expression:
                 await send_control(
@@ -1999,13 +2206,35 @@ async def _stream_and_detect_sys(
             if on_sys_detected is not None:
                 sys_task = asyncio.create_task(on_sys_detected())
 
-        if include_audio and audio_coro is not None and chunk_text:
-            # We wrap the audio coroutine into a task to run it concurrently,
-            # and append it to our queue of audio tasks.
+        # -- streaming path: feed text to TTS session --
+        if use_streaming and chunk_text:
+            # Use pre-computed tts_text (both expression tags and kaomoji stripped)
+            tts_feed = str(chunk.get("tts_text", ""))
+            if tts_feed:
+                if audio_reader_task is None:
+                    audio_reader_task = asyncio.create_task(
+                        _run_streaming_audio_reader(tts_session, user_id, last_expression)
+                    )
+                await tts_session.append_text(tts_feed)
+
+        # -- fallback path: per-sentence audio coro --
+        if not use_streaming and include_audio and audio_coro is not None and chunk_text:
             audio_task = asyncio.create_task(audio_coro)
             audio_tasks.append((audio_task, expression, chunk_text))
 
-    # Await and send audio chunks in order, but in the background relative to text streaming
+    # -- finish streaming TTS --
+    if use_streaming and tts_session is not None:
+        try:
+            await tts_session.finish()
+        except Exception:
+            logger.exception("streaming TTS finish failed, user_id=%s", user_id)
+        if audio_reader_task is not None:
+            try:
+                await audio_reader_task
+            except Exception:
+                logger.exception("streaming TTS reader task failed, user_id=%s", user_id)
+
+    # -- fallback: send per-sentence audio --
     for task, expression, chunk_text in audio_tasks:
         try:
             audio_data = await task
@@ -2138,6 +2367,29 @@ async def send_audio(user_id: str, audio: str, expression: str, text: str) -> No
             "audio": audio,
             "actions": {"expressions": [expression]},
             "display_text": {"text": clean_text, "name": BOT_NAME},
+        },
+    )
+
+
+async def send_audio_stream_chunk(user_id: str, audio: str, expression: str) -> None:
+    """Send a streaming TTS audio chunk (gapless playback on frontend)."""
+    await manager.send_personal_message(
+        user_id,
+        {
+            "type": "audio-stream-chunk",
+            "audio": audio,
+            "expression": expression,
+        },
+    )
+
+
+async def send_audio_stream_end(user_id: str, expression: str) -> None:
+    """Signal that streaming TTS audio is complete."""
+    await manager.send_personal_message(
+        user_id,
+        {
+            "type": "audio-stream-end",
+            "expression": expression,
         },
     )
 

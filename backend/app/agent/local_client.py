@@ -1,11 +1,12 @@
 """Local LLM client using OpenAI-compatible API.
 
-Implements the same interface as MockDifyClient / DifyClient so it can be
+Implements the same interface as the runtime chat provider clients so it can be
 swapped in via the AGENT_BACKEND environment variable.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -22,6 +23,7 @@ from app.agent.prompts import (
     START_READINESS_PROMPT,
     SYSTEM_AGENT_PROMPT,
     VISION_EVALUATION_PROMPT,
+    get_character_card,
 )
 from app.agent.token_tracker import track_token_usage
 from app.agent.tools import TOOL_DEFINITIONS, execute_tool
@@ -137,19 +139,24 @@ def _get_vision_client() -> AsyncOpenAI:
     )
 
 
-def _load_profile_content(user_id: str) -> str:
+# ⚡ Bolt: execute synchronous database I/O in a separate thread to avoid blocking the main asyncio event loop during chat streaming
+async def _load_profile_content(user_id: str) -> str:
     try:
         uid = int(user_id)
     except ValueError:
         return ""
-    db = SessionLocal()
-    try:
-        result = get_user_profile_document(db, uid)
-        return result.get("content", "")
-    except Exception:
-        return ""
-    finally:
-        db.close()
+
+    def _sync_load() -> str:
+        db = SessionLocal()
+        try:
+            result = get_user_profile_document(db, uid)
+            return result.get("content", "")
+        except Exception:
+            return ""
+        finally:
+            db.close()
+
+    return await asyncio.to_thread(_sync_load)
 
 
 def _build_chat_system_prompt(
@@ -181,25 +188,6 @@ def _build_language_block(language_mode: str) -> str:
     return "\n当前语言模式：zh。你必须只用自然中文回复。"
 
 
-def _build_character_block(character_id: str) -> str:
-    normalized = character_id.strip().lower()
-    if normalized == "ren":
-        return (
-            "\nCharacter profile:\n"
-            "- Name: Ren\n"
-            "- Tone: calm, concise, mentor-like\n"
-            "- Style: rational encouragement, clear boundaries, low drama\n"
-            "- Preferred expressions: [neutral] [encouraging] [proud]"
-        )
-    return (
-        "\n角色人设：\n"
-        "- 名字：米莉\n"
-        "- 风格：温柔但有压迫感，允许小脾气\n"
-        "- 表达：短句、口语化、陪伴感强\n"
-        "- 优先表情：[neutral] [happy] [encouraging] [angry] [proud]"
-    )
-
-
 def _build_runtime_chat_system_prompt(
     profile_content: str,
     current_task: str | None,
@@ -208,7 +196,8 @@ def _build_runtime_chat_system_prompt(
     character_id: str,
 ) -> str:
     base = _build_chat_system_prompt(profile_content, current_task, focus_status)
-    return f"{base}{_build_language_block(language_mode)}{_build_character_block(character_id)}"
+    character_card = get_character_card(character_id)
+    return f"{character_card}\n{base}{_build_language_block(language_mode)}"
 
 
 def _build_user_content(
@@ -242,7 +231,7 @@ def _strip_code_fences(text: str) -> str:
 
 
 class LocalLLMClient:
-    """Local LLM client implementing the same interface as DifyClient."""
+    """Local LLM client implementing the runtime provider interface."""
 
     def __init__(self) -> None:
         self._chat_model = os.getenv("LOCAL_CHAT_MODEL", "")
@@ -304,8 +293,8 @@ class LocalLLMClient:
         language_mode: str = "zh",
         character_id: str = "milly",
     ) -> AsyncIterator[str]:
-        """Stream chat response tokens, matching DifyClient.stream_chat interface."""
-        profile_content = _load_profile_content(session_id)
+        """Stream chat response tokens using the shared provider interface."""
+        profile_content = await _load_profile_content(session_id)
         system_prompt = _build_runtime_chat_system_prompt(
             profile_content=profile_content,
             current_task=current_task,
@@ -547,35 +536,58 @@ class LocalLLMClient:
                 _truncate_text(current_task or ""),
                 len(images),
             )
-            response = await _get_vision_client().chat.completions.create(
-                model=self._vision_model,
-                messages=cast(Any, [{"role": "user", "content": content}]),
-                temperature=0,
-                max_tokens=160,
-                extra_body=vision_extra,
-            )
-            if getattr(response, "usage", None):
-                track_token_usage(self._vision_model, response.usage, session_id)
 
-            text = _strip_code_fences(
-                (response.choices[0].message.content or "").strip()
-            )
-            data = json.loads(text)
-            if not isinstance(data, dict):
-                raise ValueError("start readiness response is not a JSON object")
-            result = {
-                "approved": bool(data.get("approved", False)),
-                "camera_ok": bool(data.get("camera_ok", False)),
-                "screen_ok": bool(data.get("screen_ok", False)),
-                "reason": str(data.get("reason", "环境检查未通过") or "环境检查未通过"),
-            }
-            logger.info(
-                "local start-readiness response session_id=%s model=%s text=%s",
-                session_id,
-                self._vision_model,
-                _truncate_text(text),
-            )
-            return result
+            max_attempts = 2
+            last_error: Exception | None = None
+            for attempt in range(max_attempts):
+                try:
+                    response = await _get_vision_client().chat.completions.create(
+                        model=self._vision_model,
+                        messages=cast(Any, [{"role": "user", "content": content}]),
+                        temperature=0,
+                        max_tokens=160,
+                        extra_body=vision_extra,
+                    )
+                    if getattr(response, "usage", None):
+                        track_token_usage(self._vision_model, response.usage, session_id)
+
+                    text = _strip_code_fences(
+                        (response.choices[0].message.content or "").strip()
+                    )
+                    # Try direct parse first, then extract JSON object from text
+                    try:
+                        data = json.loads(text)
+                    except json.JSONDecodeError:
+                        json_match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
+                        if json_match:
+                            data = json.loads(json_match.group())
+                        else:
+                            raise
+                    if not isinstance(data, dict):
+                        raise ValueError("start readiness response is not a JSON object")
+                    result = {
+                        "approved": bool(data.get("approved", False)),
+                        "camera_ok": bool(data.get("camera_ok", False)),
+                        "screen_ok": bool(data.get("screen_ok", False)),
+                        "reason": str(data.get("reason", "环境检查未通过") or "环境检查未通过"),
+                    }
+                    logger.info(
+                        "local start-readiness response session_id=%s model=%s text=%s",
+                        session_id,
+                        self._vision_model,
+                        _truncate_text(text),
+                    )
+                    return result
+                except (json.JSONDecodeError, ValueError, KeyError) as parse_err:
+                    last_error = parse_err
+                    logger.warning(
+                        "start-readiness JSON parse failed (attempt %d/%d): %s",
+                        attempt + 1, max_attempts, parse_err,
+                    )
+                    continue
+
+            logger.error("start-readiness exhausted %d attempts", max_attempts)
+            raise last_error or ValueError("JSON parse failed")  # noqa: TRY301
         except Exception:
             logger.exception("local start readiness evaluation failed")
             return {

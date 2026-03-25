@@ -17,9 +17,11 @@ import {
 import { DEFAULT_MODEL_CONFIG, type ModelConfig } from "@/lib/modelConfig";
 import { useI18n } from "@/lib/i18n";
 import { useAudioQueue } from "@/components/AudioPlayer/useAudioQueue";
+import { StreamingAudioPlayer } from "@/components/AudioPlayer/StreamingAudioPlayer";
 import { useAvatarStore } from "@/stores/avatarStore";
+import { useChatStore } from "@/stores/chatStore";
 import { useSessionStore } from "@/stores/sessionStore";
-import { updateModelConfig } from "@/live2d/WebSDK/src/lappdefine";
+import { updateInteractionConfig, updateModelConfig, setOnModelTapped } from "@/live2d/WebSDK/src/lappdefine";
 
 /** Imperative API exposed to parent via ref */
 export interface Live2DCanvasHandle {
@@ -28,9 +30,15 @@ export interface Live2DCanvasHandle {
   stopAudio: () => void;
 }
 
-const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
+export interface Live2DCanvasProps {
+  onModelTapped?: (hitArea: string) => void;
+}
+
+const Live2DCanvas = forwardRef<Live2DCanvasHandle, Live2DCanvasProps>(({ onModelTapped }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const lipSyncRafRef = useRef<number | null>(null);
   const sdkRef = useRef<{
     initializeLive2D?: () => void;
     LAppAdapter?: {
@@ -42,6 +50,9 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
         getMotionGroups: () => string[];
         getExpressionName: (index: number) => string;
         setExpression: (name: string) => void;
+        setExternalLipSyncValue: (value: number) => void;
+        getMotionCount: (group: string) => number;
+        startMotion: (group: string, no: number, priority: number) => number;
         setChara: (resourceRoot: string, modelDir: string) => void;
       };
     };
@@ -54,7 +65,13 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
   const pendingAudioMessages = useAvatarStore((s) => s.pendingAudioMessages);
   const playbackInterruptVersion = useAvatarStore((s) => s.playbackInterruptVersion);
   const shiftAudioMessage = useAvatarStore((s) => s.shiftAudioMessage);
+  const pendingStreamChunks = useAvatarStore((s) => s.pendingStreamChunks);
+  const streamEndReceived = useAvatarStore((s) => s.streamEndReceived);
+  const streamActiveVersion = useAvatarStore((s) => s.streamActiveVersion);
+  const shiftStreamChunk = useAvatarStore((s) => s.shiftStreamChunk);
+  const resetStreamState = useAvatarStore((s) => s.resetStreamState);
   const degradedMode = useSessionStore((s) => s.degradedMode);
+  const streamingPlayerRef = useRef<StreamingAudioPlayer | null>(null);
   const config = useMemo(
     () =>
       modelInfo
@@ -87,6 +104,12 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
     setFallbackToDefault(false);
   }, [config.url]);
 
+  /* Register the Live2D tap → React callback bridge */
+  useEffect(() => {
+    setOnModelTapped(onModelTapped ?? null);
+    return () => setOnModelTapped(null);
+  }, [onModelTapped]);
+
   const setExpression = useCallback(
     (emotionKeyword: string) => {
       const adapter = sdkRef.current?.LAppAdapter?.getInstance();
@@ -112,7 +135,84 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
     [config.emotionMap],
   );
 
+  const stopExternalLipSync = useCallback(() => {
+    if (lipSyncRafRef.current != null) {
+      window.cancelAnimationFrame(lipSyncRafRef.current);
+      lipSyncRafRef.current = null;
+    }
+    const adapter = sdkRef.current?.LAppAdapter?.getInstance();
+    adapter?.setExternalLipSyncValue(0);
+  }, []);
+
+  const startExternalLipSync = useCallback(
+    (audio: HTMLAudioElement) => {
+      const adapter = sdkRef.current?.LAppAdapter?.getInstance();
+      if (!adapter) {
+        return;
+      }
+
+      stopExternalLipSync();
+
+      const AudioCtx = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) {
+        return;
+      }
+
+      try {
+        const context = audioContextRef.current ?? new AudioCtx();
+        audioContextRef.current = context;
+        if (context.state === "suspended") {
+          void context.resume();
+        }
+
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 1024;
+        analyser.smoothingTimeConstant = 0.55;
+        const source = context.createMediaElementSource(audio);
+        source.connect(analyser);
+        analyser.connect(context.destination);
+
+        const samples = new Uint8Array(analyser.fftSize);
+        const gain = Math.max(0.1, Number(activeConfig.lipSyncGain) || 1.0);
+
+        const cleanup = () => {
+          stopExternalLipSync();
+          source.disconnect();
+          analyser.disconnect();
+          audio.removeEventListener("ended", cleanup);
+          audio.removeEventListener("pause", cleanup);
+          audio.removeEventListener("error", cleanup);
+        };
+
+        const tick = () => {
+          analyser.getByteTimeDomainData(samples);
+          let sum = 0;
+          for (let i = 0; i < samples.length; i++) {
+            const centered = (samples[i] - 128) / 128;
+            sum += centered * centered;
+          }
+          const rms = Math.sqrt(sum / samples.length);
+          const mapped = Math.min(1.0, rms * gain * 8.0);
+          adapter.setExternalLipSyncValue(mapped);
+
+          if (!audio.paused && !audio.ended) {
+            lipSyncRafRef.current = window.requestAnimationFrame(tick);
+          }
+        };
+
+        audio.addEventListener("ended", cleanup, { once: true });
+        audio.addEventListener("pause", cleanup, { once: true });
+        audio.addEventListener("error", cleanup, { once: true });
+        lipSyncRafRef.current = window.requestAnimationFrame(tick);
+      } catch (err) {
+        console.warn("[Live2DCanvas] external lip sync init failed", err);
+      }
+    },
+    [activeConfig.lipSyncGain, stopExternalLipSync],
+  );
+
   const stopAudio = useCallback(() => {
+    stopExternalLipSync();
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
@@ -137,6 +237,16 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
   };
 
   const playBase64Audio = async (base64Wav: string) => {
+    const adapter = sdkRef.current?.LAppAdapter?.getInstance();
+    const talkGroup = activeConfig.talkMotionGroup ?? "";
+    if (adapter) {
+      const motionCount = adapter.getMotionCount(talkGroup);
+      if (motionCount > 0) {
+        const randomIndex = Math.floor(Math.random() * motionCount);
+        adapter.startMotion(talkGroup, randomIndex, 2);
+      }
+    }
+
     const pureBase64 = base64Wav.includes(",")
       ? base64Wav.split(",")[1]
       : base64Wav;
@@ -183,10 +293,12 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
 
       audio.addEventListener("ended", onEnded);
       audio.addEventListener("error", onError);
+      startExternalLipSync(audio);
 
       audio.play().catch((err) => {
         audio.removeEventListener("ended", onEnded);
         audio.removeEventListener("error", onError);
+        stopExternalLipSync();
         URL.revokeObjectURL(url);
         if (audioRef.current === audio) {
           audioRef.current = null;
@@ -202,6 +314,143 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
     stopAudio,
     onQueueEmpty: () => undefined,
   });
+
+  /* ── Streaming TTS: gapless AudioContext playback ────────── */
+
+  const stopStreamingLipSync = useCallback(() => {
+    if (lipSyncRafRef.current != null) {
+      window.cancelAnimationFrame(lipSyncRafRef.current);
+      lipSyncRafRef.current = null;
+    }
+    const adapter = sdkRef.current?.LAppAdapter?.getInstance();
+    adapter?.setExternalLipSyncValue(0);
+  }, []);
+
+  const startStreamingLipSync = useCallback(() => {
+    const adapter = sdkRef.current?.LAppAdapter?.getInstance();
+    const player = streamingPlayerRef.current;
+    if (!adapter || !player) return;
+
+    stopExternalLipSync();
+    const gain = Math.max(0.1, Number(activeConfig.lipSyncGain) || 1.0);
+
+    const tick = () => {
+      if (!player.isActive) {
+        adapter.setExternalLipSyncValue(0);
+        return;
+      }
+      const mapped = player.getLipSyncValue(gain);
+      adapter.setExternalLipSyncValue(mapped);
+      lipSyncRafRef.current = window.requestAnimationFrame(tick);
+    };
+    lipSyncRafRef.current = window.requestAnimationFrame(tick);
+  }, [activeConfig.lipSyncGain, stopExternalLipSync]);
+
+  const interruptStreaming = useCallback(() => {
+    streamingPlayerRef.current?.interrupt();
+    streamingPlayerRef.current = null;
+    stopStreamingLipSync();
+    resetStreamState();
+    useChatStore.getState().setAgentSpeaking(false);
+  }, [stopStreamingLipSync, resetStreamState]);
+
+  // Create player on first chunk of a new stream
+  useEffect(() => {
+    if (streamActiveVersion === 0 || degradedMode) return;
+
+    // New streaming session — dispose any previous player
+    if (streamingPlayerRef.current) {
+      streamingPlayerRef.current.interrupt();
+      streamingPlayerRef.current = null;
+    }
+
+    const player = new StreamingAudioPlayer();
+    streamingPlayerRef.current = player;
+    useChatStore.getState().setAgentSpeaking(true);
+
+    // Start talk motion
+    const adapter = sdkRef.current?.LAppAdapter?.getInstance();
+    const talkGroup = activeConfig.talkMotionGroup ?? "";
+    if (adapter) {
+      const motionCount = adapter.getMotionCount(talkGroup);
+      if (motionCount > 0) {
+        const randomIndex = Math.floor(Math.random() * motionCount);
+        adapter.startMotion(talkGroup, randomIndex, 2);
+      }
+    }
+
+    startStreamingLipSync();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streamActiveVersion, degradedMode]);
+
+  // Feed pending chunks to the streaming player
+  useEffect(() => {
+    if (pendingStreamChunks.length === 0) return;
+    const player = streamingPlayerRef.current;
+    if (!player) return;
+
+    // Drain all pending chunks
+    let chunk = shiftStreamChunk();
+    while (chunk) {
+      const { audio, expression } = chunk;
+      if (expression) setExpression(expression);
+      player.feed(audio);
+      chunk = shiftStreamChunk();
+    }
+  }, [pendingStreamChunks, setExpression, shiftStreamChunk]);
+
+  // Handle stream end
+  useEffect(() => {
+    if (!streamEndReceived) return;
+    const player = streamingPlayerRef.current;
+    if (!player) {
+      resetStreamState();
+      return;
+    }
+
+    player.end();
+    void player.waitComplete().then(() => {
+      // Only clean up if this is still the active player
+      if (streamingPlayerRef.current === player) {
+        player.dispose();
+        streamingPlayerRef.current = null;
+        stopStreamingLipSync();
+        useChatStore.getState().setAgentSpeaking(false);
+      }
+      resetStreamState();
+    });
+  }, [streamEndReceived, stopStreamingLipSync, resetStreamState]);
+
+  // Runtime diagnostics overlay
+  useEffect(() => {
+    if (!IS_DEV) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      try {
+        const adapter = sdkRef.current?.LAppAdapter?.getInstance();
+        if (!adapter) {
+          setDebugText(`loaded=${isLoaded ? 1 : 0} sdk=0`);
+          return;
+        }
+        const model = adapter.getModel();
+        if (!model || !model._modelSetting) {
+          setDebugText(`loaded=${isLoaded ? 1 : 0} model=0 ready=0`);
+          return;
+        }
+        const expressionCount = adapter.getExpressionCount();
+        const motionGroups = adapter.getMotionGroups();
+        setDebugText(
+          `loaded=${isLoaded ? 1 : 0} model=${model ? 1 : 0} exp=${expressionCount} motGroups=${motionGroups.length}`,
+        );
+      } catch (e) {
+        setDebugText(`debug-error=${(e as Error).message}`);
+      }
+    }, 500);
+
+    return () => clearInterval(timer);
+  }, [isLoaded]);
 
   // Expose imperative methods to parent
   useImperativeHandle(
@@ -234,14 +483,16 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
       return;
     }
     interrupt();
-  }, [degradedMode, interrupt]);
+    interruptStreaming();
+  }, [degradedMode, interrupt, interruptStreaming]);
 
   useEffect(() => {
     if (playbackInterruptVersion === 0) {
       return;
     }
     interrupt();
-  }, [interrupt, playbackInterruptVersion]);
+    interruptStreaming();
+  }, [interrupt, interruptStreaming, playbackInterruptVersion]);
 
   useEffect(() => {
     let disposed = false;
@@ -265,6 +516,7 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
 
         const { resourceRoot, modelDir, modelFileName } = parseModelPath(activeConfig.url);
         updateModelConfig(resourceRoot, modelDir, modelFileName, Number(activeConfig.kScale) || undefined);
+        updateInteractionConfig(activeConfig.tapMotions, activeConfig.emotionMap);
         initializeLive2D();
 
         if (disposed) {
@@ -311,8 +563,9 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle>((_props, ref) => {
         console.warn("[Live2DCanvas] releaseInstance failed", releaseError);
       }
       stopAudio();
+      stopExternalLipSync();
     };
-  }, [activeConfig.url, activeConfig.kScale, config, lastGoodConfig, fallbackToDefault, stopAudio]);
+  }, [activeConfig.url, activeConfig.kScale, config, lastGoodConfig, fallbackToDefault, stopAudio, stopExternalLipSync]);
 
   return (
     <div id="live2d" className="relative h-full w-full">

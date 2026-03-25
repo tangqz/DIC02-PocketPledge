@@ -117,3 +117,33 @@ export const ModelInteractionDragSensitivity = 0.3;
 export const ModelInteractionWheelScaleStep = 0.05;
 export const ModelInteractionMinScale = 0.15;
 export const ModelInteractionMaxScale = 8.0;
+
+export interface HitAreaTapAction {
+  motion: string;
+  expression: string;
+}
+
+export let TapMotions: Record<string, HitAreaTapAction> = {};
+export let RuntimeEmotionMap: Record<string, number> = {};
+
+export function updateInteractionConfig(
+  tapMotions: Record<string, HitAreaTapAction> | undefined,
+  emotionMap: Record<string, number> | undefined,
+): void {
+  TapMotions = { ...(tapMotions ?? {}) };
+  RuntimeEmotionMap = { ...(emotionMap ?? {}) };
+}
+
+/**
+ * Callback invoked when the user taps on the Live2D model's hit area.
+ * Set by the React layer to bridge into the chat system.
+ */
+let _onModelTapped: ((hitArea: string) => void) | null = null;
+
+export function setOnModelTapped(cb: ((hitArea: string) => void) | null): void {
+  _onModelTapped = cb;
+}
+
+export function fireModelTapped(hitArea: string): void {
+  _onModelTapped?.(hitArea);
+}

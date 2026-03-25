@@ -41,6 +41,39 @@ export default function StatusBar() {
         title={isConnected ? t("status.connected") : t("status.disconnected")}
       />
 
+      {/* Timer */}
+      <div className="flex items-center gap-3">
+        {/* Mini progress ring */}
+        <div className="relative flex items-center justify-center">
+          <svg className="h-9 w-9 -rotate-90" viewBox="0 0 36 36">
+            <circle
+              cx="18"
+              cy="18"
+              r="15"
+              fill="none"
+              className="stroke-white/10"
+              strokeWidth="3"
+            />
+            <circle
+              cx="18"
+              cy="18"
+              r="15"
+              fill="none"
+              className="stroke-accent transition-all duration-1000"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeDasharray={`${progress * 94.25} 94.25`}
+            />
+          </svg>
+        </div>
+        <span className="font-mono text-xl font-semibold tabular-nums tracking-tight">
+          {fmt(timerSeconds)}
+        </span>
+      </div>
+
+      {/* Divider */}
+      <div className="h-6 w-px bg-slate-100" />
+
       {/* Balance */}
       <div className="flex items-center gap-2">
         <span className="text-sm text-slate-500">{t("status.balance")}</span>

@@ -82,6 +82,10 @@ export class LAppAdapter {
     this.getModel()?.setExpression(name);
   }
 
+  public setExternalLipSyncValue(value: number): void {
+    this.getModel()?.setExternalLipSyncValue(value);
+  }
+
   // @deprecated
   public nextChara(): void {
     this.getMgr().nextScene();

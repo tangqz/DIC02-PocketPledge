@@ -88,6 +88,7 @@ export function useVAD({ onSpeechEnd, enabled = true }: UseVADOptions) {
   const { setIsListening, setVadActive, setMicGranted } = useMediaStore.getState();
   const isAgentSpeaking = useChatStore((s) => s.isAgentSpeaking);
   const micMuted = useMediaStore((s) => s.micMuted);
+  const vadSensitivity = useMediaStore((s) => s.vadSensitivity);
   const onSpeechEndRef = useRef(onSpeechEnd);
   onSpeechEndRef.current = onSpeechEnd;
 
@@ -103,8 +104,8 @@ export function useVAD({ onSpeechEnd, enabled = true }: UseVADOptions) {
           baseAssetPath: VAD_ASSET_BASE_PATH,
           onnxWASMBasePath: ORT_WASM_PATHS as unknown as string,
           model: "legacy",
-          positiveSpeechThreshold: 0.35,
-          negativeSpeechThreshold: 0.2,
+          positiveSpeechThreshold: vadSensitivity,
+          negativeSpeechThreshold: Math.max(0.05, vadSensitivity - 0.15),
           preSpeechPadMs: 500,
           redemptionMs: 900,
           minSpeechMs: 250,
@@ -164,7 +165,7 @@ export function useVAD({ onSpeechEnd, enabled = true }: UseVADOptions) {
       setVadActive(false);
       setIsListening(false);
     };
-  }, [enabled]);
+  }, [enabled, vadSensitivity]);
 
   // Pause/resume when agent is speaking or user mutes mic
   useEffect(() => {

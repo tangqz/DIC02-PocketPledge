@@ -206,6 +206,7 @@ export interface PlanTask {
   recurrence?: "daily" | "weekly" | "custom";
   priority?: "low" | "medium" | "high";
   notes?: string;
+  rewardCents?: number;
 }
 
 export interface PlanData {
@@ -286,8 +287,23 @@ export interface ControlMessage {
   };
 }
 
+/** Streaming TTS audio chunk — played gaplessly via AudioContext scheduling */
+export interface AudioStreamChunk {
+  type: "audio-stream-chunk";
+  audio: string; // base64 WAV
+  expression: string;
+}
+
+/** Signals end of a streaming TTS audio session */
+export interface AudioStreamEnd {
+  type: "audio-stream-end";
+  expression: string;
+}
+
 export type RxMessage =
   | AudioMessage
+  | AudioStreamChunk
+  | AudioStreamEnd
   | AgentTextChunk
   | UserTranscript
   | AgentTextEnd

@@ -18,14 +18,14 @@ from .models import (
 )
 
 FEN_PER_RMB = Decimal("100")
-SERVICE_FEE_PER_HOUR_RMB = Decimal("8.00")
+SERVICE_FEE_PER_HOUR_RMB = Decimal("2.00")
 PENALTY_PER_DISTRACTION = 300  # 单位：分，每走神一次扣3元
 PROFILE_DOC_MAX_CHARS = 4000
 CHAT_MESSAGE_MAX_CHARS = 2000
 
 
 def _focus_fee_cents(planned_focus_minutes: int) -> int:
-    """Calculate focus fee in cents from RMB 8/hour, rounded to 2 decimals RMB."""
+    """Calculate focus fee in cents from RMB 2/hour, rounded to 2 decimals RMB."""
     fee_rmb = (
         Decimal(planned_focus_minutes) * SERVICE_FEE_PER_HOUR_RMB / Decimal("60")
     ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -53,7 +53,7 @@ def _get_or_create_user_with_wallet(db: Session, user_id: int) -> tuple[User, Wa
 
     wallet = db.get(Wallet, user_id)
     if not wallet:
-        wallet = Wallet(user_id=user_id, balance=0)
+        wallet = Wallet(user_id=user_id, balance=0, charity_ratio=40)
         db.add(wallet)
         db.flush()
 
@@ -166,7 +166,7 @@ def execute_penalty(
     )
     actual_penalty = min(requested_penalty, max(user_wallet.balance, 0))
 
-    charity_amount = actual_penalty * 40 // 100
+    charity_amount = actual_penalty * user_wallet.charity_ratio // 100
     pool_amount = actual_penalty - charity_amount
 
     charity_tx_id = _new_tx_id()
@@ -249,6 +249,143 @@ def execute_penalty(
     }
 
 
+REWARD_QUALITY_DECAY_PER_DISTRACTION = Decimal("0.15")
+
+
+def complete_focus_session(
+    db: Session,
+    user_id: int,
+    session_ref: str,
+    focused_seconds: int,
+    planned_seconds: int,
+    distraction_count: int,
+    task_reward_cents: int = 0,
+) -> dict:
+    """Award a reward from the pool back to the user based on focus quality.
+
+    If *task_reward_cents* > 0, that value is used as the maximum reward
+    (set by the system agent on the plan task).  Otherwise a baseline is
+    calculated from the upfront service fee.
+
+    A user can only earn one task reward per calendar day (UTC).  If a
+    focus_reward transaction already exists for today, no additional reward
+    is issued.
+    """
+    if user_id in (0, 1):
+        raise ValueError("cannot reward system accounts")
+
+    _get_or_create_user_with_wallet(db, user_id)
+
+    # One-reward-per-day guard: block duplicate reward on the same UTC date.
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    already_rewarded = (
+        db.query(Transaction)
+        .filter(
+            Transaction.tx_type == "focus_reward",
+            Transaction.to_user_id == user_id,
+            Transaction.created_at >= today_start,
+        )
+        .first()
+    )
+    if already_rewarded is not None:
+        balance = _require_wallet(db, user_id).balance
+        return {
+            "ok": True,
+            "user_id": user_id,
+            "reward": 0,
+            "quality": 0.0,
+            "completion": 0.0,
+            "balance_after": balance,
+            "skipped": "already_rewarded_today",
+        }
+
+    # Quality ratio: starts at 1.0, minus 0.15 per distraction, min 0
+    quality = max(
+        Decimal("0"),
+        Decimal("1") - REWARD_QUALITY_DECAY_PER_DISTRACTION * distraction_count,
+    )
+
+    # Completion ratio: actual focused vs planned
+    completion = (
+        Decimal(min(focused_seconds, planned_seconds)) / Decimal(max(planned_seconds, 1))
+    )
+
+    base_reward = task_reward_cents if task_reward_cents > 0 else _focus_fee_cents(planned_seconds // 60)
+    reward_cents = int(
+        (Decimal(base_reward) * quality * completion).to_integral_value(
+            rounding=ROUND_HALF_UP
+        )
+    )
+
+    if reward_cents <= 0:
+        return {
+            "ok": True,
+            "user_id": user_id,
+            "reward": 0,
+            "quality": float(quality),
+            "completion": float(completion),
+            "balance_after": _require_wallet(db, user_id).balance,
+        }
+
+    pool_wallet = _require_wallet_for_update(db, 1)
+    user_wallet = _require_wallet_for_update(db, user_id)
+
+    actual_reward = min(reward_cents, max(pool_wallet.balance, 0))
+    if actual_reward <= 0:
+        return {
+            "ok": True,
+            "user_id": user_id,
+            "reward": 0,
+            "quality": float(quality),
+            "completion": float(completion),
+            "balance_after": user_wallet.balance,
+        }
+
+    tx_id = _new_tx_id()
+    try:
+        pool_wallet.balance -= actual_reward
+        user_wallet.balance += actual_reward
+        db.add(
+            Transaction(
+                id=tx_id,
+                tx_type="focus_reward",
+                from_user_id=1,
+                to_user_id=user_id,
+                amount=actual_reward,
+                reason=f"Focus reward: {focused_seconds}s focused, {distraction_count} distractions",
+                session_ref=session_ref,
+                meta_json=json.dumps(
+                    {
+                        "focused_seconds": focused_seconds,
+                        "planned_seconds": planned_seconds,
+                        "distraction_count": distraction_count,
+                        "quality": float(quality),
+                        "completion": float(completion),
+                        "base_reward": base_reward,
+                        "created_at": _now_iso(),
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    db.refresh(user_wallet)
+
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "reward": actual_reward,
+        "quality": float(quality),
+        "completion": float(completion),
+        "balance_after": user_wallet.balance,
+        "tx_id": tx_id,
+    }
+
+
 def topup_wallet(
     db: Session, user_id: int, amount: int, reason: str = "User top-up"
 ) -> dict:
@@ -296,6 +433,19 @@ def topup_wallet(
     }
 
 
+def update_charity_ratio(db: Session, user_id: int, new_ratio: int) -> Wallet:
+    if not (0 <= new_ratio <= 100):
+        raise ValueError("Charity ratio must be between 0 and 100")
+
+    wallet = db.get(Wallet, user_id)
+    if not wallet:
+        raise ValueError("User wallet not found")
+
+    wallet.charity_ratio = new_ratio
+    db.commit()
+    db.refresh(wallet)
+    return wallet
+
 def get_user_status(db: Session, user_id: int) -> dict:
     if user_id in (0, 1):
         wallet = _require_wallet(db, user_id)
@@ -314,6 +464,7 @@ def get_user_status(db: Session, user_id: int) -> dict:
         "user_id": user_id,
         "balance": wallet.balance,
         "is_bankrupt": wallet.balance <= 0,
+        "charity_ratio": wallet.charity_ratio,
     }
 
 
@@ -489,6 +640,10 @@ def _normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
             normalized_task["endDate"] = task_end_date
         if task_recurrence:
             normalized_task["recurrence"] = task_recurrence
+
+        reward_cents = _parse_int(raw_task.get("rewardCents"))
+        if reward_cents is not None and reward_cents > 0:
+            normalized_task["rewardCents"] = reward_cents
 
         priority = str(raw_task.get("priority") or "").strip().lower()
         if priority in {"low", "medium", "high"}:

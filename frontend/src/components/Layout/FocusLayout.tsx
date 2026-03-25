@@ -12,6 +12,7 @@ import MediaPreviewDock from "@/components/SupervisionPanel/MediaPreviewDock";
 
 export default function FocusLayout() {
   const live2dRef = useRef<Live2DCanvasHandle>(null);
+  const lastTapRef = useRef(0);
   const send = useSend();
   const { locale } = useI18n();
 
@@ -59,6 +60,17 @@ export default function FocusLayout() {
     send({ type: "text-input", text });
   }, [interruptAgentOutput, send]);
 
+  const handleModelTapped = useCallback((hitArea: string) => {
+    if (isPaused) return;
+    const now = Date.now();
+    if (now - lastTapRef.current < 5000) return; // throttle: 5s cooldown
+    lastTapRef.current = now;
+    const chat = useChatStore.getState();
+    if (chat.isAgentSpeaking) return;
+    const msg = hitArea === "Head" ? "[用户摸了摸你的头]" : "[用户戳了戳你]";
+    send({ type: "text-input", text: msg });
+  }, [isPaused, send]);
+
   return (
     <div className="relative flex h-full min-h-0 flex-col animate-fade-in">
       <div className="z-20 shrink-0 p-3">
@@ -67,15 +79,15 @@ export default function FocusLayout() {
 
       <div className="relative min-h-0 flex-1">
         <div id="live2d-container" className="absolute inset-0">
-          {degradedMode ? <DowngradeTimerCard timerSeconds={timerSeconds} locale={locale} /> : <Live2DCanvas ref={live2dRef} />}
+          {degradedMode ? <DowngradeTimerCard timerSeconds={timerSeconds} locale={locale} /> : <Live2DCanvas ref={live2dRef} onModelTapped={handleModelTapped} />}
         </div>
 
         {!degradedMode ? (
           <>
-            <div className="absolute bottom-[26%] left-1/2 z-20 -translate-x-1/2">
+            <div className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2">
               <VoiceInput />
             </div>
-            <MediaPreviewDock className="absolute bottom-[26%] right-4 z-20" />
+            <MediaPreviewDock className="absolute bottom-4 right-4 z-20" />
           </>
         ) : null}
 

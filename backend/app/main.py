@@ -9,6 +9,7 @@ import time
 import uuid
 from typing import Any
 from urllib.parse import parse_qsl, urlencode
+import asyncio
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +18,7 @@ from app.auth import router as auth_router
 from app.business.api import router as business_router
 from app.business.models import init_db
 from app.gateway.ws_router import router as gateway_router
+from app.media_ai.asr_tts import warmup_asr_service
 
 
 LOG_BODY_LIMIT = 1000
@@ -156,8 +158,20 @@ async def log_http_requests(request: Request, call_next):
 
 
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
     init_db()
+    warmup_timeout_seconds = max(
+        1.0, float(os.getenv("MEDIA_AI_ASR_WARMUP_TIMEOUT", "30"))
+    )
+    try:
+        await asyncio.wait_for(warmup_asr_service(), timeout=warmup_timeout_seconds)
+    except TimeoutError:
+        logger.warning(
+            "ASR warmup timed out after %.1fs; backend continues startup",
+            warmup_timeout_seconds,
+        )
+    except Exception:
+        logger.exception("Unexpected ASR warmup failure; backend continues startup")
     logger.info(
         "backend startup complete agent_backend=%s asr_provider=%s",
         os.getenv("AGENT_BACKEND", "mock"),

@@ -1,6 +1,7 @@
 # Study Buddy API Contract
 
 本文档描述当前后端已经实现的 REST 接口，以及与产品描述相比仍然缺失的能力。
+当前项目已完全弃用 Dify，采用本地代理（`AGENT_BACKEND=local`）架构。
 
 ## Base
 
@@ -26,7 +27,6 @@
 ```json
 {
 	"access_token": "...",
-	"token_type": "bearer",
 	"user_id": 3,
 	"username": "alice"
 }
@@ -43,13 +43,27 @@
 }
 ```
 
+返回:
+
+```json
+{
+	"access_token": "...",
+	"user_id": 3,
+	"username": "alice"
+}
+```
+
 ### GET /api/auth/me
 
-返回当前用户与钱包余额。
+返回当前用户基础信息与钱包余额。
 
 ## Business
 
-### POST /api/business/session/start
+业务接口主要分为公开给前端调用的 `/api/business/me/*` 接口，和留给系统内部工具调用的 `/api/business/internal/users/{user_id}/*` 接口。内部接口仍然通过请求头中的 `Authorization: Bearer <配置的DIFY_TOOL_BEARER_TOKEN>` 进行认证保护。
+
+### 核心操作
+
+#### POST /api/business/session/start
 
 说明:
 - 需要 JWT
@@ -64,14 +78,9 @@
 }
 ```
 
-返回字段:
-- upfront_cost
-- balance_after
-- pool_balance_after
-- session_ref
-- tx_id
+返回包含 `upfront_cost`, `balance_after`, `pool_balance_after`, `session_ref`, `tx_id`。
 
-### POST /api/business/penalty/execute
+#### POST /api/business/penalty/execute
 
 说明:
 - 需要 JWT
@@ -86,19 +95,32 @@
 }
 ```
 
-### GET /api/business/me/status
-
-返回当前用户余额与是否破产。
-
-### GET /api/business/users/{user_id}/status
+#### POST /api/business/me/wallet/topup
 
 说明:
-- 当前为内部接口，保留给 Dify/tool callback 使用
-- 需要固定 Bearer Token，来自后端环境变量 `DIFY_TOOL_BEARER_TOKEN`
+- 需要 JWT
+- 向钱包充值
 
-## 已缺失能力
+请求体:
 
-以下能力现已具备最小后端接口，可供系统 Agent 或 Dify 工具调用：
+```json
+{
+	"amount": 1000,
+	"reason": "测试充值"
+}
+```
+
+### 状态查询
+
+#### GET /api/business/me/status
+
+返回当前用户余额与是否破产 (`balance`, `is_bankrupt`)。
+
+#### GET /api/business/users/{user_id}/status
+
+内部接口，通过工具调用的状态查询。
+
+### 个人数据管理 (Public APIs)
 
 - `GET /api/business/me/plan`：读取当前有效学习计划
 - `PUT /api/business/me/plan`：创建或更新当前学习计划
@@ -110,9 +132,10 @@
 - `POST /api/business/me/session-summaries`：写入一条会话总结
 - `GET /api/business/me/transactions`：查询当前用户相关流水
 
-以下能力现已具备固定 Bearer + `user_id` 显式传参的内部接口，更适合 Dify 工具调用：
+### 系统工具调用 (Internal APIs)
 
-- `GET /api/business/users/{user_id}/status`
+保留用于本地 System Agent 或者各类 Tools 的调用接口，这些接口支持显式指定 `user_id`：
+
 - `GET /api/business/internal/users/{user_id}/plan`
 - `PUT /api/business/internal/users/{user_id}/plan`
 - `GET /api/business/internal/users/{user_id}/profile`
@@ -123,10 +146,8 @@
 - `POST /api/business/internal/users/{user_id}/session-summaries`
 - `GET /api/business/internal/users/{user_id}/transactions`
 
-以下能力仍未实现完整产品闭环：
+## 尚未实现或未闭环的功能
 
-- RAG 检索与记忆写回的自动编排
-- 日历型计划展示与周期性计划规则引擎
-- 奖励任务创建、完成确认、奖励发放
-- Reward Pool 向用户返奖的正式接口
-- Charity / Pool 的独立管理接口
+- Reward Pool 向用户返奖的正式接口逻辑
+- 奖励任务的精细化创建、完成确认和发放
+- Charity / Pool 的独立管理后台接口

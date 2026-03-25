@@ -14,6 +14,7 @@ interface CalendarOccurrence {
   completed: boolean;
   estimatedMinutes?: number;
   actualMinutes?: number;
+  rewardCents?: number;
 }
 
 interface DaySummary {
@@ -22,6 +23,7 @@ interface DaySummary {
   completedMinutes: number;
   completedCount: number;
   allDone: boolean;
+  totalRewardCents: number;
 }
 
 function dateKeyOf(date: Date): string {
@@ -143,6 +145,7 @@ function buildOccurrences(plan: PlanData | null): CalendarOccurrence[] {
         completed: isDone,
         estimatedMinutes: task.estimatedMinutes,
         actualMinutes: dateActual,
+        rewardCents: task.rewardCents,
       });
     };
 
@@ -228,12 +231,14 @@ export default function DailyPlanCalendar({ plan, onStartFocusDay }: DailyPlanCa
         return acc + actual;
       }, 0);
       const completedCount = items.filter((item) => item.completed).length;
+      const totalRewardCents = items.reduce((acc, item) => acc + (item.rewardCents || 0), 0);
       map.set(dateKey, {
         items,
         totalMinutes,
         completedMinutes,
         completedCount,
         allDone: items.length > 0 && completedCount === items.length,
+        totalRewardCents,
       });
     }
     return map;
@@ -254,6 +259,28 @@ export default function DailyPlanCalendar({ plan, onStartFocusDay }: DailyPlanCa
     setDisplayMonth(monthStart(firstOccurrenceDate));
     setSelectedDateKey(dateKeyOf(firstOccurrenceDate));
   }, [firstOccurrenceDate]);
+
+  // Stable today key for ring styling.
+  const todayKey = dateKeyOf(new Date());
+
+  // Preserve accumulated focus minutes across plan changes.
+  // Values only ever increase — switching to a new plan never erases history.
+  const [localActuals, setLocalActuals] = useState<Record<string, number>>({});
+  useEffect(() => {
+    if (!plan?.tasks) return;
+    setLocalActuals((prev) => {
+      const next = { ...prev };
+      for (const task of plan.tasks) {
+        const t = task as PlanTask & { actualMinutesByDate?: Record<string, number> };
+        if (t.actualMinutesByDate && typeof t.actualMinutesByDate === "object") {
+          for (const [dk, mins] of Object.entries(t.actualMinutesByDate)) {
+            next[dk] = Math.max(next[dk] ?? 0, Number(mins) || 0);
+          }
+        }
+      }
+      return next;
+    });
+  }, [plan]);
 
   const monthGrid = useMemo(() => buildMonthGrid(displayMonth), [displayMonth]);
 
@@ -322,6 +349,7 @@ export default function DailyPlanCalendar({ plan, onStartFocusDay }: DailyPlanCa
           const isDone = Boolean(summary?.allDone);
           const isSelected = selectedDateKey === key;
           const isDeadline = deadlineDate ? dateKeyOf(deadlineDate) === key : false;
+          const isToday = key === todayKey;
 
           return (
             <div
@@ -335,29 +363,36 @@ export default function DailyPlanCalendar({ plan, onStartFocusDay }: DailyPlanCa
                   setSelectedDateKey(key);
                 }
               }}
-              className={`relative flex aspect-square cursor-pointer flex-col items-start justify-between rounded-lg border p-1.5 text-[11px] transition-all ${
+              className={`relative flex aspect-square cursor-pointer flex-col items-start justify-between rounded-lg border p-1.5 text-[11px] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 ${
                 inMonth ? "text-slate-700" : "text-slate-400"
               } ${
-                items.length === 0
+                items.length === 0 && !localActuals[key]
                   ? "border-slate-200 bg-white/65"
-                  : isDone
-                    ? "border-emerald-300 bg-emerald-100/65 text-emerald-800"
-                    : "border-rose-300 bg-rose-100/70 text-rose-800"
-              } ${isDeadline ? "ring-1 ring-warning" : ""} ${isSelected ? "ring-2 ring-accent" : ""}`}
+                  : items.length === 0
+                    ? "border-slate-300 bg-slate-100/70 text-slate-600"
+                    : isDone
+                      ? "border-emerald-300 bg-emerald-100/65 text-emerald-800"
+                      : "border-rose-300 bg-rose-100/70 text-rose-800"
+              } ${isDeadline ? "ring-1 ring-warning" : ""} ${isSelected ? "ring-2 ring-accent" : isToday ? "ring-2 ring-sky-400 ring-offset-1" : ""}`}
             >
               <div className="flex w-full items-center justify-between">
                 <span className="font-medium">{day.getDate()}</span>
-                {items.length > 0 ? (
-                  <span className="text-[12px] leading-none drop-shadow-sm">
-                    {isDone ? "✅" : "❌"}
-                  </span>
-                ) : null}
+                <span className="flex items-center gap-0.5">
+                  {(summary?.totalRewardCents ?? 0) > 0 && (
+                    <span className="text-[9px] font-semibold text-amber-600 drop-shadow-sm">🏆</span>
+                  )}
+                  {items.length > 0 ? (
+                    <span className="text-[12px] leading-none drop-shadow-sm">
+                      {isDone ? "✅" : "❌"}
+                    </span>
+                  ) : null}
+                </span>
               </div>
               <div className="mt-1 w-full text-[10px] leading-tight">
                 {items.length > 0 ? (
                   <div className="w-full">
                     <div className="mb-0.5 flex justify-between text-[9px] opacity-80">
-                      <span>{summary?.completedMinutes || 0}m</span>
+                      <span>{Math.max(summary?.completedMinutes || 0, localActuals[key] || 0)}m</span>
                       <span>{summary?.totalMinutes || 0}m</span>
                     </div>
                     <div className="h-1 w-full overflow-hidden rounded-full bg-black/10">
@@ -366,13 +401,15 @@ export default function DailyPlanCalendar({ plan, onStartFocusDay }: DailyPlanCa
                         style={{
                           width: `${
                             (summary?.totalMinutes || 0) > 0
-                              ? Math.min(100, ((summary?.completedMinutes || 0) / (summary?.totalMinutes || 1)) * 100)
-                              : ((summary?.completedMinutes || 0) > 0 ? 100 : 0)
+                              ? Math.min(100, (Math.max(summary?.completedMinutes || 0, localActuals[key] || 0) / (summary?.totalMinutes || 1)) * 100)
+                              : (Math.max(summary?.completedMinutes || 0, localActuals[key] || 0) > 0 ? 100 : 0)
                           }%`,
                         }}
                       />
                     </div>
                   </div>
+                ) : localActuals[key] ? (
+                  <p className="text-[9px] font-medium opacity-75">{localActuals[key]}m</p>
                 ) : (
                   <p className="opacity-60">-</p>
                 )}
@@ -388,7 +425,14 @@ export default function DailyPlanCalendar({ plan, onStartFocusDay }: DailyPlanCa
             <p className="text-slate-500">{selectedDateKey}</p>
             {selectedDateItems.map((item) => (
               <div key={`${item.taskId}-${item.dateKey}`} className="flex items-center justify-between rounded-lg bg-slate-50 px-2 py-1.5">
-                <p className="truncate pr-2">{item.taskTitle}</p>
+                <div className="flex items-center gap-1.5 truncate pr-2">
+                  <p className="truncate">{item.taskTitle}</p>
+                  {(item.rewardCents ?? 0) > 0 && (
+                    <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700">
+                      🏆 ¥{((item.rewardCents ?? 0) / 100).toFixed(2)}
+                    </span>
+                  )}
+                </div>
                 <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium flex items-center gap-1 ${item.completed ? "text-emerald-700 bg-emerald-100/50" : "text-rose-700 bg-rose-100/50"}`}>
                   {item.completed ? "✅ " + (locale === "zh" ? "已完成" : "Done") : "❌ " + (locale === "zh" ? "未完成" : "Pending")}
                 </span>

@@ -117,25 +117,71 @@ export class LAppLive2DManager {
       if (!model || !model.getModel()) {
         continue;
       }
+      const hitAreaId = model.anyhitTest(x, y);
 
-      if (model.hitTest(LAppDefine.HitAreaNameHead, x, y)) {
+      const applySemanticExpression = (emotionKeyword: string): void => {
+        if (!emotionKeyword) {
+          return;
+        }
+        const normalized = emotionKeyword.toLowerCase();
+        const expressionIndex = LAppDefine.RuntimeEmotionMap[normalized];
+        if (expressionIndex == null || !model._modelSetting) {
+          return;
+        }
+        const expressionName = model._modelSetting.getExpressionName(expressionIndex);
+        if (expressionName) {
+          model.setExpression(expressionName);
+        }
+      };
+
+      const playConfiguredTapMotion = (hitAreaId: string): boolean => {
+        const action = LAppDefine.TapMotions[hitAreaId];
+        if (!action) {
+          return false;
+        }
+
+        if (action.expression) {
+          applySemanticExpression(action.expression);
+        }
+
+        if (action.motion) {
+          const motionCount = model._modelSetting?.getMotionCount(action.motion) ?? 0;
+          if (motionCount > 0) {
+            const randomIndex = Math.floor(Math.random() * motionCount);
+            model.startMotion(action.motion, randomIndex, LAppDefine.PriorityNormal, this._finishedMotion);
+            return true;
+          }
+        }
+
+        return false;
+      };
+
+      if (hitAreaId === 'HitAreaHead' || model.hitTest(LAppDefine.HitAreaNameHead, x, y)) {
         if (LAppDefine.DebugLogEnable) {
           LAppPal.printMessage(
             `[APP]hit area: [${LAppDefine.HitAreaNameHead}]`
           );
         }
-        model.setRandomExpression();
-      } else if (model.hitTest(LAppDefine.HitAreaNameBody, x, y)) {
+        const usedConfig = playConfiguredTapMotion('HitAreaHead');
+        if (!usedConfig) {
+          model.setRandomExpression();
+        }
+        LAppDefine.fireModelTapped('Head');
+      } else if (hitAreaId === 'HitAreaBody' || model.hitTest(LAppDefine.HitAreaNameBody, x, y)) {
         if (LAppDefine.DebugLogEnable) {
           LAppPal.printMessage(
             `[APP]hit area: [${LAppDefine.HitAreaNameBody}]`
           );
         }
-        model.startRandomMotion(
-          LAppDefine.MotionGroupTapBody,
-          LAppDefine.PriorityNormal,
-          this._finishedMotion
-        );
+        const usedConfig = playConfiguredTapMotion('HitAreaBody');
+        if (!usedConfig) {
+          model.startRandomMotion(
+            LAppDefine.MotionGroupTapBody,
+            LAppDefine.PriorityNormal,
+            this._finishedMotion
+          );
+        }
+        LAppDefine.fireModelTapped('Body');
       }
     }
   }

@@ -8,13 +8,14 @@
 import { create } from "zustand";
 
 const TOKEN_KEY = "sb_token";
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:12393";
+export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:12393";
 
 export interface AuthUser {
   user_id: number;
   username: string;
   email?: string | null;
   balance?: number;
+  charity_ratio?: number;
 }
 
 interface AuthState {
