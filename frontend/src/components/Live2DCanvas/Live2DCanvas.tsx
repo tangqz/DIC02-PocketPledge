@@ -23,8 +23,6 @@ import { useChatStore } from "@/stores/chatStore";
 import { useSessionStore } from "@/stores/sessionStore";
 import { updateInteractionConfig, updateModelConfig, setOnModelTapped } from "@/live2d/WebSDK/src/lappdefine";
 
-const IS_DEV = import.meta.env.DEV;
-
 /** Imperative API exposed to parent via ref */
 export interface Live2DCanvasHandle {
   setExpression: (emotionKeyword: string) => void;
@@ -90,7 +88,6 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle, Live2DCanvasProps>(({ onMode
   );
   const { t } = useI18n();
 
-  const [debugText, setDebugText] = useState("init");
   const [isLoaded, setIsLoaded] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [lastGoodConfig, setLastGoodConfig] = useState<ModelConfig | null>(null);
@@ -597,8 +594,6 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle, Live2DCanvasProps>(({ onMode
           </div>
         </div>
       )}
-
-
     </div>
   );
 });

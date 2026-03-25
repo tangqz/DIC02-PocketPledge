@@ -1,5 +1,5 @@
 /* ────────────────────────────────────────────────
- *  StatusBar  –  Timer, Balance, Current Task
+ *  StatusBar  –  Balance, Current Task
  *  Renders at the top of the Focus layout.
  * ──────────────────────────────────────────────── */
 import { useEffect, useRef } from "react";
@@ -7,17 +7,8 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { useI18n } from "@/lib/i18n";
 import { formatRmbFromCents, formatSignedRmbFromCents } from "@/lib/currency";
 
-/** Format seconds to MM:SS */
-function fmt(s: number): string {
-  const m = String(Math.floor(s / 60)).padStart(2, "0");
-  const sec = String(s % 60).padStart(2, "0");
-  return `${m}:${sec}`;
-}
-
 export default function StatusBar() {
   const {
-    timerSeconds,
-    totalDuration,
     balance,
     lastBalanceChange,
     currentTask,
@@ -39,10 +30,6 @@ export default function StatusBar() {
     }
     prevBalance.current = balance;
   }, [balance]);
-
-  // Timer progress (0 → 1)
-  const progress =
-    totalDuration > 0 ? 1 - timerSeconds / totalDuration : 0;
 
   const isDeducting = lastBalanceChange && lastBalanceChange.change < 0;
 

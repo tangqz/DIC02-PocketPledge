@@ -18,6 +18,7 @@ export default function FocusLayout() {
 
   const supervisionState = useSessionStore((s) => s.supervisionState);
   const timerSeconds = useSessionStore((s) => s.timerSeconds);
+  const totalDuration = useSessionStore((s) => s.totalDuration);
   const pauseRemaining = useSessionStore((s) => s.pauseRemaining);
   const degradedMode = useSessionStore((s) => s.degradedMode);
   const activeToolCall = useSessionStore((s) => s.activeToolCall);
@@ -90,7 +91,35 @@ export default function FocusLayout() {
           </>
         ) : null}
 
-
+        {/* Countdown timer in top-left, below logout button */}
+        <div className="absolute left-4 top-16 z-50 flex items-center gap-3 rounded-2xl bg-surface-elevated/90 px-4 py-3 shadow-lg backdrop-blur-lg">
+          <svg className="h-10 w-10 -rotate-90" viewBox="0 0 36 36">
+            <circle
+              cx="18"
+              cy="18"
+              r="15"
+              fill="none"
+              className="stroke-white/20"
+              strokeWidth="3"
+            />
+            <circle
+              cx="18"
+              cy="18"
+              r="15"
+              fill="none"
+              className="stroke-green-500 transition-all duration-1000"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeDasharray={`${(totalDuration > 0 ? 1 - timerSeconds / totalDuration : 0) * 94.25} 94.25`}
+            />
+          </svg>
+          <div className="flex flex-col leading-tight">
+            <span className="text-xs text-slate-500">{locale === "zh" ? "专注剩余" : "Focus time"}</span>
+            <span className="font-mono text-xl font-semibold tabular-nums tracking-tight text-slate-800">
+              {Math.floor(timerSeconds / 60)}:{String(timerSeconds % 60).padStart(2, "0")}
+            </span>
+          </div>
+        </div>
 
         {activeToolCall ? (
           <div className="absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-full bg-accent/20 px-4 py-1.5 text-xs font-medium text-accent">
