@@ -29,9 +29,13 @@ from app.business.crud import (
 )
 from app.gateway.session import SessionState
 from app.media_ai import (
+    QWEN_TTS_SAMPLE_RATE,
+    create_streaming_tts_session,
     evaluate_start_readiness,
     evaluate_vision,
+    pcm16_bytes_to_wav_bytes,
     process_text_chat,
+    strip_unpronounceable_for_tts,
     transcribe_audio,
 )
 from app.system_agent import SystemAgentService
@@ -1978,6 +1982,31 @@ async def handle_complete(user_id: str, session: SessionState) -> None:
         await send_tool_call_status(user_id, "supervision.complete", "error", str(exc))
 
 
+async def _run_streaming_audio_reader(
+    tts_session: Any,
+    user_id: str,
+    expression: str,
+) -> None:
+    """Background task: read PCM chunks from a streaming TTS session, wrap in WAV, send to frontend."""
+    import base64 as _b64
+
+    while True:
+        pcm_chunk = await tts_session.read_audio_chunk()
+        if pcm_chunk is None:
+            break
+        if not pcm_chunk:
+            continue
+        try:
+            wav_bytes = pcm16_bytes_to_wav_bytes(pcm_chunk, sample_rate=QWEN_TTS_SAMPLE_RATE)
+            audio_b64 = _b64.b64encode(wav_bytes).decode("ascii")
+            await send_audio_stream_chunk(user_id, audio=audio_b64, expression=expression)
+        except Exception:
+            logger.exception("streaming TTS audio send failed, user_id=%s", user_id)
+
+    # Signal frontend that the streaming audio is complete
+    await send_audio_stream_end(user_id, expression=expression)
+
+
 async def stream_agent_reply(
     user_id: str,
     user_text: str,
@@ -1992,9 +2021,24 @@ async def stream_agent_reply(
 
     Returns the collected reply text.
     """
+    # --- Try to use streaming TTS (single WS connection) ---
+    tts_session = create_streaming_tts_session(character_id=character_id) if include_audio else None
+    use_streaming = tts_session is not None
+    audio_reader_task: asyncio.Task[Any] | None = None
+
+    if use_streaming:
+        try:
+            await tts_session.start()
+        except Exception:
+            logger.warning("streaming TTS session start failed, falling back to per-sentence TTS", exc_info=True)
+            tts_session = None
+            use_streaming = False
+
     parts: list[str] = []
     sent_text = False
-    audio_tasks = []
+    last_expression = "neutral"
+    audio_tasks: list[tuple[asyncio.Task[Any], str, str]] = []
+
     async for chunk in process_text_chat(
         user_text=user_text,
         session_id=user_id,
@@ -2003,6 +2047,7 @@ async def stream_agent_reply(
         focus_status=focus_status,
         language_mode=language_mode,
         character_id=character_id,
+        skip_audio=use_streaming,
     ):
         chunk_text = _sanitize_agent_text(str(chunk.get("text", "")))
         expression = str(chunk.get("expression", "neutral"))
@@ -2010,6 +2055,7 @@ async def stream_agent_reply(
         if chunk_text:
             parts.append(chunk_text)
             sent_text = True
+            last_expression = expression
             await send_agent_text_chunk(user_id, chunk_text)
             if expression:
                 await send_control(
@@ -2017,10 +2063,36 @@ async def stream_agent_reply(
                     "set-expression",
                     {"expression": expression},
                 )
-        if include_audio and audio_coro is not None and chunk_text:
+
+        # -- streaming path: feed text to TTS session --
+        if use_streaming and chunk_text:
+            # Use pre-computed tts_text (both expression tags and kaomoji stripped)
+            tts_feed = str(chunk.get("tts_text", ""))
+            if tts_feed:
+                if audio_reader_task is None:
+                    audio_reader_task = asyncio.create_task(
+                        _run_streaming_audio_reader(tts_session, user_id, last_expression)
+                    )
+                await tts_session.append_text(tts_feed)
+
+        # -- fallback path: per-sentence audio coro --
+        if not use_streaming and include_audio and audio_coro is not None and chunk_text:
             audio_task = asyncio.create_task(audio_coro)
             audio_tasks.append((audio_task, expression, chunk_text))
 
+    # -- finish streaming TTS --
+    if use_streaming and tts_session is not None:
+        try:
+            await tts_session.finish()
+        except Exception:
+            logger.exception("streaming TTS finish failed, user_id=%s", user_id)
+        if audio_reader_task is not None:
+            try:
+                await audio_reader_task
+            except Exception:
+                logger.exception("streaming TTS reader task failed, user_id=%s", user_id)
+
+    # -- fallback: send per-sentence audio --
     for task, expression, chunk_text in audio_tasks:
         try:
             audio_data = await task
@@ -2063,13 +2135,27 @@ async def _stream_and_detect_sys(
 
     Returns (collected_clean_text, sys_detected, capture_detected, directive_task).
     """
+    # --- Try to use streaming TTS (single WS connection) ---
+    tts_session = create_streaming_tts_session(character_id=character_id) if include_audio else None
+    use_streaming = tts_session is not None
+    audio_reader_task: asyncio.Task[Any] | None = None
+
+    if use_streaming:
+        try:
+            await tts_session.start()
+        except Exception:
+            logger.warning("streaming TTS session start failed, falling back to per-sentence TTS", exc_info=True)
+            tts_session = None
+            use_streaming = False
+
     parts: list[str] = []
     sys_detected = False
     capture_detected = False
     sent_text = False
     sys_task: asyncio.Task[Any] | None = None
+    last_expression = "neutral"
 
-    audio_tasks = []
+    audio_tasks: list[tuple[asyncio.Task[Any], str, str]] = []
 
     async for chunk in process_text_chat(
         user_text=user_text,
@@ -2079,6 +2165,7 @@ async def _stream_and_detect_sys(
         focus_status=focus_status,
         language_mode=language_mode,
         character_id=character_id,
+        skip_audio=use_streaming,
     ):
         chunk_text = _sanitize_agent_text(str(chunk.get("text", "")))
         raw_text = str(chunk.get("raw_text", ""))
@@ -2095,6 +2182,7 @@ async def _stream_and_detect_sys(
         if chunk_text:
             parts.append(chunk_text)
             sent_text = True
+            last_expression = expression
             await send_agent_text_chunk(user_id, chunk_text)
             if expression:
                 await send_control(
@@ -2118,13 +2206,35 @@ async def _stream_and_detect_sys(
             if on_sys_detected is not None:
                 sys_task = asyncio.create_task(on_sys_detected())
 
-        if include_audio and audio_coro is not None and chunk_text:
-            # We wrap the audio coroutine into a task to run it concurrently,
-            # and append it to our queue of audio tasks.
+        # -- streaming path: feed text to TTS session --
+        if use_streaming and chunk_text:
+            # Use pre-computed tts_text (both expression tags and kaomoji stripped)
+            tts_feed = str(chunk.get("tts_text", ""))
+            if tts_feed:
+                if audio_reader_task is None:
+                    audio_reader_task = asyncio.create_task(
+                        _run_streaming_audio_reader(tts_session, user_id, last_expression)
+                    )
+                await tts_session.append_text(tts_feed)
+
+        # -- fallback path: per-sentence audio coro --
+        if not use_streaming and include_audio and audio_coro is not None and chunk_text:
             audio_task = asyncio.create_task(audio_coro)
             audio_tasks.append((audio_task, expression, chunk_text))
 
-    # Await and send audio chunks in order, but in the background relative to text streaming
+    # -- finish streaming TTS --
+    if use_streaming and tts_session is not None:
+        try:
+            await tts_session.finish()
+        except Exception:
+            logger.exception("streaming TTS finish failed, user_id=%s", user_id)
+        if audio_reader_task is not None:
+            try:
+                await audio_reader_task
+            except Exception:
+                logger.exception("streaming TTS reader task failed, user_id=%s", user_id)
+
+    # -- fallback: send per-sentence audio --
     for task, expression, chunk_text in audio_tasks:
         try:
             audio_data = await task
@@ -2257,6 +2367,29 @@ async def send_audio(user_id: str, audio: str, expression: str, text: str) -> No
             "audio": audio,
             "actions": {"expressions": [expression]},
             "display_text": {"text": clean_text, "name": BOT_NAME},
+        },
+    )
+
+
+async def send_audio_stream_chunk(user_id: str, audio: str, expression: str) -> None:
+    """Send a streaming TTS audio chunk (gapless playback on frontend)."""
+    await manager.send_personal_message(
+        user_id,
+        {
+            "type": "audio-stream-chunk",
+            "audio": audio,
+            "expression": expression,
+        },
+    )
+
+
+async def send_audio_stream_end(user_id: str, expression: str) -> None:
+    """Signal that streaming TTS audio is complete."""
+    await manager.send_personal_message(
+        user_id,
+        {
+            "type": "audio-stream-end",
+            "expression": expression,
         },
     )
 

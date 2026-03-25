@@ -6,6 +6,22 @@ import re
 EXPRESSION_PATTERN = re.compile(r"\[([a-zA-Z][a-zA-Z0-9_-]{0,31})\]")
 SENTENCE_ENDINGS = {"。", "！", "？", ".", "!", "?", "\n"}
 TRAILING_CLOSERS = {'"', "'", "”", "’", ")", "]", "}", "】", "）"}
+# LLM wraps kaomoji / decorative text in {curly braces}.
+# Two separate patterns:
+_CURLY_BRACED_STRIP_RE = re.compile(r"\{[^}]*\}")       # strips whole {content} — for TTS
+_CURLY_BRACE_UNWRAP_RE = re.compile(r"\{([^}]*)\}")      # strips braces, keeps content — for display
+
+
+def strip_unpronounceable_for_tts(text: str) -> str:
+    """Remove ``{curly-braced}`` content (kaomoji etc.) before sending to TTS."""
+    cleaned = _CURLY_BRACED_STRIP_RE.sub("", text)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def prepare_tts_text(text: str) -> str:
+    """Strip both ``[expression]`` tags and ``{kaomoji}`` entirely — for TTS input."""
+    text = EXPRESSION_PATTERN.sub("", text)
+    return strip_unpronounceable_for_tts(text)
 
 
 def extract_expression_and_clean(
@@ -15,6 +31,8 @@ def extract_expression_and_clean(
     matches = EXPRESSION_PATTERN.findall(text)
     expression = matches[-1].strip().lower() if matches else default_expression
     clean_text = EXPRESSION_PATTERN.sub("", text)
+    # Strip curly braces but keep the kaomoji content inside for display.
+    clean_text = _CURLY_BRACE_UNWRAP_RE.sub(r"\1", clean_text)
     clean_text = clean_text.replace("\r", " ").replace("\n", " ")
     clean_text = re.sub(r"\s+", " ", clean_text).strip()
     return expression, clean_text

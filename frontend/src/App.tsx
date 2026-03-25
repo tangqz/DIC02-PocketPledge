@@ -101,6 +101,16 @@ function AuthenticatedApp() {
         return;
       }
 
+      if (msg.type === "audio-stream-chunk") {
+        useAvatarStore.getState().enqueueStreamChunk(msg.audio, msg.expression);
+        return;
+      }
+
+      if (msg.type === "audio-stream-end") {
+        useAvatarStore.getState().endAudioStream();
+        return;
+      }
+
       if (msg.type === "model-info") {
         useAvatarStore.getState().setModelInfo(msg.model_info);
         if (msg.character_id && msg.character_id !== useCharacterStore.getState().selectedCharacterId) {

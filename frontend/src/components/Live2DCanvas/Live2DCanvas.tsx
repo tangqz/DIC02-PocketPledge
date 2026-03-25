@@ -17,7 +17,9 @@ import {
 import { DEFAULT_MODEL_CONFIG, type ModelConfig } from "@/lib/modelConfig";
 import { useI18n } from "@/lib/i18n";
 import { useAudioQueue } from "@/components/AudioPlayer/useAudioQueue";
+import { StreamingAudioPlayer } from "@/components/AudioPlayer/StreamingAudioPlayer";
 import { useAvatarStore } from "@/stores/avatarStore";
+import { useChatStore } from "@/stores/chatStore";
 import { useSessionStore } from "@/stores/sessionStore";
 import { updateInteractionConfig, updateModelConfig, setOnModelTapped } from "@/live2d/WebSDK/src/lappdefine";
 
@@ -65,7 +67,13 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle, Live2DCanvasProps>(({ onMode
   const pendingAudioMessages = useAvatarStore((s) => s.pendingAudioMessages);
   const playbackInterruptVersion = useAvatarStore((s) => s.playbackInterruptVersion);
   const shiftAudioMessage = useAvatarStore((s) => s.shiftAudioMessage);
+  const pendingStreamChunks = useAvatarStore((s) => s.pendingStreamChunks);
+  const streamEndReceived = useAvatarStore((s) => s.streamEndReceived);
+  const streamActiveVersion = useAvatarStore((s) => s.streamActiveVersion);
+  const shiftStreamChunk = useAvatarStore((s) => s.shiftStreamChunk);
+  const resetStreamState = useAvatarStore((s) => s.resetStreamState);
   const degradedMode = useSessionStore((s) => s.degradedMode);
+  const streamingPlayerRef = useRef<StreamingAudioPlayer | null>(null);
   const config = useMemo(
     () =>
       modelInfo
@@ -310,6 +318,112 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle, Live2DCanvasProps>(({ onMode
     onQueueEmpty: () => undefined,
   });
 
+  /* ── Streaming TTS: gapless AudioContext playback ────────── */
+
+  const stopStreamingLipSync = useCallback(() => {
+    if (lipSyncRafRef.current != null) {
+      window.cancelAnimationFrame(lipSyncRafRef.current);
+      lipSyncRafRef.current = null;
+    }
+    const adapter = sdkRef.current?.LAppAdapter?.getInstance();
+    adapter?.setExternalLipSyncValue(0);
+  }, []);
+
+  const startStreamingLipSync = useCallback(() => {
+    const adapter = sdkRef.current?.LAppAdapter?.getInstance();
+    const player = streamingPlayerRef.current;
+    if (!adapter || !player) return;
+
+    stopExternalLipSync();
+    const gain = Math.max(0.1, Number(activeConfig.lipSyncGain) || 1.0);
+
+    const tick = () => {
+      if (!player.isActive) {
+        adapter.setExternalLipSyncValue(0);
+        return;
+      }
+      const mapped = player.getLipSyncValue(gain);
+      adapter.setExternalLipSyncValue(mapped);
+      lipSyncRafRef.current = window.requestAnimationFrame(tick);
+    };
+    lipSyncRafRef.current = window.requestAnimationFrame(tick);
+  }, [activeConfig.lipSyncGain, stopExternalLipSync]);
+
+  const interruptStreaming = useCallback(() => {
+    streamingPlayerRef.current?.interrupt();
+    streamingPlayerRef.current = null;
+    stopStreamingLipSync();
+    resetStreamState();
+    useChatStore.getState().setAgentSpeaking(false);
+  }, [stopStreamingLipSync, resetStreamState]);
+
+  // Create player on first chunk of a new stream
+  useEffect(() => {
+    if (streamActiveVersion === 0 || degradedMode) return;
+
+    // New streaming session — dispose any previous player
+    if (streamingPlayerRef.current) {
+      streamingPlayerRef.current.interrupt();
+      streamingPlayerRef.current = null;
+    }
+
+    const player = new StreamingAudioPlayer();
+    streamingPlayerRef.current = player;
+    useChatStore.getState().setAgentSpeaking(true);
+
+    // Start talk motion
+    const adapter = sdkRef.current?.LAppAdapter?.getInstance();
+    const talkGroup = activeConfig.talkMotionGroup ?? "";
+    if (adapter) {
+      const motionCount = adapter.getMotionCount(talkGroup);
+      if (motionCount > 0) {
+        const randomIndex = Math.floor(Math.random() * motionCount);
+        adapter.startMotion(talkGroup, randomIndex, 2);
+      }
+    }
+
+    startStreamingLipSync();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streamActiveVersion, degradedMode]);
+
+  // Feed pending chunks to the streaming player
+  useEffect(() => {
+    if (pendingStreamChunks.length === 0) return;
+    const player = streamingPlayerRef.current;
+    if (!player) return;
+
+    // Drain all pending chunks
+    let chunk = shiftStreamChunk();
+    while (chunk) {
+      const { audio, expression } = chunk;
+      if (expression) setExpression(expression);
+      player.feed(audio);
+      chunk = shiftStreamChunk();
+    }
+  }, [pendingStreamChunks, setExpression, shiftStreamChunk]);
+
+  // Handle stream end
+  useEffect(() => {
+    if (!streamEndReceived) return;
+    const player = streamingPlayerRef.current;
+    if (!player) {
+      resetStreamState();
+      return;
+    }
+
+    player.end();
+    void player.waitComplete().then(() => {
+      // Only clean up if this is still the active player
+      if (streamingPlayerRef.current === player) {
+        player.dispose();
+        streamingPlayerRef.current = null;
+        stopStreamingLipSync();
+        useChatStore.getState().setAgentSpeaking(false);
+      }
+      resetStreamState();
+    });
+  }, [streamEndReceived, stopStreamingLipSync, resetStreamState]);
+
   // Runtime diagnostics overlay
   useEffect(() => {
     if (!IS_DEV) {
@@ -372,14 +486,16 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle, Live2DCanvasProps>(({ onMode
       return;
     }
     interrupt();
-  }, [degradedMode, interrupt]);
+    interruptStreaming();
+  }, [degradedMode, interrupt, interruptStreaming]);
 
   useEffect(() => {
     if (playbackInterruptVersion === 0) {
       return;
     }
     interrupt();
-  }, [interrupt, playbackInterruptVersion]);
+    interruptStreaming();
+  }, [interrupt, interruptStreaming, playbackInterruptVersion]);
 
   useEffect(() => {
     let disposed = false;
