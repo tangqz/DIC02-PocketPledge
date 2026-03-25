@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useSend } from "@/App";
 import { useSessionStore } from "@/stores/sessionStore";
+import { useMediaStore } from "@/stores/mediaStore";
 import { useChatStore } from "@/stores/chatStore";
 import { useAvatarStore } from "@/stores/avatarStore";
 import { useI18n } from "@/lib/i18n";
@@ -18,7 +19,6 @@ export default function FocusLayout() {
 
   const supervisionState = useSessionStore((s) => s.supervisionState);
   const timerSeconds = useSessionStore((s) => s.timerSeconds);
-  const totalDuration = useSessionStore((s) => s.totalDuration);
   const pauseRemaining = useSessionStore((s) => s.pauseRemaining);
   const degradedMode = useSessionStore((s) => s.degradedMode);
   const activeToolCall = useSessionStore((s) => s.activeToolCall);
@@ -26,6 +26,9 @@ export default function FocusLayout() {
   const tickPause = useSessionStore((s) => s.tickPause);
 
   const isPaused = supervisionState === "paused";
+
+  const screenGranted = useMediaStore((s) => s.screenGranted);
+  const requestScreenShare = useMediaStore((s) => s.requestScreenShare);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -91,41 +94,23 @@ export default function FocusLayout() {
           </>
         ) : null}
 
-        {/* Countdown timer in top-left, below logout button */}
-        <div className="absolute left-4 top-16 z-50 flex items-center gap-3 rounded-2xl bg-surface-elevated/90 px-4 py-3 shadow-lg backdrop-blur-lg">
-          <svg className="h-10 w-10 -rotate-90" viewBox="0 0 36 36">
-            <circle
-              cx="18"
-              cy="18"
-              r="15"
-              fill="none"
-              className="stroke-white/20"
-              strokeWidth="3"
-            />
-            <circle
-              cx="18"
-              cy="18"
-              r="15"
-              fill="none"
-              className="stroke-green-500 transition-all duration-1000"
-              strokeWidth="3"
-              strokeLinecap="round"
-              strokeDasharray={`${(totalDuration > 0 ? 1 - timerSeconds / totalDuration : 0) * 94.25} 94.25`}
-            />
-          </svg>
-          <div className="flex flex-col leading-tight">
-            <span className="text-xs text-slate-500">{locale === "zh" ? "专注剩余" : "Focus time"}</span>
-            <span className="font-mono text-xl font-semibold tabular-nums tracking-tight text-slate-800">
-              {Math.floor(timerSeconds / 60)}:{String(timerSeconds % 60).padStart(2, "0")}
-            </span>
-          </div>
-        </div>
-
         {activeToolCall ? (
           <div className="absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-full bg-accent/20 px-4 py-1.5 text-xs font-medium text-accent">
             {activeToolCall.tool}
           </div>
         ) : null}
+
+        {/* Screen share re-auth banner after page refresh */}
+        {!screenGranted && !degradedMode && (
+          <div className="absolute right-4 top-4 z-40">
+            <button
+              onClick={() => void requestScreenShare()}
+              className="flex items-center gap-2 rounded-xl bg-warning/90 px-3 py-1.5 text-xs font-semibold text-slate-800 shadow-md backdrop-blur-sm hover:bg-warning"
+            >
+              <span>{locale === "zh" ? "重新开启屏幕共享" : "Re-enable Screen Share"}</span>
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="h-[34%] min-h-[210px] border-t border-slate-200 bg-surface-elevated/60 backdrop-blur-lg">

@@ -45,12 +45,15 @@ const zh: TranslationDict = {
   // Status
   "status.balance": "余额(RMB)",
   "status.timer": "计时",
+  "status.focusRemaining": "剩余时间",
   "status.state.active": "专注中",
   "status.state.paused": "已暂停",
   "status.state.setup": "准备中",
   "status.state.completed": "已完成",
   "status.connected": "已连接",
   "status.disconnected": "未连接",
+  "status.charity": "慈善",
+  "status.pool": "奖池",
 
   // Summary
   "summary.title": "专注报告",
@@ -135,14 +138,15 @@ const en: TranslationDict = {
 
   "status.balance": "Balance (RMB)",
   "status.timer": "Timer",
+  "status.focusRemaining": "Remaining",
   "status.state.active": "Focusing",
   "status.state.paused": "Paused",
   "status.state.setup": "Setting Up",
   "status.state.completed": "Completed",
   "status.connected": "Connected",
   "status.disconnected": "Disconnected",
-    "status.charity": "Charity",
-    "status.pool": "Pool",
+  "status.charity": "Charity",
+  "status.pool": "Pool",
 
   "summary.title": "Focus Report",
   "summary.totalTime": "Total Time",
