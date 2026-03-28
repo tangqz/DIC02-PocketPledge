@@ -720,46 +720,6 @@ def _can_start_session(session: SessionState) -> bool:
     return bool((session.current_plan or "").strip())
 
 
-def _profile_has_minimum_basics(profile_content: str) -> bool:
-    normalized = (profile_content or "").strip().lower()
-    if not normalized:
-        return False
-
-    has_calling_hint = bool(
-        re.search(
-            r"(称呼|叫我|你可以叫我|nickname|call me|preferred name|name[:：])",
-            normalized,
-        )
-    )
-    has_education_hint = bool(
-        re.search(
-            r"(教育|学历|学校|年级|专业|本科|研究生|高中|初中|大学|education|school|major|grade|background)",
-            normalized,
-        )
-    )
-    return has_calling_hint and has_education_hint
-
-
-async def _is_profile_ready_for_start(user_id: str) -> bool:
-    try:
-        uid = int(user_id)
-    except ValueError:
-        return False
-
-    db = SessionLocal()
-    try:
-        profile_doc = db_get_user_profile_document(db=db, user_id=uid)
-    except Exception:
-        logger.exception(
-            "failed to load user profile for start check, user_id=%s", user_id
-        )
-        return False
-    finally:
-        db.close()
-
-    return _profile_has_minimum_basics(str(profile_doc.get("content", "")))
-
-
 def _truncate_log_text(value: Any, limit: int = LOG_PREVIEW_LIMIT) -> str:
     text = str(value)
     if len(text) <= limit:
@@ -1186,25 +1146,13 @@ async def _handle_user_turn(
 
     # Handle visual capture request
     if directive.requires_capture:
-        if _has_system_result(system_events, "profile_incomplete"):
-            # Profile completion has higher priority than visual checks.
-            directive.requires_capture = False
-
         capture_sources = directive.capture_sources or START_CAPTURE_SOURCES
         needs_start_readiness = directive.action == "start" or _has_system_result(
             system_events, "START_ENV_CHECK_REQUIRED"
         )
 
         if needs_start_readiness and images and session.supervision_state == "setup":
-            profile_ready = await _is_profile_ready_for_start(user_id)
-            if not profile_ready:
-                await send_tool_call_status(
-                    user_id, "supervision.start", "error", "profile incomplete"
-                )
-                system_events = [
-                    "[SYSTEM_RESULT: START_REJECTED, CODE: profile_incomplete, DETAIL: 请先轻松聊聊你的称呼和教育背景]"
-                ]
-            elif not _can_start_session(session):
+            if not _can_start_session(session):
                 await send_tool_call_status(
                     user_id, "supervision.start", "error", "task not agreed"
                 )
@@ -1286,15 +1234,7 @@ async def _handle_user_turn(
         await send_tool_call_status(user_id, "plan.update", "success", "plan updated")
 
     elif directive.action == "start" and session.supervision_state == "setup":
-        profile_ready = await _is_profile_ready_for_start(user_id)
-        if not profile_ready:
-            await send_tool_call_status(
-                user_id, "supervision.start", "error", "profile incomplete"
-            )
-            system_events = [
-                "[SYSTEM_RESULT: START_REJECTED, CODE: profile_incomplete, DETAIL: 请先轻松聊聊你的称呼和教育背景]"
-            ]
-        elif not _can_start_session(session):
+        if not _can_start_session(session):
             await send_tool_call_status(
                 user_id, "supervision.start", "error", "task not agreed"
             )
@@ -1472,27 +1412,6 @@ async def handle_capture_context_result(
         user_id, "visual.capture", "success", "visual context captured"
     )
     if capture_mode == "start-readiness":
-        profile_ready = await _is_profile_ready_for_start(user_id)
-        if not profile_ready:
-            await send_tool_call_status(
-                user_id, "supervision.start", "error", "profile incomplete"
-            )
-            system_events = [
-                "[SYSTEM_RESULT: START_REJECTED, CODE: profile_incomplete, DETAIL: 请先轻松聊聊你的称呼和教育背景]"
-            ]
-            result_context = "\n".join(system_events)
-            await _handle_user_turn(
-                user_id=user_id,
-                session=session,
-                text=f"{prompt}\n{result_context}",
-                images=images,
-                is_tool_result=True,
-                append_user_message=False,
-                emit_user_transcript=False,
-                stage_depth=1,
-            )
-            return
-
         readiness = await evaluate_start_readiness(
             images=images,
             current_task=session.current_plan,
