@@ -321,6 +321,20 @@ def _has_system_result(system_events: list[str], keyword: str) -> bool:
     return any(keyword in str(event) for event in system_events)
 
 
+def _looks_like_start_request(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    if not normalized:
+        return False
+
+    # Start-intent is identified by a start verb plus focus/study semantics.
+    has_start_verb = bool(re.search(r"(开始|启动|进入|开\s*始|start|begin)", normalized))
+    has_focus_topic = bool(
+        re.search(r"(专注|学习|监督|focus|study|focus mode)", normalized)
+    )
+    has_short_start_phrase = bool(re.search(r"(我们开始吧|开始吧|我想开始)", normalized))
+    return (has_start_verb and has_focus_topic) or has_short_start_phrase
+
+
 def _plan_focus_seconds(plan: dict[str, Any] | None) -> int | None:
     if not plan:
         return None
@@ -1147,8 +1161,16 @@ async def _handle_user_turn(
     # Handle visual capture request
     if directive.requires_capture:
         capture_sources = directive.capture_sources or START_CAPTURE_SOURCES
-        needs_start_readiness = directive.action == "start" or _has_system_result(
+        start_capture_required = directive.action == "start" or _has_system_result(
             system_events, "START_ENV_CHECK_REQUIRED"
+        )
+        inferred_start_capture_required = (
+            session.supervision_state == "setup"
+            and _has_system_result(system_events, "VISUAL_CONTEXT_REQUESTED")
+            and _looks_like_start_request(text)
+        )
+        needs_start_readiness = (
+            start_capture_required or inferred_start_capture_required
         )
 
         if needs_start_readiness and images and session.supervision_state == "setup":
@@ -1411,27 +1433,40 @@ async def handle_capture_context_result(
     await send_tool_call_status(
         user_id, "visual.capture", "success", "visual context captured"
     )
-    if capture_mode == "start-readiness":
-        readiness = await evaluate_start_readiness(
-            images=images,
-            current_task=session.current_plan,
-            session_id=user_id,
-        )
-        if readiness.get("approved"):
-            duration_seconds = session.suggested_focus_seconds or DEFAULT_TOTAL_SECONDS
-            start_result = await handle_start(
-                user_id, session, duration_seconds=duration_seconds
-            )
-            system_events = _build_start_outcome_system_events(
-                start_result, duration_seconds
-            )
-        else:
+    should_run_start_readiness = capture_mode == "start-readiness" or (
+        capture_mode == "system-agent"
+        and session.supervision_state == "setup"
+        and _looks_like_start_request(prompt)
+    )
+    if should_run_start_readiness:
+        if not _can_start_session(session):
             await send_tool_call_status(
-                user_id, "supervision.start", "error", "environment check failed"
+                user_id, "supervision.start", "error", "task not agreed"
             )
-            system_events = [
-                f"[SYSTEM_RESULT: START_REJECTED, CODE: environment_check_failed, DETAIL: {readiness.get('reason') or '机位或全屏共享不满足要求'}]"
-            ]
+            system_events = ["[SYSTEM_RESULT: START_REJECTED, CODE: task_not_agreed]"]
+        else:
+            readiness = await evaluate_start_readiness(
+                images=images,
+                current_task=session.current_plan,
+                session_id=user_id,
+            )
+            if readiness.get("approved"):
+                duration_seconds = (
+                    session.suggested_focus_seconds or DEFAULT_TOTAL_SECONDS
+                )
+                start_result = await handle_start(
+                    user_id, session, duration_seconds=duration_seconds
+                )
+                system_events = _build_start_outcome_system_events(
+                    start_result, duration_seconds
+                )
+            else:
+                await send_tool_call_status(
+                    user_id, "supervision.start", "error", "environment check failed"
+                )
+                system_events = [
+                    f"[SYSTEM_RESULT: START_REJECTED, CODE: environment_check_failed, DETAIL: {readiness.get('reason') or '机位或全屏共享不满足要求'}]"
+                ]
 
         result_context = "\n".join(system_events)
         await _handle_user_turn(
