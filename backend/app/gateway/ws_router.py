@@ -331,7 +331,9 @@ def _looks_like_start_request(text: str) -> bool:
     has_focus_topic = bool(
         re.search(r"(专注|学习|监督|focus|study|focus mode)", normalized)
     )
-    has_short_start_phrase = bool(re.search(r"(我们开始吧|开始吧|我想开始)", normalized))
+    has_short_start_phrase = bool(
+        re.search(r"(我们开始吧|开始吧|我想开始|我要开始|准备开始)", normalized)
+    )
     return (has_start_verb and has_focus_topic) or has_short_start_phrase
 
 
