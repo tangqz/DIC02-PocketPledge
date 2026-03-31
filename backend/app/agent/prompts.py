@@ -148,7 +148,6 @@ CHAT_SYSTEM_PROMPT = """\
   - `[SYSTEM_RESULT: START_REJECTED, CODE: insufficient_balance, NEED_RMB: 5.25, HAVE_RMB: 4.50]`
   - `[SYSTEM_RESULT: START_REJECTED, CODE: task_not_agreed]`
   - `[SYSTEM_RESULT: START_REJECTED, CODE: environment_check_failed, DETAIL: ...]`
-  - `[SYSTEM_RESULT: START_REJECTED, CODE: profile_incomplete, DETAIL: ...]`
   - `[SYSTEM_RESULT: SYSTEM_AGENT_ERROR, DETAIL: ...]`
 3. 对批准/驳回类结果要明确表态，不要只让前端 UI 自己变化。
 4. 如果系统结果表明事情还没闭环，而且确实还需要新的系统动作，允许你再次输出 <<SYS>> 进入下一轮；不要被“第二阶段”这个名字束缚。
@@ -167,8 +166,6 @@ CHAT_SYSTEM_PROMPT = """\
 → [neutral]先别冲，我这边还没法稳定盯你，机位和全屏先调好。
 [SYSTEM_RESULT: START_REJECTED, CODE: insufficient_balance, NEED_RMB: 5.25, HAVE_RMB: 4.50]
 → [neutral]这次不是机位问题，是你余额不够。先去充上，我再给你开。
-[SYSTEM_RESULT: START_REJECTED, CODE: profile_incomplete, DETAIL: 请先轻松聊聊你的称呼]
-→ [happy]开之前先聊两句，你希望我怎么叫你呀？
 [SYSTEM_RESULT: START_REJECTED, CODE: task_not_agreed]
 → [neutral]先把这轮到底学什么说清楚，我才给你开。
 
@@ -221,7 +218,6 @@ JSON 格式：
 判定规则：
 - 开始监督：只有同时满足以下条件时才允许 start：
   1. 用户和聊天机器人已经明确说清本轮要学什么；如果 current_task 为空或任务仍然含糊，必须拒绝开始。
-  1.5 用户画像必须至少包含用户偏好称呼；缺失时拒绝开始。
   2. 必须先检查摄像头机位和屏幕共享条件；如果还没完成检查，返回 requires_capture=true 且 capture_sources 必须同时包含 camera 和 screen。
   3. 在开始前，严禁输出任何“已经批准开始”的 system_events。
     4. duration_seconds 取用户指定的时长或 suggested_focus_seconds。
@@ -296,7 +292,6 @@ system_events 字符串要稳定、简短，例如：
 - [SYSTEM_RESULT: START_REJECTED, CODE: task_not_agreed]
 - [SYSTEM_RESULT: START_REJECTED, CODE: insufficient_balance, NEED_RMB: 5.25, HAVE_RMB: 4.50]
 - [SYSTEM_RESULT: START_REJECTED, CODE: environment_check_failed, DETAIL: 摄像头没拍到上半身]
-- [SYSTEM_RESULT: START_REJECTED, CODE: profile_incomplete, DETAIL: 请先轻松聊聊你的称呼]
 - [SYSTEM_RESULT: START_ENV_CHECK_REQUIRED]
 - [SYSTEM_RESULT: PLAN_UPDATED, TITLE: 数学, TOTAL_MINUTES: 30]
 - [SYSTEM_RESULT: SESSION_COMPLETED]
