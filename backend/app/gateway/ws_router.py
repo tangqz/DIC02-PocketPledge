@@ -11,7 +11,7 @@ from typing import Any, Callable, Coroutine
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 from app.auth.security import decode_access_token
-from app.business.models import SessionLocal
+from app.business.models import SessionLocal, get_db_session
 from app.business.crud import (
     PENALTY_PER_DISTRACTION,
     append_user_profile_memory as db_append_user_profile_memory,
@@ -123,9 +123,18 @@ class ConnectionManager:
             self.pending_messages.setdefault(user_id, []).append(payload)
 
     async def broadcast(self, payload: dict) -> None:
-        """Broadcast one message to all active users."""
-        for websocket in list(self.active_connections.values()):
-            await websocket.send_json(payload)
+        """Broadcast one message to all active users with error handling."""
+        failed_users: list[str] = []
+        for user_id, websocket in list(self.active_connections.items()):
+            try:
+                await websocket.send_json(payload)
+            except Exception:
+                logger.exception("broadcast send failed user_id=%s", user_id)
+                failed_users.append(user_id)
+        # Clean up failed connections
+        for user_id in failed_users:
+            self.active_connections.pop(user_id, None)
+            self.disconnected_at[user_id] = datetime.now(UTC)
 
     def cleanup_expired_states(self) -> None:
         """Delete disconnected user states that exceeded reconnect TTL."""
@@ -815,23 +824,23 @@ async def deduct_penalty(user_id: str, amount: int) -> dict[str, int | bool]:
         uid = int(user_id)
     except ValueError:
         return {"balance": 0, "is_bankrupt": True}
-    db = SessionLocal()
+    
     try:
-        result = db_execute_penalty(
-            db,
-            uid,
-            reason="检测到连续走神",
-            distraction_count=1,
-            penalty_amount=amount,
-        )
-        return {
-            "balance": result["balance_after"],
-            "is_bankrupt": result["is_bankrupt"],
-        }
+        with get_db_session() as db:
+            result = db_execute_penalty(
+                db,
+                uid,
+                reason="检测到连续走神",
+                distraction_count=1,
+                penalty_amount=amount,
+            )
+            return {
+                "balance": result["balance_after"],
+                "is_bankrupt": result["is_bankrupt"],
+            }
     except Exception:
+        logger.exception("failed to execute penalty, user_id=%s amount=%s", user_id, amount)
         return {"balance": 0, "is_bankrupt": True}
-    finally:
-        db.close()
 
 
 async def process_pause_negotiation(event_text: str) -> str:
@@ -1503,6 +1512,9 @@ def _build_temporal_stitched_image(
     from collections import defaultdict
     from PIL import Image, ImageDraw, ImageFont
 
+    # Security: limit base64 size per image to prevent OOM attacks
+    MAX_BASE64_SIZE = 5 * 1024 * 1024  # 5MB per image
+
     # Find the relative "now" from the maximum timestamp in the batch to avoid client-server clock skew issues.
     client_timestamps = []
     for img in current_images:
@@ -1545,6 +1557,14 @@ def _build_temporal_stitched_image(
         for img_dict in imgs:
             b64 = str(img_dict.get("data", ""))
             if not b64:
+                continue
+            # Security: skip oversized images to prevent OOM
+            if len(b64) > MAX_BASE64_SIZE:
+                logger.warning(
+                    "skipping oversized image in stitcher: %d bytes > %d limit",
+                    len(b64),
+                    MAX_BASE64_SIZE,
+                )
                 continue
             try:
                 img_data = base64.b64decode(b64)

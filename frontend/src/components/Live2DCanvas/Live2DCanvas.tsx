@@ -334,12 +334,18 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle, Live2DCanvasProps>(({ onMode
     const player = streamingPlayerRef.current;
     if (!adapter || !player) return;
 
+    // Cancel any existing RAF before starting new one to prevent race condition
+    if (lipSyncRafRef.current != null) {
+      window.cancelAnimationFrame(lipSyncRafRef.current);
+      lipSyncRafRef.current = null;
+    }
     stopExternalLipSync();
     const gain = Math.max(0.1, Number(activeConfig.lipSyncGain) || 1.0);
 
     const tick = () => {
       if (!player.isActive) {
         adapter.setExternalLipSyncValue(0);
+        lipSyncRafRef.current = null;
         return;
       }
       const mapped = player.getLipSyncValue(gain);
@@ -567,6 +573,13 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle, Live2DCanvasProps>(({ onMode
       }
       stopAudio();
       stopExternalLipSync();
+      // Clean up AudioContext to prevent memory leaks
+      if (audioContextRef.current) {
+        audioContextRef.current.close().catch(() => {
+          // Ignore close errors
+        });
+        audioContextRef.current = null;
+      }
     };
   }, [activeConfig.url, activeConfig.kScale, config, lastGoodConfig, fallbackToDefault, stopAudio, stopExternalLipSync]);
 

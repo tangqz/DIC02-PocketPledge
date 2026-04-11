@@ -108,35 +108,50 @@ def _serialize_assistant_message(message: Any) -> dict[str, Any]:
     return payload
 
 
+# Cached AsyncOpenAI clients — reuse connections instead of creating per-request
+_chat_client: AsyncOpenAI | None = None
+_agent_client: AsyncOpenAI | None = None
+_vision_client: AsyncOpenAI | None = None
+
+
 def _get_chat_client() -> AsyncOpenAI:
-    """OpenAI-compatible client for the Chat VTuber model."""
-    return AsyncOpenAI(
-        api_key=os.getenv("LOCAL_CHAT_API_KEY", "sk-placeholder"),
-        base_url=os.getenv("LOCAL_CHAT_API_BASE", "https://api.openai.com/v1"),
-        timeout=float(os.getenv("LOCAL_CHAT_TIMEOUT", "30")),
-    )
+    """OpenAI-compatible client for the Chat VTuber model (cached singleton)."""
+    global _chat_client
+    if _chat_client is None:
+        _chat_client = AsyncOpenAI(
+            api_key=os.getenv("LOCAL_CHAT_API_KEY", "sk-placeholder"),
+            base_url=os.getenv("LOCAL_CHAT_API_BASE", "https://api.openai.com/v1"),
+            timeout=float(os.getenv("LOCAL_CHAT_TIMEOUT", "30")),
+        )
+    return _chat_client
 
 
 def _get_agent_client() -> AsyncOpenAI:
-    """OpenAI-compatible client for the System Agent model."""
-    return AsyncOpenAI(
-        api_key=os.getenv("LOCAL_AGENT_API_KEY")
-        or os.getenv("LOCAL_CHAT_API_KEY", "sk-placeholder"),
-        base_url=os.getenv("LOCAL_AGENT_API_BASE")
-        or os.getenv("LOCAL_CHAT_API_BASE", "https://api.openai.com/v1"),
-        timeout=float(
-            os.getenv("LOCAL_AGENT_TIMEOUT") or os.getenv("LOCAL_CHAT_TIMEOUT", "60")
-        ),
-    )
+    """OpenAI-compatible client for the System Agent model (cached singleton)."""
+    global _agent_client
+    if _agent_client is None:
+        _agent_client = AsyncOpenAI(
+            api_key=os.getenv("LOCAL_AGENT_API_KEY")
+            or os.getenv("LOCAL_CHAT_API_KEY", "sk-placeholder"),
+            base_url=os.getenv("LOCAL_AGENT_API_BASE")
+            or os.getenv("LOCAL_CHAT_API_BASE", "https://api.openai.com/v1"),
+            timeout=float(
+                os.getenv("LOCAL_AGENT_TIMEOUT") or os.getenv("LOCAL_CHAT_TIMEOUT", "60")
+            ),
+        )
+    return _agent_client
 
 
 def _get_vision_client() -> AsyncOpenAI:
-    """OpenAI-compatible client for the Vision / Supervision model."""
-    return AsyncOpenAI(
-        api_key=os.getenv("LOCAL_VISION_API_KEY", "sk-placeholder"),
-        base_url=os.getenv("LOCAL_VISION_API_BASE", "https://api.openai.com/v1"),
-        timeout=float(os.getenv("LOCAL_VISION_TIMEOUT", "30")),
-    )
+    """OpenAI-compatible client for the Vision / Supervision model (cached singleton)."""
+    global _vision_client
+    if _vision_client is None:
+        _vision_client = AsyncOpenAI(
+            api_key=os.getenv("LOCAL_VISION_API_KEY", "sk-placeholder"),
+            base_url=os.getenv("LOCAL_VISION_API_BASE", "https://api.openai.com/v1"),
+            timeout=float(os.getenv("LOCAL_VISION_TIMEOUT", "30")),
+        )
+    return _vision_client
 
 
 # ⚡ Bolt: execute synchronous database I/O in a separate thread to avoid blocking the main asyncio event loop during chat streaming
