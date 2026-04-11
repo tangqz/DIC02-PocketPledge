@@ -71,6 +71,7 @@ export function useWebSocket({
   const reconnectCountRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const manualCloseRef = useRef(false);
+  const connectingRef = useRef(false); // Prevent multiple concurrent connection attempts
   const onMessageRef = useRef(onMessage);
   onMessageRef.current = onMessage;
 
@@ -90,6 +91,11 @@ export function useWebSocket({
   }, []);
 
   const connect = useCallback(() => {
+    // Prevent multiple concurrent connection attempts
+    if (connectingRef.current) {
+      return;
+    }
+
     // Don't double-connect
     if (
       wsRef.current &&
@@ -106,6 +112,8 @@ export function useWebSocket({
       console.warn("[WS] No auth token, cannot connect");
       return;
     }
+
+    connectingRef.current = true;
     const wsUrl = `${url}?token=${encodeURIComponent(token)}&characterId=${encodeURIComponent(selectedCharacterId || "")}`;
     manualCloseRef.current = false;
     clearTimeout(reconnectTimerRef.current);
@@ -114,6 +122,7 @@ export function useWebSocket({
     console.log("[WS] Connecting to", wsUrl);
 
     ws.onopen = () => {
+      connectingRef.current = false;
       if (wsRef.current !== ws) {
         return;
       }
@@ -124,6 +133,7 @@ export function useWebSocket({
     };
 
     ws.onclose = (event) => {
+      connectingRef.current = false;
       if (wsRef.current !== ws) {
         return;
       }
@@ -134,6 +144,7 @@ export function useWebSocket({
       // Auto-reconnect
       if (!manualCloseRef.current && reconnectCountRef.current < MAX_RECONNECT_ATTEMPTS) {
         reconnectCountRef.current++;
+        clearTimeout(reconnectTimerRef.current); // Clear any existing timer first
         reconnectTimerRef.current = setTimeout(connect, RECONNECT_DELAY);
       }
     };
@@ -143,7 +154,7 @@ export function useWebSocket({
         return;
       }
       console.error("[WS] Error:", err);
-      ws.close();
+      // Don't call ws.close() here - let onclose handle reconnection to avoid double-handling
     };
 
     ws.onmessage = (event) => {
@@ -237,6 +248,7 @@ export function useWebSocket({
   const disconnect = useCallback(() => {
     clearTimeout(reconnectTimerRef.current);
     manualCloseRef.current = true;
+    connectingRef.current = false;
     reconnectCountRef.current = MAX_RECONNECT_ATTEMPTS; // prevent reconnect
     wsRef.current?.close();
     wsRef.current = null;

@@ -11,7 +11,7 @@ from typing import Any, Callable, Coroutine
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 from app.auth.security import decode_access_token
-from app.business.models import SessionLocal
+from app.business.models import SessionLocal, get_db_session
 from app.business.crud import (
     PENALTY_PER_DISTRACTION,
     append_user_profile_memory as db_append_user_profile_memory,
@@ -824,23 +824,23 @@ async def deduct_penalty(user_id: str, amount: int) -> dict[str, int | bool]:
         uid = int(user_id)
     except ValueError:
         return {"balance": 0, "is_bankrupt": True}
-    db = SessionLocal()
+    
     try:
-        result = db_execute_penalty(
-            db,
-            uid,
-            reason="检测到连续走神",
-            distraction_count=1,
-            penalty_amount=amount,
-        )
-        return {
-            "balance": result["balance_after"],
-            "is_bankrupt": result["is_bankrupt"],
-        }
+        with get_db_session() as db:
+            result = db_execute_penalty(
+                db,
+                uid,
+                reason="检测到连续走神",
+                distraction_count=1,
+                penalty_amount=amount,
+            )
+            return {
+                "balance": result["balance_after"],
+                "is_bankrupt": result["is_bankrupt"],
+            }
     except Exception:
+        logger.exception("failed to execute penalty, user_id=%s amount=%s", user_id, amount)
         return {"balance": 0, "is_bankrupt": True}
-    finally:
-        db.close()
 
 
 async def process_pause_negotiation(event_text: str) -> str:

@@ -88,8 +88,14 @@ export const useMediaStore = create<MediaState>((set, get) => ({
   requestCamera: async () => {
     const existingStream = get().cameraStream;
     if (existingStream) {
-      set({ cameraGranted: true });
-      return true;
+      // Check if stream is still active
+      const tracks = existingStream.getVideoTracks();
+      if (tracks.length > 0 && tracks[0].readyState === "live") {
+        set({ cameraGranted: true });
+        return true;
+      }
+      // Stream is dead, clean it up
+      existingStream.getTracks().forEach((t) => t.stop());
     }
 
     try {
@@ -101,9 +107,14 @@ export const useMediaStore = create<MediaState>((set, get) => ({
         },
         audio: false,
       });
-      stream.getVideoTracks()[0]?.addEventListener("ended", () => {
-        set({ cameraGranted: false, cameraStream: null });
-      });
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) {
+        const onEnded = () => {
+          videoTrack.removeEventListener("ended", onEnded);
+          set({ cameraGranted: false, cameraStream: null });
+        };
+        videoTrack.addEventListener("ended", onEnded);
+      }
       set({ cameraGranted: true, cameraStream: stream });
       return true;
     } catch (err) {
@@ -114,16 +125,32 @@ export const useMediaStore = create<MediaState>((set, get) => ({
   },
 
   requestScreenShare: async () => {
+    const existingStream = get().screenStream;
+    if (existingStream) {
+      // Check if stream is still active
+      const tracks = existingStream.getVideoTracks();
+      if (tracks.length > 0 && tracks[0].readyState === "live") {
+        set({ screenGranted: true });
+        return true;
+      }
+      // Stream is dead, clean it up
+      existingStream.getTracks().forEach((t) => t.stop());
+    }
+
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: { displaySurface: "monitor" },
         audio: false,
       });
-      // Listen for the user stopping the share via the browser's built-in UI
-      stream.getVideoTracks()[0]?.addEventListener("ended", () => {
-        set({ screenGranted: false, screenStream: null });
-        console.log("[MediaStore] Screen share ended by user");
-      });
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) {
+        const onEnded = () => {
+          videoTrack.removeEventListener("ended", onEnded);
+          set({ screenGranted: false, screenStream: null });
+          console.log("[MediaStore] Screen share ended by user");
+        };
+        videoTrack.addEventListener("ended", onEnded);
+      }
       set({ screenGranted: true, screenStream: stream });
       return true;
     } catch (err) {
