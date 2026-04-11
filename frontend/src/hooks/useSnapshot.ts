@@ -285,6 +285,10 @@ export function useSnapshot({
   useEffect(() => {
     if (!active) {
       historyBufferRef.current = [];
+      // Pause and clean video cache when inactive to prevent background resource usage
+      videoCacheRef.current.forEach((video) => {
+        video.pause();
+      });
       return;
     }
 

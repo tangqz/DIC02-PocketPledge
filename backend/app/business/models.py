@@ -32,6 +32,32 @@ SessionLocal = sessionmaker(
     future=True,
 )
 
+
+def get_db_session() -> Generator[Session, None, None]:
+    """Context manager for database sessions with automatic cleanup.
+    
+    Usage:
+        with get_db_session() as db:
+            result = some_query(db)
+            # Automatically commits on success, rolls back on exception
+    """
+    from contextlib import contextmanager
+
+    @contextmanager
+    def session_scope() -> Generator[Session, None, None]:
+        session = SessionLocal()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    return session_scope()
+
+
 Base = declarative_base()
 
 
