@@ -8,13 +8,10 @@ from typing import Any
 
 from app.business.models import SessionLocal
 from app.business.crud import (
-    get_active_plan,
     get_user_profile_document,
     get_user_status,
-    list_pause_requests,
     list_session_summaries,
     list_user_transactions,
-    upsert_study_plan,
     upsert_user_profile_document,
 )
 
@@ -28,110 +25,6 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "name": "get_user_status",
             "description": "查询当前用户的余额和破产状态",
             "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_user_plan",
-            "description": "获取当前用户活跃的学习计划",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "update_user_plan",
-            "description": "创建或更新当前用户的学习计划",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "formatVersion": {
-                        "type": "integer",
-                        "description": "计划格式版本，推荐为2",
-                    },
-                    "planType": {
-                        "type": "string",
-                        "description": "计划类型: calendar/task/progress",
-                    },
-                    "goal": {"type": "string", "description": "本轮目标摘要"},
-                    "startDate": {
-                        "type": "string",
-                        "description": "计划起始日期，YYYY-MM-DD",
-                    },
-                    "endDate": {
-                        "type": "string",
-                        "description": "计划结束日期，YYYY-MM-DD",
-                    },
-                    "deadline": {
-                        "type": "string",
-                        "description": "截止日期，YYYY-MM-DD",
-                    },
-                    "tasks": {
-                        "type": "array",
-                        "description": "任务列表",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "id": {"type": "string"},
-                                "title": {"type": "string"},
-                                "completed": {"type": "boolean"},
-                                "estimatedMinutes": {"type": "integer"},
-                                "date": {
-                                    "type": "string",
-                                    "description": "单次任务日期，YYYY-MM-DD",
-                                },
-                                "dueDate": {
-                                    "type": "string",
-                                    "description": "兼容字段，截止日期，YYYY-MM-DD",
-                                },
-                                "dates": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                    "description": "多日期任务，YYYY-MM-DD 列表",
-                                },
-                                "weekdays": {
-                                    "type": "array",
-                                    "items": {"type": "integer"},
-                                    "description": "周几列表，0=Sun..6=Sat",
-                                },
-                                "repeatCount": {
-                                    "type": "integer",
-                                    "description": "重复周数/次数",
-                                },
-                                "startDate": {
-                                    "type": "string",
-                                    "description": "任务起始日期，YYYY-MM-DD",
-                                },
-                                "endDate": {
-                                    "type": "string",
-                                    "description": "任务结束日期，YYYY-MM-DD",
-                                },
-                                "recurrence": {
-                                    "type": "string",
-                                    "description": "重复规则: daily/weekly/custom",
-                                },
-                                "priority": {
-                                    "type": "string",
-                                    "description": "优先级: low/medium/high",
-                                },
-                                "notes": {"type": "string"},
-                                "rewardCents": {
-                                    "type": "integer",
-                                    "description": "任务完成奖励金额（分）。完成此任务后从奖池发放给用户。",
-                                },
-                            },
-                            "required": ["id", "title"],
-                        },
-                    },
-                    "totalMinutes": {"type": "integer", "description": "总分钟数"},
-                    "suggestedDuration": {
-                        "type": "integer",
-                        "description": "建议专注时长（秒）",
-                    },
-                },
-                "required": ["tasks", "totalMinutes"],
-            },
         },
     },
     {
@@ -156,24 +49,6 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     },
                 },
                 "required": ["content"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_pause_requests",
-            "description": "查询当前用户的历史暂停申请记录",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "limit": {
-                        "type": "integer",
-                        "description": "最多返回条数",
-                        "default": 10,
-                    },
-                },
-                "required": [],
             },
         },
     },
@@ -238,13 +113,6 @@ def _dispatch(
     if tool_name == "get_user_status":
         return get_user_status(db, user_id)
 
-    if tool_name == "get_user_plan":
-        result = get_active_plan(db, user_id)
-        return result or {"ok": True, "plan": None, "message": "当前没有活跃的学习计划"}
-
-    if tool_name == "update_user_plan":
-        return upsert_study_plan(db, user_id, plan=arguments, source="system_agent")
-
     if tool_name == "get_user_profile":
         return get_user_profile_document(db, user_id)
 
@@ -252,9 +120,6 @@ def _dispatch(
         return upsert_user_profile_document(
             db, user_id, content=arguments.get("content", "")
         )
-
-    if tool_name == "list_pause_requests":
-        return list_pause_requests(db, user_id, limit=arguments.get("limit", 10))
 
     if tool_name == "list_session_summaries":
         return list_session_summaries(db, user_id, limit=arguments.get("limit", 10))

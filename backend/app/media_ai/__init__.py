@@ -138,7 +138,10 @@ async def process_text_chat(
                 }
     except Exception:
         logger.exception("process_text_chat failed, falling back to local response")
-        fallback_text = "当前对话服务暂时不可用，我先陪你继续当前任务。"
+        if language_mode.strip().lower() == "en":
+            fallback_text = "The chat service is temporarily unavailable. I can still stay with you and continue from here."
+        else:
+            fallback_text = "当前对话服务暂时不可用，我先陪你继续当前任务。"
         yield {
             "text": fallback_text,
             "expression": "neutral",
@@ -194,8 +197,9 @@ async def evaluate_vision(
     images: list[dict[str, Any]],
     current_task: str | None = None,
     session_id: str = "anonymous",
-) -> tuple[bool, str]:
-    """Evaluate distraction verdict through the configured vision provider."""
+) -> dict[str, Any]:
+    """Evaluate user emotion through the configured vision provider."""
+    _default: dict[str, Any] = {"emotion": "neutral", "intensity": 1, "cues": "", "suggestion": ""}
     agent_client = get_agent_client()
     try:
         return await agent_client.evaluate_vision(
@@ -204,8 +208,8 @@ async def evaluate_vision(
             session_id=session_id,
         )
     except Exception:
-        logger.exception("evaluate_vision failed, defaulting to focused")
-        return False, ""
+        logger.exception("evaluate_vision failed, defaulting to neutral")
+        return _default
 
 
 async def evaluate_start_readiness(

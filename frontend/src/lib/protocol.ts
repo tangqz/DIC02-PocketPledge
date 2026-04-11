@@ -1,23 +1,4 @@
-/* ────────────────────────────────────────────────
- *  WebSocket Message Protocol Types
- *  Authoritative contract between Frontend (A) ↔ Gateway (B)
- *
- *  Design Principle: The chatbot (Agent) drives almost ALL user
- *  operations via tool calls.  The backend translates tool-call
- *  side-effects into structured RxMessages for the frontend.
- *
- *  Feedback routing:
- *  ┌──────────────────────────┬───────────────────────────┐
- *  │  Agent verbal (emotional)│  Frontend UI (silent)     │
- *  ├──────────────────────────┼───────────────────────────┤
- *  │  Encouragement / scolding│  Balance number change    │
- *  │  Plan discussion results │  Plan panel data update   │
- *  │  Pause negotiation reply │  Timer / state badge      │
- *  │  Session greeting/bye    │  Supervision state switch │
- *  │  Achievement celebration │  Distraction indicators   │
- *  │  Emotional support       │  Session statistics       │
- *  └──────────────────────────┴───────────────────────────┘
- * ──────────────────────────────────────────────── */
+/* WarmBuddy WebSocket protocol types */
 
 // ── Shared sub-types ──
 
@@ -33,19 +14,6 @@ export interface SnapshotImage {
     timestamp?: number;
   };
 }
-
-/**
- * Supervision state machine:
- *   setup ──(Agent: supervision.start)──→ active
- *   active ──(Agent: supervision.pause)──→ paused
- *   paused ──(Agent: supervision.resume / timeout)──→ active
- *   active|paused ──(Agent / timer-zero)──→ completed
- *
- * All transitions are triggered by the backend (Agent tool calls
- * or server-side timer events). The frontend never directly
- * mutates this state.
- */
-export type SupervisionState = "setup" | "active" | "paused" | "completed";
 
 // ── Upstream (Frontend → Backend)  Tx ──
 
@@ -88,10 +56,6 @@ export interface CaptureContextResult {
   error?: string;
 }
 
-export interface ResumeNow {
-  type: "resume-now";
-}
-
 export interface SetLocale {
   type: "set-locale";
   locale: "zh" | "en";
@@ -102,6 +66,10 @@ export interface SetCharacter {
   characterId: string;
 }
 
+export interface PingMessage {
+  type: "ping";
+}
+
 export type TxMessage =
   | MicAudioData
   | MicAudioEnd
@@ -110,9 +78,9 @@ export type TxMessage =
   | PeriodicScreenshot
   | FrontendPlaybackComplete
   | CaptureContextResult
-  | ResumeNow
   | SetLocale
-  | SetCharacter;
+  | SetCharacter
+  | PingMessage;
 
 // ── Downstream (Backend → Frontend)  Rx ──
 //
@@ -150,76 +118,15 @@ export interface AgentTextEnd {
   type: "agent-text-end";
 }
 
-// ─── UI Command Messages (silent tool-call side-effects) ───
+// ─── UI Command Messages (silent side-effects) ───
 
-/**
- * Supervision state change — triggered by Agent tool calls:
- *   supervision.start  → { state: "active", duration, task }
- *   supervision.pause  → { state: "paused", pauseDuration, reason }
- *   supervision.resume → { state: "active" }
- *   session end        → { state: "completed" }
- */
-export interface SupervisionStateChange {
-  type: "supervision-state-change";
-  state: SupervisionState;
-  /** Total session duration in seconds (set on start) */
-  duration?: number;
-  /** Current task description (set on start or plan.update) */
-  task?: string;
-  /** Pause duration in seconds (set on pause) */
-  pauseDuration?: number;
-  /** Reason for state change */
-  reason?: string;
-}
-
-/** Balance update — silent UI update (Agent delivers verbal feedback separately) */
-export interface BalanceUpdate {
-  type: "balance-update";
-  balance: number;
-  change: number;
-  reason: string;
-}
-
-/**
- * Plan update — Agent called plan.update / plan.create tool.
- * Frontend renders this in a plan panel or overlay.
- */
-export interface PlanUpdate {
-  type: "plan-update";
-  plan: PlanData;
-}
-
-export interface PlanTask {
-  id: string;
-  title: string;
-  completed: boolean;
-  estimatedMinutes?: number;
-  actualMinutes?: number;
-  actualMinutesByDate?: Record<string, number>;
-  date?: string;
-  dueDate?: string;
-  dates?: string[];
-  weekdays?: number[];
-  repeatCount?: number;
-  startDate?: string;
-  endDate?: string;
-  recurrence?: "daily" | "weekly" | "custom";
-  priority?: "low" | "medium" | "high";
-  notes?: string;
-  rewardCents?: number;
-}
-
-export interface PlanData {
-  formatVersion?: number;
-  planType?: "calendar" | "task" | "progress";
-  goal?: string;
-  startDate?: string;
-  endDate?: string;
-  deadline?: string;
-  tasks: PlanTask[];
-  totalMinutes: number;
-  /** Suggested session duration derived from plan */
-  suggestedDuration?: number;
+/** Emotion recognition result from periodic camera captures */
+export interface EmotionUpdate {
+  type: "emotion-update";
+  emotion: string;
+  intensity: number; // 1-5
+  cues: string;
+  suggestion: string;
 }
 
 /**
@@ -230,29 +137,7 @@ export interface ToolCallStatus {
   type: "tool-call-status";
   tool: string;
   status: "calling" | "success" | "error";
-  /** Brief human-readable description (for devtools / debug) */
   message?: string;
-}
-
-/**
- * Supervision alert — soft = verbal reminder only (Agent speaks it),
- * hard = penalty applied (balance-update will follow).
- * The message field is for UI toast / indicator; the Agent also
- * verbalizes it separately.
- */
-export interface SupervisionAlert {
-  type: "supervision-alert";
-  message: string;
-  severity: "soft" | "hard";
-  /** How many consecutive distractions in the current streak */
-  streakCount?: number;
-}
-
-/** Timer sync from backend — keeps frontend timer in sync */
-export interface TimerSync {
-  type: "timer-sync";
-  remainingSeconds: number;
-  totalSeconds: number;
 }
 
 export interface ModelInfo {
@@ -278,13 +163,7 @@ export interface ModelInfo {
 export interface ControlMessage {
   type: "control";
   command: string;
-  payload?: {
-    requestId?: string;
-    prompt?: string;
-    sources?: Array<"camera" | "screen">;
-    reason?: string;
-    expression?: string;
-  };
+  payload?: Record<string, unknown>;
 }
 
 /** Streaming TTS audio chunk — played gaplessly via AudioContext scheduling */
@@ -307,11 +186,7 @@ export type RxMessage =
   | AgentTextChunk
   | UserTranscript
   | AgentTextEnd
-  | SupervisionStateChange
-  | BalanceUpdate
-  | PlanUpdate
+  | EmotionUpdate
   | ToolCallStatus
-  | SupervisionAlert
-  | TimerSync
   | ModelInfo
   | ControlMessage;

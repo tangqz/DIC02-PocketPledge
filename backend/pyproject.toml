@@ -1,7 +1,7 @@
 [project]
-name = "pocketpledge-backend"
+name = "warmbuddy-backend"
 version = "0.1.0"
-description = "PocketPledge backend service"
+description = "WarmBuddy backend service"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.116.0",

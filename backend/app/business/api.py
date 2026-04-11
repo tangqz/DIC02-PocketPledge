@@ -7,9 +7,16 @@ from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_user_id
 from .crud import (
+    create_assessment_result,
+    create_meal_journal_entry,
+    create_mood_entry,
     create_session_summary,
     execute_penalty,
+    get_meal_mood_correlation,
     get_active_plan,
+    list_assessment_results,
+    list_meal_journal_entries,
+    list_mood_entries,
     update_charity_ratio,
     get_user_profile_document,
     get_user_status,
@@ -24,6 +31,14 @@ from .crud import (
 )
 from .models import get_db
 from .schemas import (
+    AssessmentListResponse,
+    AssessmentSubmitRequest,
+    AssessmentSubmitResponse,
+    MealCorrelationResponse,
+    MealJournalCreate,
+    MealJournalListResponse,
+    MoodEntryCreate,
+    MoodEntryListResponse,
     PauseRequestCreate,
     PauseRequestListResponse,
     PenaltyExecuteRequest,
@@ -50,9 +65,7 @@ _internal_bearer = HTTPBearer(auto_error=False)
 def require_internal_tool_access(
     creds: HTTPAuthorizationCredentials | None = Depends(_internal_bearer),
 ) -> None:
-    configured_token = os.getenv("INTERNAL_TOOL_BEARER_TOKEN", "").strip() or os.getenv(
-        "DIFY_TOOL_BEARER_TOKEN", ""
-    ).strip()
+    configured_token = os.getenv("INTERNAL_TOOL_BEARER_TOKEN", "").strip()
     if not configured_token:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -389,3 +402,130 @@ def topup_wallet_api(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Mood entries
+# ---------------------------------------------------------------------------
+
+@router.post("/me/mood")
+def create_mood_api(
+    payload: MoodEntryCreate,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id),
+):
+    return create_mood_entry(
+        db=db,
+        user_id=current_user_id,
+        emotion=payload.emotion,
+        intensity=payload.intensity,
+        context=payload.context,
+        meal_info=payload.meal_info,
+        meal_emotion=payload.meal_emotion,
+        source=payload.source,
+        session_ref=payload.session_ref,
+    )
+
+
+@router.get("/me/mood", response_model=MoodEntryListResponse)
+def list_mood_api(
+    limit: int = 50,
+    days: int | None = None,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id),
+):
+    return list_mood_entries(
+        db=db, user_id=current_user_id, limit=limit, days=days,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Assessments
+# ---------------------------------------------------------------------------
+
+@router.post("/me/assessments", response_model=AssessmentSubmitResponse)
+def create_assessment_api(
+    payload: AssessmentSubmitRequest,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id),
+):
+    try:
+        return create_assessment_result(
+            db=db,
+            user_id=current_user_id,
+            assessment_type=payload.assessment_type,
+            answers=payload.answers,
+            session_ref=payload.session_ref,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/me/assessments", response_model=AssessmentListResponse)
+def list_assessment_api(
+    assessment_type: str | None = None,
+    limit: int = 20,
+    days: int | None = None,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id),
+):
+    return list_assessment_results(
+        db=db,
+        user_id=current_user_id,
+        assessment_type=assessment_type,
+        limit=limit,
+        days=days,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Meal journal / correlation
+# ---------------------------------------------------------------------------
+
+@router.post("/me/meal-journal")
+def create_meal_journal_api(
+    payload: MealJournalCreate,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id),
+):
+    try:
+        return create_meal_journal_entry(
+            db=db,
+            user_id=current_user_id,
+            meal_info=payload.meal_info,
+            meal_emotion=payload.meal_emotion,
+            emotion=payload.emotion,
+            intensity=payload.intensity,
+            context=payload.context,
+            session_ref=payload.session_ref,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/me/meal-journal", response_model=MealJournalListResponse)
+def list_meal_journal_api(
+    limit: int = 50,
+    days: int | None = None,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id),
+):
+    return list_meal_journal_entries(
+        db=db,
+        user_id=current_user_id,
+        limit=limit,
+        days=days,
+    )
+
+
+@router.get("/me/meal-correlation", response_model=MealCorrelationResponse)
+def meal_correlation_api(
+    days: int = 30,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id),
+):
+    return get_meal_mood_correlation(
+        db=db,
+        user_id=current_user_id,
+        days=days,
+    )

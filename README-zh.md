@@ -1,11 +1,11 @@
-# PocketPledge
+# WarmBuddy
 
 <div align="center">
-  <img src="imgs/logo.jpg" alt="PocketPledge Logo" width="400" />
+  <img src="imgs/logo.jpg" alt="WarmBuddy Logo" width="400" />
 </div>
 
 <div align="center">
-  <strong>PocketPledge</strong> 是一个面向学习监督场景的 AI 陪伴与监督系统。<br>
+  <strong>WarmBuddy</strong> 是一个面向学习监督场景的 AI 陪伴与监督系统。<br>
   结合 <b>Live2D 虚拟形象</b>、<b>实时语音对话</b>、<b>视觉状态分析</b> 和 <b>经济惩罚机制</b>，为你打造全方位的沉浸式电子学习体验。<br>
   <i>用真金白银的代价，终结你的分心时刻！</i>
 </div>
@@ -14,7 +14,7 @@
 
 ## 🌟 核心魅力与特色
 
-PocketPledge 打破了传统时间管理软件的枯燥与死板，将“陪伴”与“督导”完美融合：
+WarmBuddy 打破了传统时间管理软件的枯燥与死板，将“陪伴”与“督导”完美融合：
 
 - 🎭 **Live2D 虚拟伙伴**：告别冷冰冰的倒计时器！一位虚拟伙伴将陪你学习，让你的学习时光不再孤单枯燥。学习伙伴支持长效记忆，你将有机会与之缔造长久的羁绊。它还支持视觉读取，随时解答你的困惑。强大的 Live2D SDK 使你的虚拟伙伴拥有栩栩如生的实时动作与表情。
 - 🗣️ **实时语音对话**：通过强大的本地 ASR (Sherpa-ONNX) 与云端 TTS 的组合，加上代理模型的异步思考，实现较低延迟的语音流转。
@@ -143,7 +143,7 @@ pnpm run dev
 
 ## 📚 详细文档与资料
 
-想要深入了解 PocketPledge 的内部机制与协议，请参阅以下文档：
+想要深入了解 WarmBuddy 的内部机制与协议，请参阅以下文档：
 
 - 📄 **接口文档**: [docs/api_contract.md](docs/api_contract.md)
 - 🔌 **协议说明**: [docs/ws_protocol.md](docs/ws_protocol.md)

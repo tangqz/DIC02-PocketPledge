@@ -1,7 +1,7 @@
 services:
   model-downloader:
     image: curlimages/curl:8.7.1
-    container_name: pocketpledge-model-downloader
+    container_name: warmbuddy-model-downloader
     restart: "no"
     environment:
       HF_ENDPOINT: ${HF_ENDPOINT}
@@ -35,7 +35,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: pocketpledge-backend
+    container_name: warmbuddy-backend
     restart: unless-stopped
     depends_on:
       model-downloader:
@@ -78,7 +78,7 @@ services:
       args:
         VITE_API_BASE: ""
         VITE_WS_URL: ""
-    container_name: pocketpledge-frontend
+    container_name: warmbuddy-frontend
     restart: unless-stopped
     depends_on:
       backend:

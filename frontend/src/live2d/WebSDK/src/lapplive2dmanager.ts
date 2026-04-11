@@ -112,6 +112,61 @@ export class LAppLive2DManager {
       );
     }
 
+    const classifyHorizontal = (viewX: number): 'Left' | 'Right' | 'Center' => {
+      if (viewX <= -0.25) {
+        return 'Left';
+      }
+      if (viewX >= 0.25) {
+        return 'Right';
+      }
+      return 'Center';
+    };
+
+    const classifyHeadTapRegion = (viewX: number, viewY: number): string => {
+      const horizontal = classifyHorizontal(viewX);
+
+      if (viewY > 0.9) {
+        return horizontal === 'Center' ? 'Head.Forehead' : `Head.Forehead${horizontal}`;
+      }
+
+      if (viewY < 0.3) {
+        return horizontal === 'Center' ? 'Head.Cheek' : `Head.Cheek${horizontal}`;
+      }
+
+      return horizontal === 'Center' ? 'Head' : `Head.${horizontal}`;
+    };
+
+    const classifyBodyTapRegion = (viewX: number, viewY: number): string => {
+      const horizontal = classifyHorizontal(viewX);
+
+      if (viewY > 0.45) {
+        return horizontal === 'Center' ? 'Body.Chest' : `Body.Shoulder${horizontal}`;
+      }
+
+      if (viewY > -0.05) {
+        return horizontal === 'Center' ? 'Body.UpperTorso' : `Body.Arm${horizontal}`;
+      }
+
+      if (viewY > -0.5) {
+        return horizontal === 'Center' ? 'Body.Waist' : `Body.Waist${horizontal}`;
+      }
+
+      if (viewY > -0.95) {
+        return horizontal === 'Center' ? 'Body.Thigh' : `Body.Leg${horizontal}`;
+      }
+
+      return horizontal === 'Center' ? 'Body.Foot' : `Body.Foot${horizontal}`;
+    };
+
+    const fireCoarseRegionTap = (viewX: number, viewY: number): void => {
+      // Fallback route for models whose built-in hit areas only cover upper body.
+      if (viewY > 0.38) {
+        LAppDefine.fireModelTapped(classifyHeadTapRegion(viewX, viewY));
+        return;
+      }
+      LAppDefine.fireModelTapped(classifyBodyTapRegion(viewX, viewY));
+    };
+
     for (let i = 0; i < this._models.getSize(); i++) {
       const model = this._models.at(i);
       if (!model || !model.getModel()) {
@@ -156,6 +211,14 @@ export class LAppLive2DManager {
         return false;
       };
 
+      const playDefaultBodyTapMotion = (): void => {
+        model.startRandomMotion(
+          LAppDefine.MotionGroupTapBody,
+          LAppDefine.PriorityNormal,
+          this._finishedMotion
+        );
+      };
+
       if (hitAreaId === 'HitAreaHead' || model.hitTest(LAppDefine.HitAreaNameHead, x, y)) {
         if (LAppDefine.DebugLogEnable) {
           LAppPal.printMessage(
@@ -166,7 +229,7 @@ export class LAppLive2DManager {
         if (!usedConfig) {
           model.setRandomExpression();
         }
-        LAppDefine.fireModelTapped('Head');
+        LAppDefine.fireModelTapped(classifyHeadTapRegion(x, y));
       } else if (hitAreaId === 'HitAreaBody' || model.hitTest(LAppDefine.HitAreaNameBody, x, y)) {
         if (LAppDefine.DebugLogEnable) {
           LAppPal.printMessage(
@@ -175,13 +238,17 @@ export class LAppLive2DManager {
         }
         const usedConfig = playConfiguredTapMotion('HitAreaBody');
         if (!usedConfig) {
-          model.startRandomMotion(
-            LAppDefine.MotionGroupTapBody,
-            LAppDefine.PriorityNormal,
-            this._finishedMotion
-          );
+          playDefaultBodyTapMotion();
         }
-        LAppDefine.fireModelTapped('Body');
+        LAppDefine.fireModelTapped(classifyBodyTapRegion(x, y));
+      } else if (model.isHitOnModel(x, y)) {
+        // Generic mesh hit fallback: still allow full-body interaction even when
+        // model3 HitArea only defines head/body around upper torso.
+        const usedBodyConfig = playConfiguredTapMotion('HitAreaBody');
+        if (!usedBodyConfig) {
+          playDefaultBodyTapMotion();
+        }
+        fireCoarseRegionTap(x, y);
       }
     }
   }

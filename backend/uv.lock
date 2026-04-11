@@ -998,7 +998,7 @@ wheels = [
 ]
 
 [[package]]
-name = "pocketpledge-backend"
+name = "warmbuddy-backend"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

@@ -1,4 +1,5 @@
 import os
+import uuid
 from datetime import datetime
 from typing import Generator
 
@@ -11,6 +12,7 @@ from sqlalchemy import (
     Text,
     create_engine,
     Boolean,
+    text,
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker, Session
 
@@ -133,7 +135,34 @@ class UserProfileDocument(Base):
 
     user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
     content = Column(Text, nullable=False, default="")
+    profile_json = Column(Text, nullable=False, default="{}")
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class MoodEntry(Base):
+    __tablename__ = "mood_entries"
+
+    id = Column(String(64), primary_key=True, default=lambda: f"mood_{uuid.uuid4().hex[:24]}")
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    emotion = Column(String(32), nullable=False)
+    intensity = Column(Integer, nullable=False, default=3)
+    context = Column(Text, nullable=True)
+    meal_info = Column(Text, nullable=True)
+    meal_emotion = Column(String(32), nullable=True)
+    source = Column(String(32), nullable=False, default="manual")
+    session_ref = Column(String(100), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class AssessmentResult(Base):
+    __tablename__ = "assessment_results"
+
+    id = Column(String(64), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    assessment_type = Column(String(32), nullable=False)
+    score = Column(Integer, nullable=False)
+    answers_json = Column(Text, nullable=False, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class SessionSummary(Base):
@@ -181,11 +210,28 @@ def _seed_user_with_wallet(
         db.add(wallet)
 
 
+def _sqlite_column_exists(db: Session, table_name: str, column_name: str) -> bool:
+    rows = db.execute(text(f"PRAGMA table_info({table_name})")).fetchall()
+    return any(str(row[1]) == column_name for row in rows)
+
+
+def _run_lightweight_migrations(db: Session) -> None:
+    if not DATABASE_URL.startswith("sqlite"):
+        return
+
+    if _sqlite_column_exists(db, "mood_entries", "session_ref"):
+        return
+
+    db.execute(text("ALTER TABLE mood_entries ADD COLUMN session_ref VARCHAR(100)"))
+
+
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
 
     db = SessionLocal()
     try:
+        _run_lightweight_migrations(db)
+
         # 系统账户
         _seed_user_with_wallet(db, 0, "charity_sink", "system_charity", 0)
         _seed_user_with_wallet(db, 1, "reward_pool", "system_pool", 0)

@@ -10,11 +10,7 @@
  *  ├──────────────────────────┼────────────────────────────────┤
  *  │ agent-text-chunk         │ chatStore.appendStreamingText  │
  *  │ agent-text-end           │ chatStore.commitStreamingText  │
- *  │ supervision-state-change │ sessionStore.applyStateChange  │
- *  │ balance-update           │ sessionStore.applyBalanceUpdate│
- *  │ plan-update              │ sessionStore.applyPlanUpdate   │
- *  │ timer-sync               │ sessionStore.applyTimerSync    │
- *  │ supervision-alert        │ sessionStore.applyAlert        │
+ *  │ emotion-update           │ sessionStore.applyEmotionUpdate│
  *  │ tool-call-status         │ sessionStore.setActiveToolCall │
  *  │ audio, model-info, ctrl  │ onMessage callback (Live2D etc)│
  *  └──────────────────────────┴────────────────────────────────┘
@@ -25,11 +21,14 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { useChatStore } from "@/stores/chatStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useCharacterStore } from "@/stores/characterStore";
-import type { TxMessage, RxMessage } from "@/lib/protocol";
+import type { Locale } from "@/lib/i18n";
+import type { TxMessage, RxMessage, EmotionUpdate } from "@/lib/protocol";
 
 export interface UseWebSocketOptions {
   /** WebSocket URL (default: ws://localhost:12393/ws) */
   url?: string;
+  /** Preferred locale for initial backend session hydration */
+  locale?: Locale;
   /** Called when an RxMessage is received (for audio/model-info/control) */
   onMessage?: (msg: RxMessage) => void;
   /** Auto-connect on mount? */
@@ -63,6 +62,7 @@ const MAX_RECONNECT_ATTEMPTS = 5;
 
 export function useWebSocket({
   url = DEFAULT_URL,
+  locale,
   onMessage,
   autoConnect = true,
 }: UseWebSocketOptions = {}) {
@@ -114,7 +114,7 @@ export function useWebSocket({
     }
 
     connectingRef.current = true;
-    const wsUrl = `${url}?token=${encodeURIComponent(token)}&characterId=${encodeURIComponent(selectedCharacterId || "")}`;
+    const wsUrl = `${url}?token=${encodeURIComponent(token)}&characterId=${encodeURIComponent(selectedCharacterId || "")}&locale=${encodeURIComponent(locale || "")}`;
     manualCloseRef.current = false;
     clearTimeout(reconnectTimerRef.current);
     const ws = new WebSocket(wsUrl);
@@ -169,7 +169,7 @@ export function useWebSocket({
         console.warn("[WS] Invalid message:", err);
       }
     };
-  }, [flushPendingMessages, url]);
+  }, [flushPendingMessages, locale, url]);
 
   /** Dispatch incoming messages to the appropriate stores */
   const dispatch = useCallback((msg: RxMessage) => {
@@ -191,31 +191,12 @@ export function useWebSocket({
         chat.commitStreamingText();
         break;
 
-      // ── Silent UI state updates (from Agent tool-call side-effects) ──
-      case "supervision-state-change":
-        session.applyStateChange(msg.state, {
-          duration: msg.duration,
-          task: msg.task,
-          pauseDuration: msg.pauseDuration,
-          reason: msg.reason,
-        });
+      // ── Silent UI state updates ──
+      case "emotion-update": {
+        const em = msg as EmotionUpdate;
+        session.applyEmotionUpdate(em.emotion, em.intensity, em.cues ?? "", em.suggestion ?? "");
         break;
-
-      case "balance-update":
-        session.applyBalanceUpdate(msg.balance, msg.change, msg.reason);
-        break;
-
-      case "plan-update":
-        session.applyPlanUpdate(msg.plan);
-        break;
-
-      case "timer-sync":
-        session.applyTimerSync(msg.remainingSeconds, msg.totalSeconds);
-        break;
-
-      case "supervision-alert":
-        session.applyAlert(msg.message, msg.severity, msg.streakCount);
-        break;
+      }
 
       case "tool-call-status":
         session.setActiveToolCall(

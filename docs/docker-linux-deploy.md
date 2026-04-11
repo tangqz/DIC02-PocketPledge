@@ -1,4 +1,4 @@
-# PocketPledge Linux Docker Deployment
+# WarmBuddy Linux Docker Deployment
 
 This document provides a production-oriented Docker deployment for Linux.
 

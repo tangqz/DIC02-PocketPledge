@@ -1,11 +1,11 @@
-# PocketPledge
+# WarmBuddy
 
 <div align="center">
-  <img src="imgs/logo.jpg" alt="PocketPledge Logo" width="400" />
+  <img src="imgs/logo.jpg" alt="WarmBuddy Logo" width="400" />
 </div>
 
 <div align="center">
-  <strong>PocketPledge</strong> is an AI companionship and supervision system designed for study-monitoring scenarios.<br>
+  <strong>WarmBuddy</strong> is an AI companionship and supervision system designed for study-monitoring scenarios.<br>
   It integrates <b>Live2D virtual avatars</b>, <b>real-time voice conversations</b>, <b>visual state analysis</b>, and <b>economic penalty mechanisms</b> to create a fully immersive e-learning experience.<br>
   <i>Put your money where your mouth is and end distractions for good!</i>
 </div>
@@ -18,7 +18,7 @@
 
 ## 🌟 Core Highlights & Features
 
-PocketPledge breaks the monotony and rigidity of traditional time-management tools by perfectly blending "companionship" with "supervision":
+WarmBuddy breaks the monotony and rigidity of traditional time-management tools by perfectly blending "companionship" with "supervision":
 
 - 🎭 **Live2D Virtual Companion**: Say goodbye to cold countdown timers! A virtual partner will accompany you while you study, making your learning sessions no longer lonely or dull. The study companion supports long-term memory, giving you the opportunity to build lasting bonds. It also supports visual recognition and is always ready to answer your questions. The powerful Live2D SDK enables your virtual companion to have lifelike real-time movements and expressions.
 - 🗣️ **Real-time Voice Conversations**: Through a combination of powerful on-device ASR (Sherpa-ONNX) and cloud-based TTS, along with asynchronous agent-based reasoning, we achieve low-latency voice interaction.
@@ -143,7 +143,7 @@ After startup, open the corresponding local address in your browser (default `ht
 
 ## 📚 Detailed Documentation
 
-To delve deeper into the internal mechanisms and protocols of PocketPledge, please refer to the following documents:
+To delve deeper into the internal mechanisms and protocols of WarmBuddy, please refer to the following documents:
 
 - 📄 **API Contract**: [docs/api_contract.md](docs/api_contract.md)
 - 🔌 **Protocol Specification**: [docs/ws_protocol.md](docs/ws_protocol.md)

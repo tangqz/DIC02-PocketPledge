@@ -67,7 +67,7 @@ export const useMediaStore = create<MediaState>((set, get) => ({
   vadActive: false,
   micMuted: false,
   micAudioLevel: 0,
-  snapshotInterval: 20,
+  snapshotInterval: 60,
   snapshotActive: false,
   vadSensitivity: 0.35,
 

@@ -18,17 +18,22 @@ from typing import Any, cast
 from openai import AsyncOpenAI
 
 from app.agent.prompts import (
-    CHAT_SYSTEM_PROMPT,
     PROFILE_MEMORY_EXTRACT_PROMPT,
     START_READINESS_PROMPT,
     SYSTEM_AGENT_PROMPT,
     VISION_EVALUATION_PROMPT,
+    get_chat_system_prompt,
     get_character_card,
 )
 from app.agent.token_tracker import track_token_usage
 from app.agent.tools import TOOL_DEFINITIONS, execute_tool
 from app.business.models import SessionLocal
-from app.business.crud import get_user_profile_document
+from app.business.crud import (
+    get_user_profile_document,
+    list_assessment_results,
+    list_meal_journal_entries,
+    list_mood_entries,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -174,32 +179,121 @@ async def _load_profile_content(user_id: str) -> str:
     return await asyncio.to_thread(_sync_load)
 
 
+async def _load_recent_behavior_summary(user_id: str, language_mode: str) -> str:
+    try:
+        uid = int(user_id)
+    except ValueError:
+        return ""
+
+    def _sync_load() -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        db = SessionLocal()
+        try:
+            moods = list_mood_entries(db, uid, limit=8, days=14).get("items", [])
+            meals = list_meal_journal_entries(db, uid, limit=6, days=14).get("items", [])
+            assessments = list_assessment_results(db, uid, limit=6, days=30).get(
+                "items", []
+            )
+            mood_items = [item for item in moods if isinstance(item, dict)]
+            meal_items = [item for item in meals if isinstance(item, dict)]
+            assessment_items = [
+                item for item in assessments if isinstance(item, dict)
+            ]
+            return mood_items, meal_items, assessment_items
+        except Exception:
+            return [], [], []
+        finally:
+            db.close()
+
+    mood_items, meal_items, assessment_items = await asyncio.to_thread(_sync_load)
+    is_en = language_mode.strip().lower() == "en"
+
+    if not mood_items and not meal_items and not assessment_items:
+        return ""
+
+    lines: list[str] = []
+    if is_en:
+        lines.append("=== Recent Mood & Meal Context ===")
+        if mood_items:
+            latest = mood_items[0]
+            lines.append(
+                f"Latest mood: {latest.get('emotion', 'neutral')} ({latest.get('intensity', 1)}/5)"
+            )
+        if meal_items:
+            latest_meal = str(meal_items[0].get("meal_info") or "").strip()
+            if latest_meal:
+                lines.append(f"Latest meal note: {latest_meal[:60]}")
+        if assessment_items:
+            latest_assessment = assessment_items[0]
+            lines.append(
+                f"Latest screening: {latest_assessment.get('assessment_type', 'assessment')}="
+                f"{latest_assessment.get('score', 0)} ({latest_assessment.get('severity', 'unknown')})"
+            )
+    else:
+        lines.append("═══ 最近情绪与饮食上下文 ═══")
+        if mood_items:
+            latest = mood_items[0]
+            lines.append(
+                f"最近一次情绪：{latest.get('emotion', 'neutral')}（{latest.get('intensity', 1)}/5）"
+            )
+        if meal_items:
+            latest_meal = str(meal_items[0].get("meal_info") or "").strip()
+            if latest_meal:
+                lines.append(f"最近饮食记录：{latest_meal[:60]}")
+        if assessment_items:
+            latest_assessment = assessment_items[0]
+            lines.append(
+                f"最近一次自测：{latest_assessment.get('assessment_type', 'assessment')}="
+                f"{latest_assessment.get('score', 0)}（{latest_assessment.get('severity', 'unknown')}）"
+            )
+
+    return "\n".join(lines)
+
+
 def _build_chat_system_prompt(
     profile_content: str,
     current_task: str | None,
     focus_status: str | None,
+    language_mode: str,
 ) -> str:
+    normalized_lang = language_mode.strip().lower()
     now_local = datetime.now().astimezone()
-    parts = [CHAT_SYSTEM_PROMPT]
-    parts.append(
-        "\n═══ 时间上下文 ═══"
-        f"\n当前本地时间：{now_local.isoformat()}"
-        f"\n当前本地日期：{now_local.date().isoformat()}"
-        f"\n时区：{now_local.tzname() or 'local'}"
-    )
-    if profile_content:
-        parts.append(f"\n═══ 用户画像 ═══\n{profile_content}")
-    if current_task:
-        parts.append(f"\n当前学习任务：{current_task}")
-    if focus_status:
-        parts.append(f"\n当前专注状态：{focus_status}")
+    parts = [get_chat_system_prompt(normalized_lang)]
+    if normalized_lang == "en":
+        parts.append(
+            "\n=== Time Context ==="
+            f"\nCurrent local time: {now_local.isoformat()}"
+            f"\nCurrent local date: {now_local.date().isoformat()}"
+            f"\nTimezone: {now_local.tzname() or 'local'}"
+        )
+        if profile_content:
+            parts.append(f"\n=== User Profile ===\n{profile_content}")
+        if current_task:
+            parts.append(f"\nCurrent task: {current_task}")
+        if focus_status:
+            parts.append(f"\nCurrent focus status: {focus_status}")
+    else:
+        parts.append(
+            "\n═══ 时间上下文 ═══"
+            f"\n当前本地时间：{now_local.isoformat()}"
+            f"\n当前本地日期：{now_local.date().isoformat()}"
+            f"\n时区：{now_local.tzname() or 'local'}"
+        )
+        if profile_content:
+            parts.append(f"\n═══ 用户画像 ═══\n{profile_content}")
+        if current_task:
+            parts.append(f"\n当前学习任务：{current_task}")
+        if focus_status:
+            parts.append(f"\n当前专注状态：{focus_status}")
     return "\n".join(parts)
 
 
 def _build_language_block(language_mode: str) -> str:
     normalized = language_mode.strip().lower()
     if normalized == "en":
-        return "\nCurrent language mode: en. You must respond in natural English only."
+        return (
+            "\nLanguage lock: en. You must respond in fluent natural English only."
+            " Never output Chinese characters unless directly quoting the user."
+        )
     return "\n当前语言模式：zh。你必须只用自然中文回复。"
 
 
@@ -210,8 +304,13 @@ def _build_runtime_chat_system_prompt(
     language_mode: str,
     character_id: str,
 ) -> str:
-    base = _build_chat_system_prompt(profile_content, current_task, focus_status)
-    character_card = get_character_card(character_id)
+    base = _build_chat_system_prompt(
+        profile_content,
+        current_task,
+        focus_status,
+        language_mode,
+    )
+    character_card = get_character_card(character_id, language_mode)
     return f"{character_card}\n{base}{_build_language_block(language_mode)}"
 
 
@@ -309,9 +408,19 @@ class LocalLLMClient:
         character_id: str = "milly",
     ) -> AsyncIterator[str]:
         """Stream chat response tokens using the shared provider interface."""
-        profile_content = await _load_profile_content(session_id)
+        profile_content, behavior_context = await asyncio.gather(
+            _load_profile_content(session_id),
+            _load_recent_behavior_summary(session_id, language_mode),
+        )
+        combined_profile = profile_content
+        if behavior_context:
+            combined_profile = (
+                f"{profile_content}\n\n{behavior_context}"
+                if profile_content
+                else behavior_context
+            )
         system_prompt = _build_runtime_chat_system_prompt(
-            profile_content=profile_content,
+            profile_content=combined_profile,
             current_task=current_task,
             focus_status=focus_status,
             language_mode=language_mode,
@@ -378,12 +487,13 @@ class LocalLLMClient:
         images: list[dict[str, Any]],
         current_task: str | None = None,
         session_id: str | None = None,
-    ) -> tuple[bool, str]:
-        """Evaluate whether the user is distracted using a vision model."""
+    ) -> dict[str, Any]:
+        """Evaluate user emotion from camera images using a vision model."""
+        _default = {"emotion": "neutral", "intensity": 1, "cues": "", "suggestion": ""}
         if not images:
-            return False, ""
+            return _default
 
-        prompt = VISION_EVALUATION_PROMPT.format(current_task=current_task or "学习")
+        prompt = VISION_EVALUATION_PROMPT
 
         content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
 
@@ -461,20 +571,24 @@ class LocalLLMClient:
             text = (response.choices[0].message.content or "").strip()
             text = _strip_code_fences(text)
 
-            is_distracted = False
-            reason = ""
             import re
 
             match = re.search(r"\{.*\}", text, re.DOTALL)
             if match:
                 try:
                     data = json.loads(match.group(0))
-                    is_distracted = bool(data.get("is_distracted", False))
-                    reason = str(data.get("reason", ""))
-                except json.JSONDecodeError:
+                    result = {
+                        "emotion": str(data.get("emotion", "neutral")),
+                        "intensity": int(data.get("intensity", 1)),
+                        "cues": str(data.get("cues", "")),
+                        "suggestion": str(data.get("suggestion", "")),
+                    }
+                except (json.JSONDecodeError, ValueError):
                     logger.warning("Failed to parse vision response as JSON: %s", text)
+                    result = _default
             else:
                 logger.warning("No JSON found in vision response: %s", text)
+                result = _default
 
             logger.info(
                 "local vision api response session_id=%s model=%s text=%s",
@@ -482,10 +596,10 @@ class LocalLLMClient:
                 self._vision_model,
                 _truncate_text(text),
             )
-            return is_distracted, reason
+            return result
         except Exception:
             logger.exception("local vision evaluation failed")
-            return False, ""
+            return _default
 
     async def evaluate_start_readiness(
         self,
@@ -702,6 +816,11 @@ class LocalLLMClient:
 
     def _format_system_agent_context(self, inputs: dict[str, Any]) -> str:
         now_local = datetime.now().astimezone()
+        recent_moods = json.dumps(inputs.get("recent_moods", []), ensure_ascii=False)
+        recent_meals = json.dumps(inputs.get("recent_meals", []), ensure_ascii=False)
+        recent_assessments = json.dumps(
+            inputs.get("recent_assessments", []), ensure_ascii=False
+        )
         lines = [
             f"current_time_local: {now_local.isoformat()}",
             f"current_date_local: {now_local.date().isoformat()}",
@@ -710,13 +829,12 @@ class LocalLLMClient:
             f"chat_history:\n{inputs.get('chat_history', '')}",
             f"language_mode: {inputs.get('language_mode', 'zh')}",
             f"character_id: {inputs.get('character_id', 'milly')}",
-            f"supervision_state: {inputs.get('supervision_state', 'setup')}",
-            f"current_task: {inputs.get('current_task', '')}",
-            f"total_focus_seconds: {inputs.get('total_focus_seconds', 0)}",
-            f"focus_time_remaining: {inputs.get('focus_time_remaining', 0)}",
-            f"suggested_focus_seconds: {inputs.get('suggested_focus_seconds', 0)}",
-            f"pause_remaining_seconds: {inputs.get('pause_remaining_seconds', 0)}",
-            f"pause_requests_count: {inputs.get('pause_requests_count', 0)}",
+            f"recent_mood_summary: {inputs.get('recent_mood_summary', '')}",
+            f"recent_meal_summary: {inputs.get('recent_meal_summary', '')}",
+            f"recent_assessment_summary: {inputs.get('recent_assessment_summary', '')}",
+            f"recent_moods: {recent_moods}",
+            f"recent_meals: {recent_meals}",
+            f"recent_assessments: {recent_assessments}",
             f"is_bankrupt: {inputs.get('is_bankrupt', 'false')}",
         ]
         return "\n".join(lines)

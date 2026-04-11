@@ -175,3 +175,119 @@ class TransactionListResponse(BaseModel):
     ok: bool
     user_id: int
     items: List[TransactionItem]
+
+
+# ---------------------------------------------------------------------------
+# Mood entries
+# ---------------------------------------------------------------------------
+
+class MoodEntryCreate(BaseModel):
+    emotion: str = Field(..., min_length=1, max_length=50)
+    intensity: int = Field(default=1, ge=1, le=5)
+    context: str = Field(default="", max_length=500)
+    meal_info: str = Field(default="", max_length=200)
+    meal_emotion: str = Field(default="", max_length=50)
+    source: str = Field(default="manual", max_length=20)
+    session_ref: str | None = Field(default=None, max_length=100)
+
+
+class MoodEntryItem(BaseModel):
+    id: str
+    emotion: str
+    intensity: int
+    context: str = ""
+    meal_info: str = ""
+    meal_emotion: str = ""
+    source: str = "manual"
+    session_ref: str | None = None
+    created_at: str | None = None
+
+
+class MoodEntryListResponse(BaseModel):
+    ok: bool
+    user_id: int
+    items: List[MoodEntryItem]
+
+
+# ---------------------------------------------------------------------------
+# Assessment
+# ---------------------------------------------------------------------------
+
+class AssessmentSubmitRequest(BaseModel):
+    assessment_type: str = Field(..., min_length=1, max_length=32)
+    answers: List[int] = Field(..., min_length=2, max_length=2)
+    session_ref: str | None = Field(default=None, max_length=100)
+
+
+class AssessmentSubmitResponse(BaseModel):
+    ok: bool
+    id: str
+    assessment_type: str
+    score: int
+    severity: str
+    positive_screen: bool
+    reward_granted: int
+    balance_after: int
+    reward_tx_id: str | None = None
+    created_at: str | None = None
+
+
+class AssessmentItem(BaseModel):
+    id: str
+    assessment_type: str
+    score: int
+    severity: str
+    positive_screen: bool
+    answers: List[int]
+    created_at: str | None = None
+
+
+class AssessmentListResponse(BaseModel):
+    ok: bool
+    user_id: int
+    items: List[AssessmentItem]
+
+
+# ---------------------------------------------------------------------------
+# Meal journal / correlation
+# ---------------------------------------------------------------------------
+
+class MealJournalCreate(BaseModel):
+    meal_info: str = Field(..., min_length=1, max_length=200)
+    meal_emotion: str = Field(default="", max_length=50)
+    emotion: str = Field(default="neutral", max_length=50)
+    intensity: int = Field(default=1, ge=1, le=5)
+    context: str = Field(default="", max_length=500)
+    session_ref: str | None = Field(default=None, max_length=100)
+
+
+class MealJournalItem(BaseModel):
+    id: str
+    meal_info: str
+    meal_emotion: str = ""
+    emotion: str = "neutral"
+    intensity: int = 1
+    context: str = ""
+    source: str = "meal"
+    session_ref: str | None = None
+    created_at: str | None = None
+
+
+class MealJournalListResponse(BaseModel):
+    ok: bool
+    user_id: int
+    items: List[MealJournalItem]
+
+
+class MealCorrelationBucket(BaseModel):
+    label: str
+    count: int
+    avg_intensity: float
+
+
+class MealCorrelationResponse(BaseModel):
+    ok: bool
+    user_id: int
+    days: int
+    total_records: int
+    buckets: List[MealCorrelationBucket]

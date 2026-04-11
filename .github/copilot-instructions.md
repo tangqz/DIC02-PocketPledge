@@ -1,4 +1,4 @@
-# PocketPledge — Project Guidelines
+# WarmBuddy — Project Guidelines
 
 AI 学习监督陪伴系统：Live2D 虚拟角色 + 实时语音对话 + 视觉分心检测 + 经济惩罚机制。
 

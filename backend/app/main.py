@@ -174,14 +174,14 @@ async def on_startup():
         logger.exception("Unexpected ASR warmup failure; backend continues startup")
     logger.info(
         "backend startup complete agent_backend=%s asr_provider=%s",
-        os.getenv("AGENT_BACKEND", "mock"),
+        os.getenv("AGENT_BACKEND", "local"),
         os.getenv("MEDIA_AI_ASR_PROVIDER", "sherpa-onnx"),
     )
 
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "study_buddy"}
+    return {"ok": True, "service": "warmbuddy"}
 
 
 app.include_router(auth_router)

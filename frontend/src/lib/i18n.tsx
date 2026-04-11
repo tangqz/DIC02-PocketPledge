@@ -15,7 +15,7 @@ type TranslationDict = Record<string, string>;
 // ── Chinese translations ──
 const zh: TranslationDict = {
   // App
-  "app.title": "PocketPledge",
+  "app.title": "WarmBuddy",
   "app.loading": "加载中…",
 
   // Setup
@@ -28,11 +28,11 @@ const zh: TranslationDict = {
   "setup.screenReady": "屏幕共享已就绪",
   "setup.screenNotReady": "未开启屏幕共享",
   "setup.micLabel": "麦克风",
-  "setup.start": "开始专注",
-  "setup.duration": "专注时长",
+  "setup.start": "开始陪伴",
+  "setup.duration": "陪伴时长",
   "setup.minutes": "分钟",
-  "setup.chatHint": "和你的学习伙伴聊聊今天的计划吧",
-  "setup.agentStartHint": "与助手讨论好计划后，助手会帮你开始专注",
+  "setup.chatHint": "和暖伴聊聊你现在的心情吧",
+  "setup.agentStartHint": "暖伴会根据你的状态给你温柔回应",
 
   // Focus
   "focus.pause": "暂停",
@@ -46,7 +46,7 @@ const zh: TranslationDict = {
   "status.balance": "余额(RMB)",
   "status.timer": "计时",
   "status.focusRemaining": "剩余时间",
-  "status.state.active": "专注中",
+  "status.state.active": "陪伴中",
   "status.state.paused": "已暂停",
   "status.state.setup": "准备中",
   "status.state.completed": "已完成",
@@ -56,7 +56,7 @@ const zh: TranslationDict = {
   "status.pool": "奖池",
 
   // Summary
-  "summary.title": "专注报告",
+  "summary.title": "陪伴小结",
   "summary.totalTime": "总时长",
   "summary.finalBalance": "最终余额",
   "summary.deductions": "总扣除",
@@ -79,8 +79,48 @@ const zh: TranslationDict = {
   "chat.agent": "助手",
   "chat.user": "我",
 
+  // Common
+  "common.close": "关闭",
+  "common.cancel": "取消",
+  "common.refresh": "刷新",
+  "common.loading": "加载中...",
+  "common.submit": "提交",
+  "common.submitFailed": "提交失败",
+  "common.loadFailed": "加载失败",
+  "common.networkRetry": "网络异常，请稍后再试",
+  "common.processing": "系统正在处理你的请求",
+  "common.switchToEnglish": "切换到英文",
+  "common.switchToChinese": "切换到中文",
+
+  // Companion
+  "companion.enableMic": "开启麦克风",
+  "companion.enableCamera": "开启摄像头",
+  "companion.logMood": "记录心情",
+  "companion.logMeal": "记录饮食",
+  "companion.selfCheck": "心理自测",
+  "companion.moodChart": "情绪记录",
+  "companion.moodMeal": "情绪与饮食",
+
+  // Assessment
+  "assessment.title": "心理自测",
+  "assessment.disclaimer": "仅供自我观察，不构成医学诊断。如持续不适，请及时寻求专业帮助。",
+  "assessment.submitAndSave": "提交并记录",
+
+  // Meal
+  "meal.title": "饮食记录",
+  "meal.what": "吃了什么",
+  "meal.whatPlaceholder": "例如：午饭吃了鸡肉沙拉",
+  "meal.afterMood": "饭后情绪",
+  "meal.intensity": "强度",
+  "meal.notesOptional": "备注（可选）",
+  "meal.notesPlaceholder": "比如：吃饭时很赶、和朋友一起吃",
+  "meal.submit": "提交记录",
+  "meal.inputRequired": "请先输入饮食内容",
+  "meal.noRecords": "还没有饮食记录",
+  "meal.correlation": "饮食-情绪关联",
+
   // Auth
-  "auth.loginTitle": "登录 PocketPledge",
+  "auth.loginTitle": "登录 WarmBuddy",
   "auth.registerTitle": "创建账号",
   "auth.username": "用户名",
   "auth.emailOptional": "邮箱（可选）",
@@ -111,7 +151,7 @@ const zh: TranslationDict = {
 
 // ── English translations ──
 const en: TranslationDict = {
-  "app.title": "PocketPledge",
+  "app.title": "WarmBuddy",
   "app.loading": "Loading…",
 
   "setup.title": "Environment Calibration",
@@ -123,11 +163,11 @@ const en: TranslationDict = {
   "setup.screenReady": "Screen Share Ready",
   "setup.screenNotReady": "Screen Share Not Enabled",
   "setup.micLabel": "Microphone",
-  "setup.start": "Start Focus",
-  "setup.duration": "Focus Duration",
+  "setup.start": "Start Companion",
+  "setup.duration": "Companion Duration",
   "setup.minutes": "min",
-  "setup.chatHint": "Chat with your study companion about today's plan",
-  "setup.agentStartHint": "Your agent will start the session once you agree on a plan",
+  "setup.chatHint": "Talk to WarmBuddy about how you feel right now",
+  "setup.agentStartHint": "WarmBuddy responds based on your emotional state",
 
   "focus.pause": "Pause",
   "focus.resume": "Resume",
@@ -139,7 +179,7 @@ const en: TranslationDict = {
   "status.balance": "Balance (RMB)",
   "status.timer": "Timer",
   "status.focusRemaining": "Remaining",
-  "status.state.active": "Focusing",
+  "status.state.active": "Companion Active",
   "status.state.paused": "Paused",
   "status.state.setup": "Setting Up",
   "status.state.completed": "Completed",
@@ -148,7 +188,7 @@ const en: TranslationDict = {
   "status.charity": "Charity",
   "status.pool": "Pool",
 
-  "summary.title": "Focus Report",
+  "summary.title": "Companion Summary",
   "summary.totalTime": "Total Time",
   "summary.finalBalance": "Final Balance",
   "summary.deductions": "Total Deductions",
@@ -168,7 +208,43 @@ const en: TranslationDict = {
   "chat.agent": "Agent",
   "chat.user": "Me",
 
-  "auth.loginTitle": "Sign In to PocketPledge",
+  "common.close": "Close",
+  "common.cancel": "Cancel",
+  "common.refresh": "Refresh",
+  "common.loading": "Loading...",
+  "common.submit": "Submit",
+  "common.submitFailed": "Submit failed",
+  "common.loadFailed": "Failed to load",
+  "common.networkRetry": "Network error, please retry",
+  "common.processing": "System is processing your request",
+  "common.switchToEnglish": "Switch to English",
+  "common.switchToChinese": "Switch to Chinese",
+
+  "companion.enableMic": "Enable Mic",
+  "companion.enableCamera": "Enable Camera",
+  "companion.logMood": "Log mood",
+  "companion.logMeal": "Meal journal",
+  "companion.selfCheck": "Self-check",
+  "companion.moodChart": "Mood chart",
+  "companion.moodMeal": "Mood & Meal",
+
+  "assessment.title": "Quick Self-Check",
+  "assessment.disclaimer": "For self-observation only. This is not a medical diagnosis. Seek professional help if needed.",
+  "assessment.submitAndSave": "Submit",
+
+  "meal.title": "Meal Journal",
+  "meal.what": "What did you eat",
+  "meal.whatPlaceholder": "e.g. chicken salad for lunch",
+  "meal.afterMood": "After-meal mood",
+  "meal.intensity": "Intensity",
+  "meal.notesOptional": "Notes (optional)",
+  "meal.notesPlaceholder": "e.g. rushed meal, ate with friends",
+  "meal.submit": "Submit",
+  "meal.inputRequired": "Please enter meal details",
+  "meal.noRecords": "No meal records yet",
+  "meal.correlation": "Meal-Mood Correlation",
+
+  "auth.loginTitle": "Sign In to WarmBuddy",
   "auth.registerTitle": "Create Account",
   "auth.username": "Username",
   "auth.emailOptional": "Email (optional)",

@@ -121,7 +121,7 @@ wss.on("connection", (ws) => {
                     type: "audio",
                     audio: generateSilentWav(800),
                     actions: { expressions: [resp.expression] },
-                    display_text: { text: resp.text, name: "PocketPledge" },
+                    display_text: { text: resp.text, name: "WarmBuddy" },
                   }),
                 );
               }

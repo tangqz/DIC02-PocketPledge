@@ -7,7 +7,9 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from .models import (
+    AssessmentResult,
     ChatMessage,
+    MoodEntry,
     PauseRequest,
     SessionSummary,
     StudyPlan,
@@ -22,6 +24,10 @@ SERVICE_FEE_PER_HOUR_RMB = Decimal("2.00")
 PENALTY_PER_DISTRACTION = 300  # 单位：分，每走神一次扣3元
 PROFILE_DOC_MAX_CHARS = 4000
 CHAT_MESSAGE_MAX_CHARS = 2000
+MOOD_RECORD_REWARD_CENTS = 50
+MOOD_STREAK_BONUS_CENTS = 200
+ASSESSMENT_REWARD_CENTS = 100
+MOOD_STREAK_DAYS = 3
 
 
 def _focus_fee_cents(planned_focus_minutes: int) -> int:
@@ -42,6 +48,104 @@ def _new_tx_id() -> str:
 
 def _new_session_ref() -> str:
     return f"sess_{uuid.uuid4().hex[:16]}"
+
+
+def _new_mood_id() -> str:
+    return f"mood_{uuid.uuid4().hex[:24]}"
+
+
+def _new_assessment_id() -> str:
+    return f"assess_{uuid.uuid4().hex[:24]}"
+
+
+def _has_reward_today(db: Session, user_id: int, tx_type: str) -> bool:
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    row = (
+        db.query(Transaction.id)
+        .filter(
+            Transaction.tx_type == tx_type,
+            Transaction.to_user_id == user_id,
+            Transaction.created_at >= today_start,
+        )
+        .first()
+    )
+    return row is not None
+
+
+def _current_mood_streak_days(db: Session, user_id: int) -> int:
+    rows = (
+        db.query(MoodEntry.created_at)
+        .filter(MoodEntry.user_id == user_id)
+        .order_by(MoodEntry.created_at.desc())
+        .limit(120)
+        .all()
+    )
+    day_set = {row[0].date() for row in rows if row[0] is not None}
+    if not day_set:
+        return 0
+
+    today = datetime.utcnow().date()
+    if today not in day_set:
+        return 0
+
+    streak = 0
+    cursor = today
+    while cursor in day_set:
+        streak += 1
+        cursor = cursor - timedelta(days=1)
+    return streak
+
+
+def _assessment_severity(assessment_type: str, score: int) -> str:
+    normalized_type = str(assessment_type or "").strip().lower()
+    if normalized_type in {"phq2", "gad2"}:
+        if score <= 2:
+            return "minimal"
+        if score <= 4:
+            return "mild"
+        return "moderate_or_above"
+    return "unknown"
+
+
+def _assessment_positive_screen(assessment_type: str, score: int) -> bool:
+    normalized_type = str(assessment_type or "").strip().lower()
+    if normalized_type in {"phq2", "gad2"}:
+        return score >= 3
+    return False
+
+
+def _grant_positive_reward(
+    db: Session,
+    user_id: int,
+    amount: int,
+    tx_type: str,
+    reason: str,
+    session_ref: str | None = None,
+    meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if amount <= 0:
+        return {"granted": 0, "tx_id": None, "balance_after": _require_wallet(db, user_id).balance}
+
+    user_wallet = _require_wallet_for_update(db, user_id)
+    tx_id = _new_tx_id()
+    user_wallet.balance += amount
+    db.add(
+        Transaction(
+            id=tx_id,
+            tx_type=tx_type,
+            from_user_id=1,
+            to_user_id=user_id,
+            amount=amount,
+            reason=reason,
+            session_ref=session_ref,
+            meta_json=json.dumps(meta or {}, ensure_ascii=False),
+        )
+    )
+    return {
+        "granted": amount,
+        "tx_id": tx_id,
+        "balance_after": user_wallet.balance,
+    }
 
 
 def _get_or_create_user_with_wallet(db: Session, user_id: int) -> tuple[User, Wallet]:
@@ -1052,4 +1156,410 @@ def list_user_transactions(
         "ok": True,
         "user_id": user_id,
         "items": items,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Mood entries
+# ---------------------------------------------------------------------------
+
+def create_mood_entry(
+    db: Session,
+    user_id: int,
+    emotion: str,
+    intensity: int = 1,
+    context: str = "",
+    meal_info: str = "",
+    meal_emotion: str = "",
+    source: str = "manual",
+    session_ref: str | None = None,
+    grant_reward: bool = True,
+) -> dict[str, Any]:
+    if user_id in (0, 1):
+        raise ValueError("cannot create mood entries for system accounts")
+
+    _get_or_create_user_with_wallet(db, user_id)
+
+    normalized_session_ref = session_ref[:100] if session_ref else None
+
+    entry = MoodEntry(
+        id=_new_mood_id(),
+        user_id=user_id,
+        emotion=emotion[:50],
+        intensity=max(1, min(intensity, 5)),
+        context=context[:500] if context else "",
+        meal_info=meal_info[:200] if meal_info else "",
+        meal_emotion=meal_emotion[:50] if meal_emotion else "",
+        source=source[:20] if source else "manual",
+        session_ref=normalized_session_ref,
+    )
+
+    mood_reward = 0
+    streak_bonus = 0
+    streak_days = 0
+    tx_ids: list[str] = []
+
+    db.add(entry)
+    db.flush()
+
+    if grant_reward:
+        mood_reward_result = _grant_positive_reward(
+            db=db,
+            user_id=user_id,
+            amount=MOOD_RECORD_REWARD_CENTS,
+            tx_type="mood_reward",
+            reason=f"Mood logged: {entry.emotion}",
+            session_ref=normalized_session_ref,
+            meta={
+                "source": entry.source,
+                "emotion": entry.emotion,
+                "intensity": entry.intensity,
+                "created_at": _now_iso(),
+            },
+        )
+        mood_reward = int(mood_reward_result["granted"])
+        if mood_reward_result.get("tx_id"):
+            tx_ids.append(str(mood_reward_result["tx_id"]))
+
+        streak_days = _current_mood_streak_days(db, user_id)
+        if streak_days >= MOOD_STREAK_DAYS and not _has_reward_today(db, user_id, "streak_bonus"):
+            streak_bonus_result = _grant_positive_reward(
+                db=db,
+                user_id=user_id,
+                amount=MOOD_STREAK_BONUS_CENTS,
+                tx_type="streak_bonus",
+                reason=f"{streak_days}-day mood streak bonus",
+                session_ref=normalized_session_ref,
+                meta={
+                    "streak_days": streak_days,
+                    "created_at": _now_iso(),
+                },
+            )
+            streak_bonus = int(streak_bonus_result["granted"])
+            if streak_bonus_result.get("tx_id"):
+                tx_ids.append(str(streak_bonus_result["tx_id"]))
+
+    db.commit()
+    db.refresh(entry)
+
+    balance_after = _require_wallet(db, user_id).balance
+    created_at_value = getattr(entry, "created_at", None)
+
+    return {
+        "ok": True,
+        "id": entry.id,
+        "emotion": entry.emotion,
+        "intensity": entry.intensity,
+        "context": entry.context,
+        "meal_info": entry.meal_info,
+        "meal_emotion": entry.meal_emotion,
+        "source": entry.source,
+        "session_ref": entry.session_ref,
+        "mood_reward": mood_reward,
+        "streak_bonus": streak_bonus,
+        "total_reward": mood_reward + streak_bonus,
+        "streak_days": streak_days,
+        "balance_after": balance_after,
+        "reward_tx_ids": tx_ids,
+        "created_at": created_at_value.isoformat() if created_at_value is not None else None,
+    }
+
+
+def list_mood_entries(
+    db: Session,
+    user_id: int,
+    limit: int = 50,
+    days: int | None = None,
+) -> dict[str, Any]:
+    query = db.query(MoodEntry).filter(MoodEntry.user_id == user_id)
+    if days is not None and days > 0:
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        query = query.filter(MoodEntry.created_at >= cutoff)
+    rows = (
+        query.order_by(MoodEntry.created_at.desc())
+        .limit(max(1, min(limit, 200)))
+        .all()
+    )
+    items = [
+        {
+            "id": r.id,
+            "emotion": r.emotion,
+            "intensity": r.intensity,
+            "context": r.context,
+            "meal_info": r.meal_info,
+            "meal_emotion": r.meal_emotion,
+            "source": r.source,
+            "session_ref": r.session_ref,
+            "created_at": getattr(r, "created_at", None).isoformat() if getattr(r, "created_at", None) is not None else None,
+        }
+        for r in rows
+    ]
+    return {"ok": True, "user_id": user_id, "items": items}
+
+
+# ---------------------------------------------------------------------------
+# Assessments
+# ---------------------------------------------------------------------------
+
+def create_assessment_result(
+    db: Session,
+    user_id: int,
+    assessment_type: str,
+    answers: list[int],
+    session_ref: str | None = None,
+    grant_reward: bool = True,
+) -> dict[str, Any]:
+    if user_id in (0, 1):
+        raise ValueError("cannot create assessments for system accounts")
+
+    _get_or_create_user_with_wallet(db, user_id)
+
+    normalized_type = str(assessment_type or "").strip().lower()
+    if normalized_type not in {"phq2", "gad2"}:
+        raise ValueError("assessment_type must be phq2 or gad2")
+
+    normalized_answers: list[int] = []
+    for raw in answers:
+        try:
+            value = int(raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("answers must be integers") from exc
+        if value < 0 or value > 3:
+            raise ValueError("assessment answers must be between 0 and 3")
+        normalized_answers.append(value)
+
+    if len(normalized_answers) != 2:
+        raise ValueError("assessment answers must contain exactly 2 values")
+
+    score = sum(normalized_answers)
+    normalized_session_ref = session_ref[:100] if session_ref else None
+
+    row = AssessmentResult(
+        id=_new_assessment_id(),
+        user_id=user_id,
+        assessment_type=normalized_type,
+        score=score,
+        answers_json=json.dumps({"answers": normalized_answers}, ensure_ascii=False),
+        created_at=datetime.utcnow(),
+    )
+
+    reward_granted = 0
+    reward_tx_id: str | None = None
+
+    db.add(row)
+    db.flush()
+
+    if grant_reward and not _has_reward_today(db, user_id, "assessment_reward"):
+        reward_result = _grant_positive_reward(
+            db=db,
+            user_id=user_id,
+            amount=ASSESSMENT_REWARD_CENTS,
+            tx_type="assessment_reward",
+            reason=f"Assessment completed: {normalized_type}",
+            session_ref=normalized_session_ref,
+            meta={
+                "assessment_type": normalized_type,
+                "score": score,
+                "created_at": _now_iso(),
+            },
+        )
+        reward_granted = int(reward_result["granted"])
+        if reward_result.get("tx_id"):
+            reward_tx_id = str(reward_result["tx_id"])
+
+    db.commit()
+    db.refresh(row)
+
+    balance_after = _require_wallet(db, user_id).balance
+    created_at_value = getattr(row, "created_at", None)
+
+    return {
+        "ok": True,
+        "id": row.id,
+        "assessment_type": row.assessment_type,
+        "score": row.score,
+        "severity": _assessment_severity(row.assessment_type, row.score),
+        "positive_screen": _assessment_positive_screen(row.assessment_type, row.score),
+        "reward_granted": reward_granted,
+        "balance_after": balance_after,
+        "reward_tx_id": reward_tx_id,
+        "created_at": created_at_value.isoformat() if created_at_value is not None else None,
+    }
+
+
+def list_assessment_results(
+    db: Session,
+    user_id: int,
+    assessment_type: str | None = None,
+    limit: int = 20,
+    days: int | None = None,
+) -> dict[str, Any]:
+    query = db.query(AssessmentResult).filter(AssessmentResult.user_id == user_id)
+    if assessment_type:
+        normalized_type = str(assessment_type).strip().lower()
+        query = query.filter(AssessmentResult.assessment_type == normalized_type)
+    if days is not None and days > 0:
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        query = query.filter(AssessmentResult.created_at >= cutoff)
+
+    rows = (
+        query.order_by(AssessmentResult.created_at.desc())
+        .limit(max(1, min(limit, 200)))
+        .all()
+    )
+
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        answers: list[int] = []
+        try:
+            parsed_answers = json.loads(row.answers_json or "{}")
+        except json.JSONDecodeError:
+            parsed_answers = {}
+        if isinstance(parsed_answers, dict):
+            raw_answers = parsed_answers.get("answers")
+            if isinstance(raw_answers, list):
+                for raw in raw_answers:
+                    try:
+                        value = int(raw)
+                    except (TypeError, ValueError):
+                        continue
+                    if 0 <= value <= 3:
+                        answers.append(value)
+
+        created_at_value = getattr(row, "created_at", None)
+        items.append(
+            {
+                "id": row.id,
+                "assessment_type": row.assessment_type,
+                "score": row.score,
+                "severity": _assessment_severity(row.assessment_type, row.score),
+                "positive_screen": _assessment_positive_screen(row.assessment_type, row.score),
+                "answers": answers,
+                "created_at": created_at_value.isoformat() if created_at_value is not None else None,
+            }
+        )
+
+    return {"ok": True, "user_id": user_id, "items": items}
+
+
+# ---------------------------------------------------------------------------
+# Meal journal / correlation
+# ---------------------------------------------------------------------------
+
+def create_meal_journal_entry(
+    db: Session,
+    user_id: int,
+    meal_info: str,
+    meal_emotion: str = "",
+    emotion: str = "neutral",
+    intensity: int = 1,
+    context: str = "",
+    session_ref: str | None = None,
+    grant_reward: bool = True,
+) -> dict[str, Any]:
+    normalized_meal_info = str(meal_info or "").strip()
+    if not normalized_meal_info:
+        raise ValueError("meal_info cannot be empty")
+
+    normalized_emotion = str(emotion or meal_emotion or "neutral").strip().lower() or "neutral"
+    return create_mood_entry(
+        db=db,
+        user_id=user_id,
+        emotion=normalized_emotion,
+        intensity=intensity,
+        context=context,
+        meal_info=normalized_meal_info,
+        meal_emotion=str(meal_emotion or "").strip().lower(),
+        source="meal",
+        session_ref=session_ref,
+        grant_reward=grant_reward,
+    )
+
+
+def list_meal_journal_entries(
+    db: Session,
+    user_id: int,
+    limit: int = 50,
+    days: int | None = None,
+) -> dict[str, Any]:
+    query = db.query(MoodEntry).filter(
+        MoodEntry.user_id == user_id,
+        MoodEntry.meal_info.isnot(None),
+        MoodEntry.meal_info != "",
+    )
+    if days is not None and days > 0:
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        query = query.filter(MoodEntry.created_at >= cutoff)
+
+    rows = (
+        query.order_by(MoodEntry.created_at.desc())
+        .limit(max(1, min(limit, 200)))
+        .all()
+    )
+
+    items = [
+        {
+            "id": row.id,
+            "meal_info": row.meal_info or "",
+            "meal_emotion": row.meal_emotion or "",
+            "emotion": row.emotion,
+            "intensity": row.intensity,
+            "context": row.context or "",
+            "source": row.source,
+            "session_ref": row.session_ref,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+        for row in rows
+    ]
+    return {"ok": True, "user_id": user_id, "items": items}
+
+
+def get_meal_mood_correlation(
+    db: Session,
+    user_id: int,
+    days: int = 30,
+) -> dict[str, Any]:
+    normalized_days = max(1, min(days, 365))
+    listing = list_meal_journal_entries(
+        db=db,
+        user_id=user_id,
+        limit=500,
+        days=normalized_days,
+    )
+    items = listing.get("items", [])
+
+    grouped: dict[str, list[int]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("meal_emotion") or item.get("emotion") or "unspecified").strip().lower()
+        if not label:
+            label = "unspecified"
+        try:
+            raw_intensity = int(item.get("intensity", 1))
+        except (TypeError, ValueError):
+            raw_intensity = 1
+        normalized_intensity = max(1, min(raw_intensity, 5))
+        grouped.setdefault(label, []).append(normalized_intensity)
+
+    buckets: list[dict[str, Any]] = []
+    sorted_labels = sorted(grouped.keys(), key=lambda key: (-len(grouped[key]), key))
+    for label in sorted_labels:
+        values = grouped[label]
+        if not values:
+            continue
+        buckets.append(
+            {
+                "label": label,
+                "count": len(values),
+                "avg_intensity": round(sum(values) / len(values), 2),
+            }
+        )
+
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "days": normalized_days,
+        "total_records": len(items),
+        "buckets": buckets,
     }

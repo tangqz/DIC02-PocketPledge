@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from .dify_proxy import DifyClient, MockDifyClient
+from .mock_agent_client import MockAgentClient
 
 
 _client_instances: dict[str, Any] = {}
@@ -12,12 +12,11 @@ _client_instances: dict[str, Any] = {}
 def get_agent_client() -> Any:
     """Return the configured agent client with singleton reuse.
 
-    Values: "local" | "dify" | "mock" (default).
-    Legacy MEDIA_AI_USE_REAL_DIFY=1 is still respected as a fallback.
+    Values: "local" | "mock".
     """
-    backend = os.getenv("AGENT_BACKEND", "").strip().lower()
-    if backend not in {"local", "dify", "mock"}:
-        backend = "dify" if os.getenv("MEDIA_AI_USE_REAL_DIFY", "0") == "1" else "mock"
+    backend = os.getenv("AGENT_BACKEND", "local").strip().lower()
+    if backend not in {"local", "mock"}:
+        backend = "local"
 
     cached = _client_instances.get(backend)
     if cached is not None:
@@ -27,10 +26,8 @@ def get_agent_client() -> Any:
         from app.agent.local_client import LocalLLMClient
 
         client = LocalLLMClient()
-    elif backend == "dify":
-        client = DifyClient()
     else:
-        client = MockDifyClient()
+        client = MockAgentClient()
 
     _client_instances[backend] = client
     return client

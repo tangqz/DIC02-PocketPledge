@@ -611,6 +611,11 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle, Live2DCanvasProps>(({ onMode
         </div>
       )}
 
+      {IS_DEV && (
+        <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-black/55 px-2 py-1 text-[10px] text-white">
+          {debugText}
+        </div>
+      )}
 
     </div>
   );

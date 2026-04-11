@@ -42,7 +42,7 @@ export default function ChatPanel({
           {activeToolCall?.status === "calling" && (
             <div className="mb-2 flex items-center justify-center gap-2 text-xs font-medium text-accent">
               <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-accent" />
-              系统正在处理您的请求
+              {t("common.processing")}
             </div>
           )}
           <p className="text-center text-sm leading-relaxed text-slate-800">
@@ -66,7 +66,7 @@ export default function ChatPanel({
         {activeToolCall?.status === "calling" && (
           <div className="mb-3 flex justify-center">
             <div className="rounded-2xl border border-accent/30 bg-accent/10 px-4 py-2 text-sm font-medium text-accent backdrop-blur-sm">
-              系统正在处理您的请求
+              {t("common.processing")}
             </div>
           </div>
         )}
