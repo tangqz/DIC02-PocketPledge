@@ -71,6 +71,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   clearStreaming: () => set({ streamingText: "" }),
-  setAgentSpeaking: (speaking) => set({ isAgentSpeaking: speaking }),
+  setAgentSpeaking: (speaking) =>
+    set((state) => (state.isAgentSpeaking === speaking ? state : { isAgentSpeaking: speaking })),
   clearMessages: () => set({ messages: [], streamingText: "" }),
 }));

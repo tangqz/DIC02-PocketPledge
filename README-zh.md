@@ -21,7 +21,6 @@ WarmBuddy 由 React + Live2D 前端和 FastAPI WebSocket 后端组成。用户�
 - `zh` / `en` 双语体验
 - 本地鉴权、SQLite 持久化与长对话画像滚动记忆
 
-![WarmBuddy 界面](imgs/UI-zh.jpg)
 
 ## Monorepo 结构
 

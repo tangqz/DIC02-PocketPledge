@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSend } from "@/lib/sendContext";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useMediaStore } from "@/stores/mediaStore";
@@ -16,7 +16,11 @@ import CharacterMarket from "@/components/Dashboard/CharacterMarket";
 import AssessmentModal from "@/components/Health/AssessmentModal";
 import AssessmentInsightsPanel from "@/components/Health/AssessmentInsightsPanel";
 import MealCorrelationPanel from "@/components/Health/MealCorrelationPanel";
-import MealJournalModal from "@/components/Health/MealJournalModal";
+import MealJournalModal, { type MealJournalSavedPayload } from "@/components/Health/MealJournalModal";
+import MealSupportPanel, {
+  type MealSupportMealContext,
+  type MealSupportPhase,
+} from "@/components/Health/MealSupportPanel";
 import MoodPicker from "@/components/Mood/MoodPicker";
 import MoodChart from "@/components/Mood/MoodChart";
 
@@ -72,19 +76,133 @@ function buildCareHint(emotion: string, intensity: number, locale: "zh" | "en"):
   return "你现在的状态适合继续慢慢聊，不用一下子说很多。";
 }
 
+type MealSupportSuggestionSource = "user" | "meal" | "camera";
+
+interface MealSupportSuggestion {
+  key: string;
+  phase: MealSupportPhase;
+  title: string;
+  body: string;
+  source: MealSupportSuggestionSource;
+}
+
+const NEGATIVE_EMOTIONS = new Set(["sad", "anxious", "stressed", "angry", "tired"]);
+
+function isNegativeEmotion(emotion: string | undefined): boolean {
+  return NEGATIVE_EMOTIONS.has(String(emotion || "").trim().toLowerCase());
+}
+
+function detectMealSupportPhase(text: string): MealSupportPhase | null {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  if (/(刚吃完|吃完了|饭后|吃完很难受|补偿|内疚|羞耻|想吐|不想消化|after.*meal|just ate|post.?meal|compensat)/.test(normalized)) {
+    return "post";
+  }
+  if (/(正在吃|吃到一半|边吃边|饭中|陪我吃|eating now|during.*meal|mid.?meal)/.test(normalized)) {
+    return "during";
+  }
+  if (/(要吃饭了|准备吃饭|饭前|开饭|去吃饭|before.*meal|about to eat|meal time)/.test(normalized)) {
+    return "pre";
+  }
+  return null;
+}
+
+function resolveDefaultMealSupportPhase(
+  latestMeal: MealSupportMealContext | null,
+  currentEmotion: ReturnType<typeof useSessionStore.getState>["currentEmotion"],
+): MealSupportPhase {
+  if (!latestMeal) {
+    return "pre";
+  }
+  if (Date.now() - latestMeal.timestamp > 90 * 60 * 1000) {
+    return "pre";
+  }
+  if (currentEmotion && currentEmotion.intensity >= 3 && isNegativeEmotion(currentEmotion.emotion)) {
+    return "post";
+  }
+  return "during";
+}
+
+function buildMealSupportSuggestion(
+  phase: MealSupportPhase,
+  locale: "zh" | "en",
+  source: MealSupportSuggestionSource,
+  latestMeal: MealSupportMealContext | null,
+  currentEmotion: ReturnType<typeof useSessionStore.getState>["currentEmotion"],
+): Omit<MealSupportSuggestion, "key" | "phase" | "source"> {
+  const mealLabel = latestMeal?.mealInfo ? ` ${latestMeal.mealInfo}` : "";
+  if (locale === "en") {
+    if (phase === "pre") {
+      return {
+        title: "Meal-time Escort is ready",
+        body:
+          source === "user"
+            ? "This sounds like a before-meal moment. WarmBuddy can stay with you through the first hard minutes."
+            : `If this meal${mealLabel} feels loaded, start with a 30-second check-in before it gets heavier.`,
+      };
+    }
+    if (phase === "during") {
+      return {
+        title: "Keep company through this meal",
+        body: "WarmBuddy can switch into a low-pressure meal-time support mode and stay beside you without judgment.",
+      };
+    }
+    return {
+      title: "This looks like a post-meal window",
+      body:
+        source === "camera"
+          ? `Recent emotion signals${currentEmotion ? ` (${emotionLabel(currentEmotion.emotion, locale)} ${currentEmotion.intensity}/5)` : ""} suggest this could be a good moment to enter the ten-minute rescue.`
+          : "WarmBuddy can help you through the ten hardest minutes after the meal, before you rush into self-blame or compensation.",
+    };
+  }
+
+  if (phase === "pre") {
+    return {
+      title: "餐时护航已经准备好",
+      body:
+        source === "user"
+          ? "这听起来像是饭前时刻。暖伴可以先陪你做个 30 秒 check-in，再一起进这顿饭。"
+          : `如果这顿饭${mealLabel}已经让你开始绷起来，可以先开一下护航。`,
+    };
+  }
+  if (phase === "during") {
+    return {
+      title: "这顿饭可以有人陪着你",
+      body: "暖伴可以切到低压力的餐时陪伴模式，只陪你把这几分钟过完，不评价食物。",
+    };
+  }
+  return {
+    title: "现在像是饭后十分钟窗口",
+    body:
+      source === "camera"
+        ? `最近的情绪信号${currentEmotion ? `（${emotionLabel(currentEmotion.emotion, locale)} ${currentEmotion.intensity}/5）` : ""}提示你可能需要一点饭后救援。`
+        : "暖伴可以先陪你把最难的十分钟扛过去，不急着责备自己，也不急着做补偿决定。",
+  };
+}
+
 export default function CompanionLayout() {
   const live2dRef = useRef<Live2DCanvasHandle>(null);
   const lastTapRef = useRef(0);
+  const lastHandledUserMessageIdRef = useRef<string | null>(null);
+  const dismissedMealSupportKeyRef = useRef<string | null>(null);
+  const lastCameraMealNudgeRef = useRef<number | null>(null);
   const send = useSend();
   const { t, locale, setLocale } = useI18n();
   const [showAssessment, setShowAssessment] = useState(false);
   const [showMealJournal, setShowMealJournal] = useState(false);
+  const [showMealSupport, setShowMealSupport] = useState<MealSupportPhase | null>(null);
+  const [mealSupportSuggestion, setMealSupportSuggestion] = useState<MealSupportSuggestion | null>(null);
+  const [latestMealSupportContext, setLatestMealSupportContext] = useState<MealSupportMealContext | null>(null);
   const [showMoodPicker, setShowMoodPicker] = useState(false);
   const [showMoodChart, setShowMoodChart] = useState(false);
   const [showCharacterPanel, setShowCharacterPanel] = useState(false);
 
   const activeToolCall = useSessionStore((s) => s.activeToolCall);
   const currentEmotion = useSessionStore((s) => s.currentEmotion);
+  const messages = useChatStore((s) => s.messages);
   const cameraGranted = useMediaStore((s) => s.cameraGranted);
   const requestCamera = useMediaStore((s) => s.requestCamera);
   const requestMicrophone = useMediaStore((s) => s.requestMicrophone);
@@ -96,6 +214,63 @@ export default function CompanionLayout() {
   const selectedCharacter = useMemo(
     () => CHARACTER_MARKET.find((item) => item.id === selectedCharacterId) ?? null,
     [selectedCharacterId],
+  );
+  const defaultMealSupportPhase = useMemo(
+    () => resolveDefaultMealSupportPhase(latestMealSupportContext, currentEmotion),
+    [currentEmotion, latestMealSupportContext],
+  );
+
+  const requestMealSupportSuggestion = useCallback(
+    (nextSuggestion: MealSupportSuggestion) => {
+      if (showMealSupport) {
+        return;
+      }
+      if (dismissedMealSupportKeyRef.current === nextSuggestion.key) {
+        return;
+      }
+      setMealSupportSuggestion(nextSuggestion);
+    },
+    [showMealSupport],
+  );
+
+  const openMealSupport = useCallback((phase: MealSupportPhase) => {
+    setShowMealJournal(false);
+    setShowMoodPicker(false);
+    setShowAssessment(false);
+    setShowMoodChart(false);
+    setMealSupportSuggestion(null);
+    setShowMealSupport(phase);
+  }, []);
+
+  const dismissMealSupportSuggestion = useCallback(() => {
+    if (mealSupportSuggestion) {
+      dismissedMealSupportKeyRef.current = mealSupportSuggestion.key;
+    }
+    setMealSupportSuggestion(null);
+  }, [mealSupportSuggestion]);
+
+  const handleMealJournalSaved = useCallback(
+    (payload: MealJournalSavedPayload) => {
+      const latestMeal: MealSupportMealContext = {
+        mealInfo: payload.mealInfo,
+        mealEmotion: payload.mealEmotion,
+        intensity: payload.intensity,
+        context: payload.context,
+        timestamp: payload.timestamp,
+      };
+      setLatestMealSupportContext(latestMeal);
+
+      if (payload.intensity >= 3 || isNegativeEmotion(payload.mealEmotion)) {
+        const suggestionCopy = buildMealSupportSuggestion("post", locale, "meal", latestMeal, currentEmotion);
+        requestMealSupportSuggestion({
+          key: `meal:${payload.timestamp}`,
+          phase: "post",
+          source: "meal",
+          ...suggestionCopy,
+        });
+      }
+    },
+    [currentEmotion, locale, requestMealSupportSuggestion],
   );
 
   const interruptAgentOutput = useCallback(() => {
@@ -177,6 +352,69 @@ export default function CompanionLayout() {
     ? `${t("status.balance")}: ${user.balance}`
     : null;
 
+  useEffect(() => {
+    const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+    if (!lastMessage || lastMessage.role !== "user") {
+      return;
+    }
+    if (lastHandledUserMessageIdRef.current === lastMessage.id) {
+      return;
+    }
+    lastHandledUserMessageIdRef.current = lastMessage.id;
+
+    const detectedPhase = detectMealSupportPhase(lastMessage.text);
+    if (!detectedPhase) {
+      return;
+    }
+
+    const suggestionCopy = buildMealSupportSuggestion(
+      detectedPhase,
+      locale,
+      "user",
+      latestMealSupportContext,
+      currentEmotion,
+    );
+    requestMealSupportSuggestion({
+      key: `message:${lastMessage.id}`,
+      phase: detectedPhase,
+      source: "user",
+      ...suggestionCopy,
+    });
+  }, [currentEmotion, latestMealSupportContext, locale, messages, requestMealSupportSuggestion]);
+
+  useEffect(() => {
+    if (!currentEmotion || !latestMealSupportContext || showMealSupport) {
+      return;
+    }
+    if (!isNegativeEmotion(currentEmotion.emotion) || currentEmotion.intensity < 3) {
+      return;
+    }
+    if (Date.now() - latestMealSupportContext.timestamp > 90 * 60 * 1000) {
+      return;
+    }
+    if (currentEmotion.timestamp - latestMealSupportContext.timestamp < 45 * 1000) {
+      return;
+    }
+    if (lastCameraMealNudgeRef.current === latestMealSupportContext.timestamp) {
+      return;
+    }
+    lastCameraMealNudgeRef.current = latestMealSupportContext.timestamp;
+
+    const suggestionCopy = buildMealSupportSuggestion(
+      "post",
+      locale,
+      "camera",
+      latestMealSupportContext,
+      currentEmotion,
+    );
+    requestMealSupportSuggestion({
+      key: `camera:${latestMealSupportContext.timestamp}`,
+      phase: "post",
+      source: "camera",
+      ...suggestionCopy,
+    });
+  }, [currentEmotion, latestMealSupportContext, locale, requestMealSupportSuggestion, showMealSupport]);
+
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-slate-50 animate-fade-in">
       {/* Top bar */}
@@ -245,6 +483,36 @@ export default function CompanionLayout() {
         </div>
       )}
 
+      {mealSupportSuggestion && !showMealSupport && (
+        <div className="z-20 px-4 pb-3">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 rounded-[24px] border border-orange-100 bg-[linear-gradient(135deg,#fff6ef_0%,#fff9f3_55%,#ffffff_100%)] px-4 py-4 shadow-sm md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange-500">
+                {locale === "zh" ? "餐时护航" : "Meal Support"}
+              </p>
+              <p className="mt-1 text-sm font-semibold text-slate-700">{mealSupportSuggestion.title}</p>
+              <p className="mt-1 text-sm text-slate-600">{mealSupportSuggestion.body}</p>
+            </div>
+            <div className="flex shrink-0 gap-2">
+              <button
+                type="button"
+                onClick={() => openMealSupport(mealSupportSuggestion.phase)}
+                className="rounded-full bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-orange-600"
+              >
+                {locale === "zh" ? "进入护航" : "Enter support"}
+              </button>
+              <button
+                type="button"
+                onClick={dismissMealSupportSuggestion}
+                className="rounded-full bg-white px-4 py-2 text-sm font-medium text-slate-500 ring-1 ring-slate-200 transition hover:bg-slate-50"
+              >
+                {locale === "zh" ? "稍后" : "Later"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Live2D avatar */}
       <div className="relative min-h-0 flex-1">
         <div id="live2d-container" className="absolute inset-0">
@@ -271,6 +539,13 @@ export default function CompanionLayout() {
 
       {/* Emotion buttons - vertical on mobile, horizontal on desktop */}
       <div className="fixed bottom-[38%] left-4 z-30 flex flex-col gap-2 md:hidden">
+        <button
+          onClick={() => openMealSupport(defaultMealSupportPhase)}
+          className="flex h-12 w-12 items-center justify-center rounded-full bg-orange-400 text-lg text-white shadow-lg hover:bg-orange-500 active:scale-95"
+          title={locale === "zh" ? "餐时护航" : "Meal support"}
+        >
+          🫶
+        </button>
         <button
           onClick={() => setShowMoodPicker((v) => !v)}
           className="flex h-12 w-12 items-center justify-center rounded-full bg-violet-500 text-xl text-white shadow-lg hover:bg-violet-600 active:scale-95"
@@ -337,6 +612,15 @@ export default function CompanionLayout() {
         📊
       </button>
 
+      <button
+        onClick={() => openMealSupport(defaultMealSupportPhase)}
+        className="fixed bottom-[38%] right-[13.8rem] z-30 hidden items-center gap-2 rounded-full bg-orange-400 px-4 py-2 text-sm font-semibold text-white shadow-lg transition hover:bg-orange-500 active:scale-95 md:flex"
+        title={locale === "zh" ? "餐时护航" : "Meal support"}
+      >
+        <span>🫶</span>
+        <span>{locale === "zh" ? "餐时护航" : "Meal Support"}</span>
+      </button>
+
       {/* Mood picker modal */}
       {showMoodPicker && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/20 backdrop-blur-sm">
@@ -361,7 +645,18 @@ export default function CompanionLayout() {
       {/* Meal journal modal */}
       {showMealJournal && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/20 backdrop-blur-sm">
-          <MealJournalModal onClose={() => setShowMealJournal(false)} />
+          <MealJournalModal onClose={() => setShowMealJournal(false)} onSaved={handleMealJournalSaved} />
+        </div>
+      )}
+
+      {showMealSupport && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-black/20 p-4 backdrop-blur-sm">
+          <MealSupportPanel
+            initialPhase={showMealSupport}
+            latestMeal={latestMealSupportContext}
+            currentEmotion={currentEmotion}
+            onClose={() => setShowMealSupport(null)}
+          />
         </div>
       )}
 

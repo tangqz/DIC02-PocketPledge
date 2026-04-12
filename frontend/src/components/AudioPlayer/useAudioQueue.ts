@@ -26,13 +26,18 @@ interface Callbacks {
 export function useAudioQueue(callbacks: Callbacks) {
   const queueRef = useRef<AudioTask[]>([]);
   const processingRef = useRef(false);
+  const callbacksRef = useRef(callbacks);
   const { setAgentSpeaking } = useChatStore.getState();
+
+  useEffect(() => {
+    callbacksRef.current = callbacks;
+  }, [callbacks]);
 
   const processNext = useCallback(async () => {
     if (processingRef.current) return;
     if (queueRef.current.length === 0) {
       setAgentSpeaking(false);
-      callbacks.onQueueEmpty();
+      callbacksRef.current.onQueueEmpty();
       return;
     }
 
@@ -41,23 +46,23 @@ export function useAudioQueue(callbacks: Callbacks) {
 
     // 1. Set expression
     if (task.expressions.length > 0) {
-      callbacks.setExpression(task.expressions[0]);
+      callbacksRef.current.setExpression(task.expressions[0]);
     }
 
     setAgentSpeaking(true);
 
     // 3. Play audio with lip sync (blocks until done)
     try {
-      await callbacks.playAudio(task.audio);
+      await callbacksRef.current.playAudio(task.audio);
     } catch (error) {
-      callbacks.stopAudio();
+      callbacksRef.current.stopAudio();
       console.error("Audio playback failed in useAudioQueue:", error);
     } finally {
       processingRef.current = false;
       processNext();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [callbacks]);
+  }, [setAgentSpeaking]);
 
   /** Enqueue an audio message from the backend */
   const enqueue = useCallback(
@@ -82,9 +87,9 @@ export function useAudioQueue(callbacks: Callbacks) {
   const interrupt = useCallback(() => {
     queueRef.current = [];
     processingRef.current = false;
-    callbacks.stopAudio();
+    callbacksRef.current.stopAudio();
     setAgentSpeaking(false);
-  }, [callbacks]);
+  }, [setAgentSpeaking]);
 
   /** Current queue length */
   const queueLength = () => queueRef.current.length;

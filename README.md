@@ -21,7 +21,6 @@ WarmBuddy pairs a React + Live2D frontend with a FastAPI WebSocket backend. Afte
 - Bilingual experience in `zh` and `en`
 - Local auth, SQLite persistence, and profile-memory rollover for long conversations
 
-![WarmBuddy UI](imgs/UI-en.jpg)
 
 ## Monorepo Layout
 

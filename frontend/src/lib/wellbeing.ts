@@ -27,6 +27,27 @@ interface MealReflectionPayload {
   totalReward?: number;
 }
 
+interface MealSupportStartedPayload {
+  phase: "pre" | "during" | "post";
+  emotion: string;
+  intensity: number;
+  supportNeed?: string;
+  mealInfo?: string;
+  rescueFocus?: string;
+}
+
+interface MealSupportCompletedPayload {
+  phase: "pre" | "during" | "post";
+  emotion: string;
+  startIntensity: number;
+  endIntensity: number;
+  supportNeed?: string;
+  rescueFocus?: string;
+  microAction?: string;
+  trendInsight?: string;
+  totalReward?: number;
+}
+
 interface AssessmentReflectionPayload {
   phq2Score: number;
   phq2Severity: string;
@@ -62,6 +83,19 @@ function buildSystemResult(tag: string, fields: Record<string, string | number |
     })
     .join(", ");
   return serialized ? `[SYSTEM_RESULT: ${tag}, ${serialized}]` : `[SYSTEM_RESULT: ${tag}]`;
+}
+
+function buildSystemEvent(tag: string, fields: Record<string, string | number | boolean | undefined>): string {
+  const serialized = Object.entries(fields)
+    .filter(([, value]) => value !== undefined && value !== "")
+    .map(([key, value]) => {
+      if (typeof value === "boolean") {
+        return `${key}: ${value ? "yes" : "no"}`;
+      }
+      return `${key}: ${value}`;
+    })
+    .join(", ");
+  return serialized ? `[SYSTEM_EVENT: ${tag}, ${serialized}]` : `[SYSTEM_EVENT: ${tag}]`;
 }
 
 function interruptAgentOutput(send: SendFn): void {
@@ -139,6 +173,40 @@ export function buildMealRecordedReflection(payload: MealReflectionPayload): str
       EMOTION: sanitizeSystemValue(payload.mealEmotion, 40),
       INTENSITY: Math.max(1, Math.min(payload.intensity, 5)),
       NOTES: sanitizeSystemValue(payload.notes, 90) || undefined,
+      POINTS: reward > 0 ? `+${reward}` : undefined,
+    }),
+  ];
+
+  if (reward > 0) {
+    lines.push(buildSystemResult("REWARD_GRANTED", { POINTS: `+${reward}` }));
+  }
+
+  return lines.join("\n");
+}
+
+export function buildMealSupportStartedReflection(payload: MealSupportStartedPayload): string {
+  return buildSystemEvent("MEAL_SUPPORT_STARTED", {
+    PHASE: sanitizeSystemValue(payload.phase, 20),
+    EMOTION: sanitizeSystemValue(payload.emotion, 40),
+    INTENSITY: Math.max(1, Math.min(payload.intensity, 5)),
+    NEED: sanitizeSystemValue(payload.supportNeed, 60) || undefined,
+    MEAL: sanitizeSystemValue(payload.mealInfo, 70) || undefined,
+    RESCUE_FOCUS: sanitizeSystemValue(payload.rescueFocus, 60) || undefined,
+  });
+}
+
+export function buildMealSupportCompletedReflection(payload: MealSupportCompletedPayload): string {
+  const reward = Number(payload.totalReward ?? 0);
+  const lines = [
+    buildSystemResult("MEAL_SUPPORT_COMPLETED", {
+      PHASE: sanitizeSystemValue(payload.phase, 20),
+      EMOTION: sanitizeSystemValue(payload.emotion, 40),
+      START_INTENSITY: Math.max(1, Math.min(payload.startIntensity, 5)),
+      END_INTENSITY: Math.max(1, Math.min(payload.endIntensity, 5)),
+      NEED: sanitizeSystemValue(payload.supportNeed, 60) || undefined,
+      RESCUE_FOCUS: sanitizeSystemValue(payload.rescueFocus, 60) || undefined,
+      MICRO_ACTION: sanitizeSystemValue(payload.microAction, 80) || undefined,
+      TREND: sanitizeSystemValue(payload.trendInsight, 90) || undefined,
       POINTS: reward > 0 ? `+${reward}` : undefined,
     }),
   ];

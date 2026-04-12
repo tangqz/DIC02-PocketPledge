@@ -581,7 +581,7 @@ const Live2DCanvas = forwardRef<Live2DCanvasHandle, Live2DCanvasProps>(({ onMode
         audioContextRef.current = null;
       }
     };
-  }, [activeConfig.url, activeConfig.kScale, config, lastGoodConfig, fallbackToDefault, stopAudio, stopExternalLipSync]);
+  }, [activeConfig.url, activeConfig.kScale, fallbackToDefault, stopAudio, stopExternalLipSync]);
 
   return (
     <div id="live2d" className="relative h-full w-full">

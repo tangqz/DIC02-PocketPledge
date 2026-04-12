@@ -11,6 +11,17 @@ import { API_BASE, useAuthStore } from "@/stores/authStore";
 
 interface MealJournalModalProps {
   onClose?: () => void;
+  onSaved?: (payload: MealJournalSavedPayload) => void;
+}
+
+export interface MealJournalSavedPayload {
+  mealInfo: string;
+  mealEmotion: string;
+  intensity: number;
+  context: string;
+  totalReward: number;
+  balanceAfter: number;
+  timestamp: number;
 }
 
 const MEAL_EMOTIONS = [
@@ -22,7 +33,7 @@ const MEAL_EMOTIONS = [
   { value: "neutral", zh: "一般", en: "neutral" },
 ];
 
-export default function MealJournalModal({ onClose }: MealJournalModalProps) {
+export default function MealJournalModal({ onClose, onSaved }: MealJournalModalProps) {
   const { locale, t } = useI18n();
   const send = useSend();
   const [mealInfo, setMealInfo] = useState("");
@@ -89,6 +100,19 @@ export default function MealJournalModal({ onClose }: MealJournalModalProps) {
           totalReward: reward,
         }),
       );
+      onSaved?.({
+        mealInfo,
+        mealEmotion,
+        intensity,
+        context,
+        totalReward: reward,
+        balanceAfter: balance,
+        timestamp: Date.now(),
+      });
+      if (onClose) {
+        onClose();
+        return;
+      }
       setSuccessText(
         locale === "zh"
           ? `已记录饮食情绪，奖励 +${reward}，余额 ${balance}，暖伴会结合这次记录继续陪你聊。`
@@ -130,7 +154,7 @@ export default function MealJournalModal({ onClose }: MealJournalModalProps) {
             onChange={(event) => setMealInfo(event.target.value)}
             maxLength={200}
             placeholder={t("meal.whatPlaceholder")}
-            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none"
+            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 caret-slate-800 focus:border-sky-400 focus:outline-none"
           />
         </div>
 
@@ -179,7 +203,7 @@ export default function MealJournalModal({ onClose }: MealJournalModalProps) {
             rows={3}
             maxLength={500}
             placeholder={t("meal.notesPlaceholder")}
-            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none"
+            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 caret-slate-800 focus:border-sky-400 focus:outline-none"
           />
         </div>
       </div>
