@@ -265,13 +265,13 @@ def _is_english_mode(language_mode: str) -> bool:
     return str(language_mode).strip().lower() == "en"
 
 
-def _build_auto_greeting_event(language_mode: str) -> str:
+def _build_page_opened_greeting_event(language_mode: str) -> str:
     if _is_english_mode(language_mode):
         return (
-            "[SYSTEM_EVENT: USER_CONNECTED] "
-            "The user just opened the app. Greet them with one short warm sentence."
+            "[SYSTEM_EVENT: PAGE_OPENED] "
+            "The user just opened the webpage. Greet them first with one short warm sentence."
         )
-    return "[SYSTEM_EVENT: USER_CONNECTED] 用户刚刚打开了应用，用一句温暖的话打招呼。"
+    return "[SYSTEM_EVENT: PAGE_OPENED] 用户刚刚打开了页面，请先用一句简短温暖的话主动打招呼。"
 
 
 def _build_emotion_event_instruction(language_mode: str, tired: bool) -> str:
@@ -452,7 +452,7 @@ def _authenticate_ws_token(token: str | None) -> int | None:
 
 @router.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
-    """WarmBuddy WebSocket hub — auth, hydrate, greet, loop."""
+    """WarmBuddy WebSocket hub — auth, hydrate, loop."""
     token = ws.query_params.get("token")
     user_id_int = _authenticate_ws_token(token)
     if user_id_int is None:
@@ -476,10 +476,6 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     await _hydrate_chat_history(user_id, session)
     await send_model_info(user_id, session)
 
-    # Auto-greeting for fresh sessions
-    if not session.chat_history:
-        asyncio.create_task(_send_auto_greeting(user_id, session))
-
     try:
         while True:
             try:
@@ -496,12 +492,12 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             audio_buffers.pop(user_id, None)
 
 
-async def _send_auto_greeting(user_id: str, session: SessionState) -> None:
-    """Send a one-line greeting when user first connects."""
+async def _send_page_opened_greeting(user_id: str, session: SessionState) -> None:
+    """Send a one-line greeting when the authenticated page is opened."""
     try:
         greeting = await stream_agent_reply(
             user_id=user_id,
-            user_text=_build_auto_greeting_event(session.language_mode),
+            user_text=_build_page_opened_greeting_event(session.language_mode),
             images=[],
             current_task=None,
             language_mode=session.language_mode,
@@ -511,7 +507,7 @@ async def _send_auto_greeting(user_id: str, session: SessionState) -> None:
         if greeting:
             await _append_chat(session, user_id, "assistant", greeting)
     except Exception:
-        logger.exception("auto-greeting failed, user_id=%s", user_id)
+        logger.exception("page-opened greeting failed, user_id=%s", user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -572,6 +568,10 @@ async def dispatch_message(
                 "chat-cleared",
                 {"reason": "character_switched", "characterId": character_id},
             )
+        return
+
+    if msg_type == "page-opened":
+        await _send_page_opened_greeting(user_id, session)
         return
 
     if msg_type == "ping":

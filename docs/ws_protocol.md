@@ -102,6 +102,16 @@ ws://localhost:12393/ws?token=<JWT>&locale=zh&characterId=milly
 }
 ```
 
+### `page-opened`
+
+前端在认证通过并挂载主陪伴页面后发送一次，用于触发“打开网页主动问候”。
+
+```json
+{
+  "type": "page-opened"
+}
+```
+
 ### `ping`
 
 心跳保活，后端会返回 `control: pong`。
@@ -113,8 +123,7 @@ ws://localhost:12393/ws?token=<JWT>&locale=zh&characterId=milly
 连接建立后下发：
 
 1. `model-info`（当前角色 + Live2D 配置）
-
-首次空会话还会异步触发自动问候（`agent-text-chunk` / `agent-text-end`）。
+2. 当前页面随后由前端主动发送 `page-opened`，后端据此流式下发首句问候（`agent-text-chunk` / `agent-text-end`，并可伴随音频流）
 
 ### 文本与语音流
 

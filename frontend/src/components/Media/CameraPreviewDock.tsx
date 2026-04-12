@@ -23,7 +23,7 @@ export default function CameraPreviewDock({ className = "" }: CameraPreviewDockP
 
   return (
     <section
-      className={`w-44 overflow-hidden rounded-2xl border border-white/20 bg-slate-950/65 p-1.5 shadow-lg backdrop-blur-md ${className}`.trim()}
+      className={`w-44 overflow-hidden rounded-2xl border border-white/20 bg-slate-950/65 p-1.5 shadow-lg backdrop-blur-md md:w-44 max-w-[35vw] ${className}`.trim()}
     >
       <div className="mb-1 flex items-center justify-between px-1 text-[10px] text-slate-200">
         <span>{t("media.camera")}</span>

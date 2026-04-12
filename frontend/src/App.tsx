@@ -4,7 +4,7 @@
  *  Single layout: Auth gate → CompanionLayout.
  *  No session state machine — open page = start companion.
  * ──────────────────────────────────────────────── */
-import { useCallback, useMemo, useEffect, useState } from "react";
+import { useCallback, useMemo, useEffect, useRef, useState } from "react";
 import { useMediaStore } from "@/stores/mediaStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useAvatarStore } from "@/stores/avatarStore";
@@ -21,6 +21,7 @@ import type { RxMessage, SnapshotImage } from "@/lib/protocol";
 
 /** Inner app — only rendered when authenticated */
 function AuthenticatedApp() {
+  const hasSentPageOpenedRef = useRef(false);
   const micMuted = useMediaStore((s) => s.micMuted);
   const micGranted = useMediaStore((s) => s.micGranted);
   const cameraGranted = useMediaStore((s) => s.cameraGranted);
@@ -84,10 +85,13 @@ function AuthenticatedApp() {
           return;
         }
         if (msg.command === "request-visual-context") {
-          const requestId = msg.payload?.requestId ?? "unknown";
-          const prompt = msg.payload?.prompt ?? "";
-          const sources = msg.payload?.sources ?? ["camera"];
-          void captureVisualContext(sources).then(({ images, error }) => {
+          const requestId = typeof msg.payload?.requestId === "string" ? msg.payload.requestId : "unknown";
+          const prompt = typeof msg.payload?.prompt === "string" ? msg.payload.prompt : "";
+          const sourceCandidates = Array.isArray(msg.payload?.sources) ? msg.payload.sources : ["camera"];
+          const sources = sourceCandidates.filter(
+            (source): source is "camera" | "screen" => source === "camera" || source === "screen",
+          );
+          void captureVisualContext(sources.length > 0 ? sources : ["camera"]).then(({ images, error }) => {
             send({
               type: "capture-context-result",
               requestId,
@@ -106,6 +110,14 @@ function AuthenticatedApp() {
       }
     },
   });
+
+  useEffect(() => {
+    if (hasSentPageOpenedRef.current) {
+      return;
+    }
+    hasSentPageOpenedRef.current = true;
+    send({ type: "page-opened" });
+  }, [send]);
 
   // ── Locale sync ──
   useEffect(() => {

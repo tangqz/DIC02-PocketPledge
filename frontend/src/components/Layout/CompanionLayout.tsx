@@ -196,37 +196,69 @@ export default function CompanionLayout() {
         <ChatPanel expanded onSendText={handleSendText} />
       </div>
 
-      {/* Mood floating button */}
+      {/* Emotion buttons - vertical on mobile, horizontal on desktop */}
+      <div className="fixed bottom-[38%] left-4 z-30 flex flex-col gap-2 md:hidden">
+        <button
+          onClick={() => setShowMoodPicker((v) => !v)}
+          className="flex h-12 w-12 items-center justify-center rounded-full bg-violet-500 text-xl text-white shadow-lg hover:bg-violet-600 active:scale-95"
+          title={t("companion.logMood")}
+        >
+          😊
+        </button>
+        <button
+          onClick={() => setShowMealJournal((v) => !v)}
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-200 text-sm text-emerald-700 shadow hover:bg-emerald-300 active:scale-95"
+          title={t("companion.logMeal")}
+        >
+          🍽
+        </button>
+        <button
+          onClick={() => setShowAssessment((v) => !v)}
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-sky-200 text-sm text-sky-700 shadow hover:bg-sky-300 active:scale-95"
+          title={t("companion.selfCheck")}
+        >
+          📝
+        </button>
+        <button
+          onClick={() => setShowMoodChart((v) => !v)}
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-200 text-sm text-slate-600 shadow hover:bg-slate-300 active:scale-95"
+          title={t("companion.moodChart")}
+        >
+          📊
+        </button>
+      </div>
+
+      {/* Mood floating button - desktop only */}
       <button
         onClick={() => setShowMoodPicker((v) => !v)}
-        className="fixed bottom-[38%] right-4 z-30 flex h-12 w-12 items-center justify-center rounded-full bg-violet-500 text-xl text-white shadow-lg hover:bg-violet-600 active:scale-95"
+        className="fixed bottom-[38%] right-4 z-30 hidden h-12 w-12 items-center justify-center rounded-full bg-violet-500 text-xl text-white shadow-lg hover:bg-violet-600 active:scale-95 md:flex"
         title={t("companion.logMood")}
       >
         😊
       </button>
 
-      {/* Meal journal button */}
+      {/* Meal journal button - desktop only */}
       <button
         onClick={() => setShowMealJournal((v) => !v)}
-        className="fixed bottom-[38%] right-[7.6rem] z-30 flex h-10 w-10 items-center justify-center rounded-full bg-emerald-200 text-sm text-emerald-700 shadow hover:bg-emerald-300 active:scale-95"
+        className="fixed bottom-[38%] right-[7.6rem] z-30 hidden h-10 w-10 items-center justify-center rounded-full bg-emerald-200 text-sm text-emerald-700 shadow hover:bg-emerald-300 active:scale-95 md:flex"
         title={t("companion.logMeal")}
       >
         🍽
       </button>
 
-      {/* Assessment button */}
+      {/* Assessment button - desktop only */}
       <button
         onClick={() => setShowAssessment((v) => !v)}
-        className="fixed bottom-[38%] right-[10.7rem] z-30 flex h-10 w-10 items-center justify-center rounded-full bg-sky-200 text-sm text-sky-700 shadow hover:bg-sky-300 active:scale-95"
+        className="fixed bottom-[38%] right-[10.7rem] z-30 hidden h-10 w-10 items-center justify-center rounded-full bg-sky-200 text-sm text-sky-700 shadow hover:bg-sky-300 active:scale-95 md:flex"
         title={t("companion.selfCheck")}
       >
         📝
       </button>
 
-      {/* Mood chart toggle */}
+      {/* Mood chart toggle - desktop only */}
       <button
         onClick={() => setShowMoodChart((v) => !v)}
-        className="fixed bottom-[38%] right-[4.5rem] z-30 flex h-10 w-10 items-center justify-center rounded-full bg-slate-200 text-sm text-slate-600 shadow hover:bg-slate-300 active:scale-95"
+        className="fixed bottom-[38%] right-[4.5rem] z-30 hidden h-10 w-10 items-center justify-center rounded-full bg-slate-200 text-sm text-slate-600 shadow hover:bg-slate-300 active:scale-95 md:flex"
         title={t("companion.moodChart")}
       >
         📊
@@ -262,7 +294,7 @@ export default function CompanionLayout() {
 
       {/* Assessment modal */}
       {showAssessment && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/20 backdrop-blur-sm">
+        <div className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-black/20 p-4 backdrop-blur-sm">
           <AssessmentModal onClose={() => setShowAssessment(false)} />
         </div>
       )}

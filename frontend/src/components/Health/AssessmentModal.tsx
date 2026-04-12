@@ -139,7 +139,7 @@ export default function AssessmentModal({ onClose }: AssessmentModalProps) {
   };
 
   return (
-    <div className="w-[min(92vw,640px)] rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-xl backdrop-blur-sm">
+    <div className="w-[min(92vw,640px)] max-h-[85vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-xl backdrop-blur-sm">
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-base font-semibold text-slate-700">
           {t("assessment.title")}

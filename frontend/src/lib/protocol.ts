@@ -66,6 +66,10 @@ export interface SetCharacter {
   characterId: string;
 }
 
+export interface PageOpened {
+  type: "page-opened";
+}
+
 export interface PingMessage {
   type: "ping";
 }
@@ -80,6 +84,7 @@ export type TxMessage =
   | CaptureContextResult
   | SetLocale
   | SetCharacter
+  | PageOpened
   | PingMessage;
 
 // ── Downstream (Backend → Frontend)  Rx ──

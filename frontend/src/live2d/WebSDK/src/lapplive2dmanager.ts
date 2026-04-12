@@ -139,19 +139,19 @@ export class LAppLive2DManager {
     const classifyBodyTapRegion = (viewX: number, viewY: number): string => {
       const horizontal = classifyHorizontal(viewX);
 
-      if (viewY > 0.45) {
+      if (viewY > 0.40) {
         return horizontal === 'Center' ? 'Body.Chest' : `Body.Shoulder${horizontal}`;
       }
 
-      if (viewY > -0.05) {
+      if (viewY > 0.10) {
         return horizontal === 'Center' ? 'Body.UpperTorso' : `Body.Arm${horizontal}`;
       }
 
-      if (viewY > -0.5) {
+      if (viewY > -0.30) {
         return horizontal === 'Center' ? 'Body.Waist' : `Body.Waist${horizontal}`;
       }
 
-      if (viewY > -0.95) {
+      if (viewY > -0.75) {
         return horizontal === 'Center' ? 'Body.Thigh' : `Body.Leg${horizontal}`;
       }
 

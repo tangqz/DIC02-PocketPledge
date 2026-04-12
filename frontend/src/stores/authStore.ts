@@ -8,7 +8,23 @@
 import { create } from "zustand";
 
 const TOKEN_KEY = "sb_token";
-export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:12393";
+
+/**
+ * API base URL detection:
+ * 1. Use VITE_API_BASE env var if explicitly set
+ * 2. Otherwise, use relative path (works with Vite proxy in dev mode)
+ * 3. Fallback to localhost for direct file access
+ */
+function getApiBase(): string {
+  if (import.meta.env.VITE_API_BASE) {
+    return import.meta.env.VITE_API_BASE as string;
+  }
+  // Use relative path - Vite proxy will forward to backend
+  // This works for both localhost and LAN access
+  return "";
+}
+
+export const API_BASE = getApiBase();
 
 export interface AuthUser {
   user_id: number;

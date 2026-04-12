@@ -101,10 +101,16 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Study Buddy Backend")
 
-allowed_origins_str = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173")
-allowed_origins = [
-    origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()
-]
+# CORS configuration
+# In development (no ALLOWED_ORIGINS set), allow all origins for LAN access
+# In production, set ALLOWED_ORIGINS environment variable to specific domains
+allowed_origins_str = os.getenv("ALLOWED_ORIGINS", "*")
+if allowed_origins_str == "*":
+    allowed_origins = ["*"]
+else:
+    allowed_origins = [
+        origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()
+    ]
 
 app.add_middleware(
     CORSMiddleware,
