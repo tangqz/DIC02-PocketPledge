@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useI18n } from "@/lib/i18n";
 import { API_BASE, useAuthStore } from "@/stores/authStore";
+import { useSessionStore } from "@/stores/sessionStore";
 
 interface CorrelationBucket {
   label: string;
@@ -25,8 +26,30 @@ const FALLBACK_RESPONSE: MealCorrelationResponse = {
   buckets: [],
 };
 
+const EMOTION_LABELS: Record<string, { zh: string; en: string }> = {
+  happy: { zh: "开心", en: "happy" },
+  calm: { zh: "平静", en: "calm" },
+  anxious: { zh: "焦虑", en: "anxious" },
+  stressed: { zh: "压力大", en: "stressed" },
+  tired: { zh: "疲惫", en: "tired" },
+  neutral: { zh: "一般", en: "neutral" },
+  sad: { zh: "难过", en: "sad" },
+  angry: { zh: "生气", en: "angry" },
+  unspecified: { zh: "未注明", en: "unspecified" },
+};
+
+function emotionLabel(label: string, locale: "zh" | "en"): string {
+  const normalized = label.trim().toLowerCase();
+  const labels = EMOTION_LABELS[normalized];
+  if (!labels) {
+    return normalized;
+  }
+  return locale === "zh" ? labels.zh : labels.en;
+}
+
 export default function MealCorrelationPanel() {
   const { locale, t } = useI18n();
+  const wellbeingSyncVersion = useSessionStore((s) => s.wellbeingSyncVersion);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [response, setResponse] = useState<MealCorrelationResponse>(FALLBACK_RESPONSE);
@@ -57,7 +80,7 @@ export default function MealCorrelationPanel() {
 
   useEffect(() => {
     void loadData();
-  }, [loadData]);
+  }, [loadData, wellbeingSyncVersion]);
 
   const maxCount = useMemo(() => {
     if (response.buckets.length === 0) {
@@ -65,6 +88,7 @@ export default function MealCorrelationPanel() {
     }
     return Math.max(...response.buckets.map((item) => item.count), 1);
   }, [response.buckets]);
+  const leadingBucket = useMemo(() => response.buckets[0] ?? null, [response.buckets]);
 
   return (
     <div className="border-t border-slate-200 px-4 py-3">
@@ -96,12 +120,20 @@ export default function MealCorrelationPanel() {
 
       {!loading && !error && response.total_records > 0 && (
         <div className="space-y-2">
+          {leadingBucket && (
+            <p className="text-[11px] text-slate-500">
+              {locale === "zh"
+                ? `最近 ${response.days} 天里，“${emotionLabel(leadingBucket.label, locale)}”相关记录最多，平均强度 ${leadingBucket.avg_intensity}/5。`
+                : `In the last ${response.days} days, ${emotionLabel(leadingBucket.label, locale)} appears most often, with an average intensity of ${leadingBucket.avg_intensity}/5.`}
+            </p>
+          )}
+
           {response.buckets.map((bucket) => {
             const width = `${Math.round((bucket.count / maxCount) * 100)}%`;
             return (
               <div key={bucket.label}>
                 <div className="mb-1 flex items-center justify-between text-[11px] text-slate-500">
-                  <span>{bucket.label}</span>
+                  <span>{emotionLabel(bucket.label, locale)}</span>
                   <span>
                     {locale === "zh"
                       ? `${bucket.count} 次, 平均强度 ${bucket.avg_intensity}`

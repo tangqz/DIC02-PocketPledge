@@ -24,7 +24,13 @@ interface DayMoodSummary {
   count: number;
   dominantEmotion: string;
   avgIntensity: number;
+  startTimestamp: number;
+  endTimestamp: number;
 }
+
+const DAY_BUCKET_MS = 24 * 60 * 60 * 1000;
+const RECENT_BUCKET_MS = 60 * 60 * 1000;
+const RECENT_BUCKET_COUNT = 12;
 
 const EMOTION_COLORS: Record<string, string> = {
   happy: "bg-green-400",
@@ -49,15 +55,37 @@ const EMOTION_LABELS: Record<string, { zh: string; en: string }> = {
   loved: { zh: "被爱", en: "Loved" },
   stressed: { zh: "压力", en: "Stressed" },
   bored: { zh: "无聊", en: "Bored" },
-  neutral: { zh: "一般", en: "Neutral" },
+  neutral: { zh: "平稳", en: "Neutral" },
 };
 
+const EMOTION_DOMINANCE_WEIGHT: Record<string, number> = {
+  neutral: 0.5,
+  calm: 0.85,
+};
+
+function normalizeEmotion(emotion: string): string {
+  const normalized = emotion.toLowerCase();
+  if (EMOTION_LABELS[normalized]) {
+    return normalized;
+  }
+  if (normalized === "fatigued" || normalized === "sleepy") {
+    return "tired";
+  }
+  if (normalized === "stress") {
+    return "stressed";
+  }
+  if (normalized === "relaxed") {
+    return "calm";
+  }
+  return "neutral";
+}
+
 function emotionColor(emotion: string): string {
-  return EMOTION_COLORS[emotion] ?? "bg-slate-300";
+  return EMOTION_COLORS[normalizeEmotion(emotion)] ?? "bg-slate-300";
 }
 
 function emotionLabel(emotion: string, locale: "zh" | "en"): string {
-  const normalized = emotion.toLowerCase();
+  const normalized = normalizeEmotion(emotion);
   const labels = EMOTION_LABELS[normalized];
   if (!labels) {
     return normalized;
@@ -69,7 +97,8 @@ function toTimestamp(createdAt: string | null | undefined): number | null {
   if (!createdAt) {
     return null;
   }
-  const value = Date.parse(createdAt);
+  const normalized = /(?:z|[+-]\d{2}:\d{2})$/i.test(createdAt) ? createdAt : `${createdAt}Z`;
+  const value = Date.parse(normalized);
   return Number.isNaN(value) ? null : value;
 }
 
@@ -80,79 +109,111 @@ function formatDayLabel(timestamp: number, locale: "zh" | "en"): string {
   return locale === "zh" ? `${m}/${day}` : `${m}/${day}`;
 }
 
-function buildDaySummaries(
-  events: EmotionEvent[],
-  locale: "zh" | "en",
-): DayMoodSummary[] {
-  const end = new Date();
-  end.setHours(0, 0, 0, 0);
+function formatHourLabel(timestamp: number): string {
+  const d = new Date(timestamp);
+  return `${String(d.getHours()).padStart(2, "0")}:00`;
+}
 
-  const grouped = new Map<string, EmotionEvent[]>();
+function summarizeBucket(events: EmotionEvent[]): Pick<DayMoodSummary, "count" | "dominantEmotion" | "avgIntensity"> {
+  if (events.length === 0) {
+    return {
+      count: 0,
+      dominantEmotion: "neutral",
+      avgIntensity: 0,
+    };
+  }
+
+  const scores = new Map<string, number>();
+  let intensitySum = 0;
   for (const event of events) {
-    const dt = new Date(event.timestamp);
-    if (Number.isNaN(dt.getTime())) {
-      continue;
-    }
-    dt.setHours(0, 0, 0, 0);
-    const key = dt.toISOString().slice(0, 10);
-    const bucket = grouped.get(key);
-    if (bucket) {
-      bucket.push(event);
-    } else {
-      grouped.set(key, [event]);
+    const emotion = normalizeEmotion(event.emotion);
+    const intensity = Math.max(1, Math.min(event.intensity, 5));
+    const weight = EMOTION_DOMINANCE_WEIGHT[emotion] ?? 1;
+    intensitySum += intensity;
+    scores.set(emotion, (scores.get(emotion) ?? 0) + intensity * weight);
+  }
+
+  const neutralScore = scores.get("neutral") ?? 0;
+  const nonNeutralEntries = [...scores.entries()].filter(([emotion]) => emotion !== "neutral");
+  let dominantEmotion = "neutral";
+  let dominantScore = neutralScore;
+
+  for (const [emotion, score] of nonNeutralEntries) {
+    if (score > dominantScore || (dominantEmotion === "neutral" && score >= neutralScore * 0.85)) {
+      dominantEmotion = emotion;
+      dominantScore = score;
     }
   }
 
+  return {
+    count: events.length,
+    dominantEmotion,
+    avgIntensity: Math.round((intensitySum / events.length) * 10) / 10,
+  };
+}
+
+function buildFixedBuckets(
+  events: EmotionEvent[],
+  latestBucketStart: number,
+  bucketCount: number,
+  bucketMs: number,
+  labelFormatter: (timestamp: number) => string,
+): DayMoodSummary[] {
   const summaries: DayMoodSummary[] = [];
-  for (let i = 6; i >= 0; i -= 1) {
-    const current = new Date(end);
-    current.setDate(end.getDate() - i);
-    const key = current.toISOString().slice(0, 10);
-    const items = grouped.get(key) ?? [];
 
-    if (items.length === 0) {
-      summaries.push({
-        key,
-        label: formatDayLabel(current.getTime(), locale),
-        count: 0,
-        dominantEmotion: "neutral",
-        avgIntensity: 0,
-      });
-      continue;
-    }
-
-    const freq = new Map<string, number>();
-    let totalIntensity = 0;
-    for (const event of items) {
-      totalIntensity += event.intensity;
-      const normalized = event.emotion.toLowerCase();
-      freq.set(normalized, (freq.get(normalized) ?? 0) + 1);
-    }
-
-    let dominantEmotion = "neutral";
-    let dominantCount = -1;
-    for (const [emotion, count] of freq.entries()) {
-      if (count > dominantCount) {
-        dominantEmotion = emotion;
-        dominantCount = count;
-      }
-    }
-
+  for (let index = bucketCount - 1; index >= 0; index -= 1) {
+    const startTimestamp = latestBucketStart - index * bucketMs;
+    const endTimestamp = startTimestamp + bucketMs;
+    const items = events.filter(
+      (event) => event.timestamp >= startTimestamp && event.timestamp < endTimestamp,
+    );
+    const summary = summarizeBucket(items);
+    const key = `${bucketMs}-${startTimestamp}`;
     summaries.push({
       key,
-      label: formatDayLabel(current.getTime(), locale),
-      count: items.length,
-      dominantEmotion,
-      avgIntensity: Math.round((totalIntensity / items.length) * 10) / 10,
+      label: labelFormatter(startTimestamp),
+      startTimestamp,
+      endTimestamp,
+      ...summary,
     });
   }
 
   return summaries;
 }
 
+function buildDaySummaries(
+  events: EmotionEvent[],
+  locale: "zh" | "en",
+): DayMoodSummary[] {
+  const latestDayStart = new Date();
+  latestDayStart.setHours(0, 0, 0, 0);
+  return buildFixedBuckets(
+    events,
+    latestDayStart.getTime(),
+    7,
+    DAY_BUCKET_MS,
+    (timestamp) => formatDayLabel(timestamp, locale),
+  );
+}
+
+function buildRecentTimeSummaries(
+  events: EmotionEvent[],
+): DayMoodSummary[] {
+  const latestHourStart = new Date();
+  latestHourStart.setMinutes(0, 0, 0);
+  return buildFixedBuckets(
+    events,
+    latestHourStart.getTime(),
+    RECENT_BUCKET_COUNT,
+    RECENT_BUCKET_MS,
+    formatHourLabel,
+  );
+}
+
 export default function MoodChart() {
   const { locale, t } = useI18n();
   const emotionHistory = useSessionStore((s) => s.emotionHistory);
+  const wellbeingSyncVersion = useSessionStore((s) => s.wellbeingSyncVersion);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [entries, setEntries] = useState<MoodEntryItem[]>([]);
@@ -185,7 +246,7 @@ export default function MoodChart() {
 
   useEffect(() => {
     void loadMoodEntries();
-  }, [loadMoodEntries, emotionHistory.length]);
+  }, [loadMoodEntries, wellbeingSyncVersion]);
 
   const mergedHistory = useMemo(() => {
     const fromBackend: EmotionEvent[] = entries
@@ -195,7 +256,7 @@ export default function MoodChart() {
           return null;
         }
         return {
-          emotion: item.emotion,
+          emotion: normalizeEmotion(item.emotion),
           intensity: item.intensity,
           cues: "",
           suggestion: "",
@@ -214,17 +275,49 @@ export default function MoodChart() {
     return [...fromBackend, ...realtimeTail].sort((a, b) => a.timestamp - b.timestamp);
   }, [emotionHistory, entries]);
 
-  const recent = useMemo(() => mergedHistory.slice(-20), [mergedHistory]);
   const daySummaries = useMemo(
     () => buildDaySummaries(mergedHistory, locale),
     [locale, mergedHistory],
+  );
+  const recentTimeSummaries = useMemo(
+    () => buildRecentTimeSummaries(mergedHistory),
+    [mergedHistory],
   );
   const maxAvgIntensity = useMemo(
     () => Math.max(...daySummaries.map((item) => item.avgIntensity), 1),
     [daySummaries],
   );
+  const recentMaxAvgIntensity = useMemo(
+    () => Math.max(...recentTimeSummaries.map((item) => item.avgIntensity), 1),
+    [recentTimeSummaries],
+  );
+  const visibleRecentEmotions = useMemo(
+    () => [...new Set(
+      recentTimeSummaries
+        .filter((item) => item.count > 0)
+        .map((item) => normalizeEmotion(item.dominantEmotion)),
+    )],
+    [recentTimeSummaries],
+  );
+  const weeklySummary = useMemo(() => {
+    if (mergedHistory.length === 0) {
+      return "";
+    }
 
-  if (!loading && !error && recent.length === 0) {
+    const sevenDaysAgo = Date.now() - 7 * DAY_BUCKET_MS;
+    const recentEvents = mergedHistory.filter((item) => item.timestamp >= sevenDaysAgo);
+    if (recentEvents.length === 0) {
+      return "";
+    }
+
+    const summary = summarizeBucket(recentEvents);
+    const label = emotionLabel(summary.dominantEmotion, locale);
+    return locale === "zh"
+      ? `本周主要情绪：${label}，平均强度 ${summary.avgIntensity}/5`
+      : `Main mood this week: ${label}, avg ${summary.avgIntensity}/5`;
+  }, [locale, mergedHistory]);
+
+  if (!loading && !error && mergedHistory.length === 0) {
     return (
       <div className="px-4 py-3 text-center text-xs text-slate-400">
         {locale === "zh" ? "还没有情绪记录" : "No emotion data yet"}
@@ -245,6 +338,10 @@ export default function MoodChart() {
           {t("common.refresh")}
         </button>
       </div>
+
+      {weeklySummary && (
+        <p className="mb-2 text-[11px] text-slate-500">{weeklySummary}</p>
+      )}
 
       {loading && (
         <p className="mb-2 text-xs text-slate-400">
@@ -268,7 +365,7 @@ export default function MoodChart() {
                   <div
                     className={`w-4 rounded-t ${emotionColor(item.dominantEmotion)}`}
                     style={{ height: `${barHeight}px` }}
-                    title={`${item.label} · ${emotionLabel(item.dominantEmotion, locale)} · ${item.avgIntensity}/5`}
+                    title={`${item.label} · ${emotionLabel(item.dominantEmotion, locale)} · ${item.avgIntensity}/5 · ${item.count}`}
                   />
                 </div>
                 <span className="text-[10px] text-slate-400">{item.label}</span>
@@ -278,37 +375,55 @@ export default function MoodChart() {
         </div>
       )}
 
-      {!error && recent.length > 0 && (
+      {!error && (
         <>
           <p className="mb-2 text-[11px] font-medium text-slate-500">
-            {locale === "zh" ? "最近记录" : "Recent Logs"}
+            {locale === "zh" ? "最近 12 小时情绪时间轴" : "Last 12 Hours"}
           </p>
-          <div className="flex items-end gap-1">
-            {recent.map((ev: EmotionEvent, i: number) => (
-              <div
-                key={`${ev.timestamp}-${i}`}
-                className="group relative flex flex-col items-center"
-              >
-                <div
-                  className={`w-3 rounded-t ${emotionColor(ev.emotion)}`}
-                  style={{ height: `${ev.intensity * 8}px` }}
-                  title={`${emotionLabel(ev.emotion, locale)} (${ev.intensity}/5)`}
-                />
-                <div className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100">
-                  {emotionLabel(ev.emotion, locale)} {ev.intensity}/5
+          <p className="mb-2 text-[10px] text-slate-400">
+            {locale === "zh" ? "按 1 小时聚合，显示窗口平均强度" : "Grouped by hour, showing average intensity per window"}
+          </p>
+
+          {recentTimeSummaries.some((item) => item.count > 0) ? (
+            <>
+              <div className="overflow-x-auto pb-1">
+                <div className="grid min-w-[24rem] grid-cols-12 gap-1.5">
+                  {recentTimeSummaries.map((item) => {
+                    const barHeight =
+                      item.count === 0
+                        ? 4
+                        : Math.max(8, Math.round((item.avgIntensity / recentMaxAvgIntensity) * 46));
+
+                    return (
+                      <div key={item.key} className="flex flex-col items-center gap-1">
+                        <div className="flex h-14 items-end">
+                          <div
+                            className={`w-3 rounded-t ${emotionColor(item.dominantEmotion)}`}
+                            style={{ height: `${barHeight}px` }}
+                            title={`${item.label} · ${emotionLabel(item.dominantEmotion, locale)} · ${item.avgIntensity}/5 · ${item.count}`}
+                          />
+                        </div>
+                        <span className="text-[10px] text-slate-400">{item.label}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-            ))}
-          </div>
 
-          <div className="mt-2 flex flex-wrap gap-2">
-            {[...new Set(recent.map((e) => e.emotion.toLowerCase()))].map((emotion) => (
-              <span key={emotion} className="flex items-center gap-1 text-[10px] text-slate-500">
-                <span className={`inline-block h-2 w-2 rounded-full ${emotionColor(emotion)}`} />
-                {emotionLabel(emotion, locale)}
-              </span>
-            ))}
-          </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {visibleRecentEmotions.map((emotion) => (
+                  <span key={emotion} className="flex items-center gap-1 text-[10px] text-slate-500">
+                    <span className={`inline-block h-2 w-2 rounded-full ${emotionColor(emotion)}`} />
+                    {emotionLabel(emotion, locale)}
+                  </span>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="text-xs text-slate-400">
+              {locale === "zh" ? "最近 12 小时暂无新增情绪记录" : "No emotion data in the last 12 hours"}
+            </p>
+          )}
         </>
       )}
     </div>

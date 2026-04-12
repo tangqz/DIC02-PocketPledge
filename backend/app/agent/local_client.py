@@ -344,6 +344,139 @@ def _strip_code_fences(text: str) -> str:
     return stripped
 
 
+_VISION_EMOTION_ALIASES = {
+    "fatigued": "tired",
+    "sleepy": "tired",
+    "stress": "stressed",
+    "relaxed": "calm",
+    "normal": "neutral",
+    "平静": "calm",
+    "一般": "neutral",
+    "正常": "neutral",
+    "疲惫": "tired",
+    "焦虑": "anxious",
+    "压力": "stressed",
+    "开心": "happy",
+    "生气": "angry",
+    "难过": "sad",
+}
+_VISION_ALLOWED_EMOTIONS = {
+    "happy",
+    "sad",
+    "anxious",
+    "stressed",
+    "tired",
+    "neutral",
+    "angry",
+    "calm",
+}
+
+
+def _normalize_vision_emotion(value: Any) -> str:
+    emotion = str(value or "neutral").strip().lower()
+    emotion = _VISION_EMOTION_ALIASES.get(emotion, emotion)
+    return emotion if emotion in _VISION_ALLOWED_EMOTIONS else "neutral"
+
+
+def _extract_json_candidate(text: str) -> str | None:
+    stripped = _strip_code_fences(text)
+    start = stripped.find("{")
+    if start < 0:
+        return None
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for idx in range(start, len(stripped)):
+        ch = stripped[idx]
+        if in_string:
+            if escaped:
+                escaped = False
+                continue
+            if ch == "\\":
+                escaped = True
+                continue
+            if ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == "{":
+            depth += 1
+            continue
+        if ch == "}":
+            depth -= 1
+            if depth == 0:
+                return stripped[start:idx + 1]
+
+    candidate = stripped[start:].strip()
+    if not candidate:
+        return None
+
+    if in_string:
+        candidate += '"'
+    if depth > 0:
+        candidate += "}" * depth
+    candidate = re.sub(r",\s*}$", "}", candidate)
+    return candidate
+
+
+def _parse_partial_vision_fields(text: str) -> dict[str, Any] | None:
+    emotion_match = re.search(r'"emotion"\s*:\s*"([^"\r\n,}]+)', text)
+    if not emotion_match:
+        return None
+
+    intensity_match = re.search(r'"intensity"\s*:\s*(\d+)', text)
+    cues_match = re.search(r'"cues"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)', text, re.DOTALL)
+    suggestion_match = re.search(r'"suggestion"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)', text, re.DOTALL)
+
+    def _clean_fragment(fragment: str | None) -> str:
+        if not fragment:
+            return ""
+        return (
+            fragment
+            .replace(r"\n", " ")
+            .replace(r"\r", " ")
+            .replace(r"\t", " ")
+            .replace(r'\"', '"')
+            .strip()
+            .rstrip(",")
+        )
+
+    intensity = 1
+    if intensity_match:
+        try:
+            intensity = int(intensity_match.group(1))
+        except ValueError:
+            intensity = 1
+
+    return {
+        "emotion": _normalize_vision_emotion(emotion_match.group(1)),
+        "intensity": max(1, min(intensity, 5)),
+        "cues": _clean_fragment(cues_match.group(1) if cues_match else None),
+        "suggestion": _clean_fragment(suggestion_match.group(1) if suggestion_match else None),
+    }
+
+
+def _parse_vision_response_text(text: str) -> dict[str, Any] | None:
+    candidate = _extract_json_candidate(text)
+    if candidate:
+        try:
+            data = json.loads(candidate)
+            return {
+                "emotion": _normalize_vision_emotion(data.get("emotion", "neutral")),
+                "intensity": max(1, min(int(data.get("intensity", 1)), 5)),
+                "cues": str(data.get("cues", "")).strip(),
+                "suggestion": str(data.get("suggestion", "")).strip(),
+            }
+        except (json.JSONDecodeError, TypeError, ValueError):
+            logger.warning("Failed to parse vision response as strict JSON: %s", candidate)
+
+    return _parse_partial_vision_fields(text)
+
+
 class LocalLLMClient:
     """Local LLM client implementing the runtime provider interface."""
 
@@ -562,7 +695,7 @@ class LocalLLMClient:
                 model=self._vision_model,
                 messages=cast(Any, [{"role": "user", "content": content}]),
                 temperature=0,
-                max_tokens=64,
+                max_tokens=160,
                 extra_body=vision_extra,
             )
             if getattr(response, "usage", None):
@@ -571,23 +704,9 @@ class LocalLLMClient:
             text = (response.choices[0].message.content or "").strip()
             text = _strip_code_fences(text)
 
-            import re
-
-            match = re.search(r"\{.*\}", text, re.DOTALL)
-            if match:
-                try:
-                    data = json.loads(match.group(0))
-                    result = {
-                        "emotion": str(data.get("emotion", "neutral")),
-                        "intensity": int(data.get("intensity", 1)),
-                        "cues": str(data.get("cues", "")),
-                        "suggestion": str(data.get("suggestion", "")),
-                    }
-                except (json.JSONDecodeError, ValueError):
-                    logger.warning("Failed to parse vision response as JSON: %s", text)
-                    result = _default
-            else:
-                logger.warning("No JSON found in vision response: %s", text)
+            result = _parse_vision_response_text(text)
+            if result is None:
+                logger.warning("No structured vision payload found in response: %s", text)
                 result = _default
 
             logger.info(

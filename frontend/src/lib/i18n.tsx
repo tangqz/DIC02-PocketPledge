@@ -43,7 +43,7 @@ const zh: TranslationDict = {
   "focus.openChat": "打开对话",
 
   // Status
-  "status.balance": "余额(RMB)",
+  "status.balance": "积分",
   "status.timer": "计时",
   "status.focusRemaining": "剩余时间",
   "status.state.active": "陪伴中",
@@ -176,7 +176,7 @@ const en: TranslationDict = {
   "focus.send": "Send",
   "focus.openChat": "Open Chat",
 
-  "status.balance": "Balance (RMB)",
+  "status.balance": "Points",
   "status.timer": "Timer",
   "status.focusRemaining": "Remaining",
   "status.state.active": "Companion Active",

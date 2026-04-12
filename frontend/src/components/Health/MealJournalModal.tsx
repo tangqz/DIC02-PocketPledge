@@ -1,6 +1,12 @@
 import { useState } from "react";
 
 import { useI18n } from "@/lib/i18n";
+import { useSend } from "@/lib/sendContext";
+import {
+  buildMealRecordedReflection,
+  sendCompanionWellbeingReflection,
+  syncWellbeingAfterSave,
+} from "@/lib/wellbeing";
 import { API_BASE, useAuthStore } from "@/stores/authStore";
 
 interface MealJournalModalProps {
@@ -18,6 +24,7 @@ const MEAL_EMOTIONS = [
 
 export default function MealJournalModal({ onClose }: MealJournalModalProps) {
   const { locale, t } = useI18n();
+  const send = useSend();
   const [mealInfo, setMealInfo] = useState("");
   const [mealEmotion, setMealEmotion] = useState("neutral");
   const [intensity, setIntensity] = useState(2);
@@ -64,10 +71,28 @@ export default function MealJournalModal({ onClose }: MealJournalModalProps) {
       };
       const reward = Number(payload.total_reward ?? 0);
       const balance = Number(payload.balance_after ?? 0);
+      await syncWellbeingAfterSave({
+        emotion: {
+          emotion: mealEmotion,
+          intensity,
+          cues: mealInfo.trim(),
+          suggestion: "",
+        },
+      });
+      sendCompanionWellbeingReflection(
+        send,
+        buildMealRecordedReflection({
+          mealInfo,
+          mealEmotion,
+          intensity,
+          notes: context,
+          totalReward: reward,
+        }),
+      );
       setSuccessText(
         locale === "zh"
-          ? `已记录饮食情绪，奖励 +${reward}，余额 ${balance}`
-          : `Saved meal mood, reward +${reward}, balance ${balance}`,
+          ? `已记录饮食情绪，奖励 +${reward}，余额 ${balance}，暖伴会结合这次记录继续陪你聊。`
+          : `Saved meal mood, reward +${reward}, balance ${balance}. WarmBuddy will respond based on this log.`,
       );
       setMealInfo("");
       setContext("");

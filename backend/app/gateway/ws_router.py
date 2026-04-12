@@ -189,6 +189,9 @@ CAPTURE_MARKER = "<<CAPTURE>>"
 LOG_PREVIEW_LIMIT = 240
 CAPTURE_SOURCES = ["camera"]
 MAX_AGENT_STAGES = 6
+CAMERA_EMOTION_SMOOTH_WINDOW_SECONDS = 8 * 60
+CAMERA_EMOTION_SAMPLE_LIMIT = 4
+CAMERA_MOOD_PERSIST_INTERVAL_SECONDS = 5 * 60
 
 audio_buffers: dict[str, list[float]] = {}
 system_agent = SystemAgentService()
@@ -240,6 +243,115 @@ def _summarize_payload(payload: dict[str, Any]) -> str:
             continue
         summary[key] = value
     return json.dumps(summary, ensure_ascii=False)
+
+
+def _normalize_emotion_name(emotion: Any) -> str:
+    normalized = str(emotion or "neutral").strip().lower()
+    aliases = {
+        "fatigued": "tired",
+        "sleepy": "tired",
+        "stress": "stressed",
+        "relaxed": "calm",
+        "normal": "neutral",
+    }
+    normalized = aliases.get(normalized, normalized)
+    return normalized if normalized in {
+        "happy", "sad", "anxious", "stressed", "tired", "neutral", "angry", "calm",
+    } else "neutral"
+
+
+def _normalize_emotion_payload(
+    emotion_data: dict[str, Any],
+    *,
+    source: str,
+    timestamp: float | None = None,
+) -> dict[str, Any]:
+    normalized_timestamp = timestamp if timestamp is not None else datetime.now(UTC).timestamp()
+    return {
+        "emotion": _normalize_emotion_name(emotion_data.get("emotion", "neutral")),
+        "intensity": max(1, min(_parse_non_negative_int(emotion_data.get("intensity"), 1), 5)),
+        "cues": str(emotion_data.get("cues", "")).strip(),
+        "suggestion": str(emotion_data.get("suggestion", "")).strip(),
+        "source": source,
+        "timestamp": normalized_timestamp,
+    }
+
+
+def _emotion_display_weight(emotion: str) -> float:
+    if emotion == "neutral":
+        return 0.5
+    if emotion == "calm":
+        return 0.85
+    return 1.0
+
+
+def _smooth_camera_emotion(session: SessionState, emotion_data: dict[str, Any]) -> dict[str, Any]:
+    current_ts = float(emotion_data.get("timestamp") or datetime.now(UTC).timestamp())
+    candidates = [
+        sample
+        for sample in session.camera_emotion_samples
+        if isinstance(sample.get("timestamp"), (int, float))
+        and float(sample["timestamp"]) >= current_ts - CAMERA_EMOTION_SMOOTH_WINDOW_SECONDS
+    ]
+    candidates = [*candidates[-(CAMERA_EMOTION_SAMPLE_LIMIT - 1):], emotion_data]
+    if len(candidates) == 1:
+        return emotion_data
+
+    scores: dict[str, float] = {}
+    latest_by_emotion: dict[str, dict[str, Any]] = {}
+    weighted_intensity = 0.0
+    total_weight = 0.0
+
+    denom = max(len(candidates) - 1, 1)
+    for idx, sample in enumerate(candidates):
+        emotion = _normalize_emotion_name(sample.get("emotion"))
+        intensity = max(1, min(_parse_non_negative_int(sample.get("intensity"), 1), 5))
+        recency_weight = 0.85 + (idx / denom) * 0.3
+        score = intensity * _emotion_display_weight(emotion) * recency_weight
+        scores[emotion] = scores.get(emotion, 0.0) + score
+        latest_by_emotion[emotion] = sample
+        weighted_intensity += intensity * recency_weight
+        total_weight += recency_weight
+
+    dominant_emotion = "neutral"
+    dominant_score = -1.0
+    for emotion, score in scores.items():
+        prefer_non_neutral = emotion != "neutral" and dominant_emotion == "neutral" and score >= dominant_score * 0.85
+        if score > dominant_score or prefer_non_neutral:
+            dominant_emotion = emotion
+            dominant_score = score
+
+    avg_intensity = max(1, min(round(weighted_intensity / max(total_weight, 1.0)), 5))
+    if dominant_emotion != "neutral":
+        avg_intensity = max(avg_intensity, 2)
+
+    dominant_payload = latest_by_emotion.get(dominant_emotion, emotion_data)
+    return {
+        "emotion": dominant_emotion,
+        "intensity": avg_intensity,
+        "cues": str(dominant_payload.get("cues", "")).strip(),
+        "suggestion": str(dominant_payload.get("suggestion", "")).strip(),
+        "source": "camera",
+        "timestamp": current_ts,
+    }
+
+
+def _should_persist_camera_mood(session: SessionState, emotion_data: dict[str, Any]) -> bool:
+    current_ts = float(emotion_data.get("timestamp") or datetime.now(UTC).timestamp())
+    last_at = session.last_camera_mood_persisted_at
+    if last_at is None:
+        return True
+
+    current_emotion = _normalize_emotion_name(emotion_data.get("emotion"))
+    current_intensity = max(1, min(_parse_non_negative_int(emotion_data.get("intensity"), 1), 5))
+    if current_ts - last_at >= CAMERA_MOOD_PERSIST_INTERVAL_SECONDS:
+        return True
+    if current_emotion != (session.last_camera_mood_persisted_emotion or "neutral") and current_emotion != "neutral":
+        return True
+    last_intensity = session.last_camera_mood_persisted_intensity or 1
+    if current_emotion != "neutral" and abs(current_intensity - last_intensity) >= 2:
+        return True
+    return False
 
 
 def _split_sys_marker_buffer(buffer: str) -> tuple[str, str, bool]:
@@ -309,6 +421,7 @@ async def _persist_mood_entry(
     mood_data: dict[str, Any],
     source: str,
     session_ref: str | None,
+    grant_reward: bool = True,
 ) -> dict[str, Any] | None:
     try:
         uid = int(user_id)
@@ -339,6 +452,7 @@ async def _persist_mood_entry(
             meal_emotion=meal_emotion,
             source=normalized_source,
             session_ref=session_ref,
+            grant_reward=grant_reward,
         )
     except Exception:
         logger.exception("failed to persist mood entry, user_id=%s source=%s", user_id, normalized_source)
@@ -616,7 +730,9 @@ async def handle_text(user_id: str, session: SessionState, msg: dict[str, Any]) 
     is_tool_result = bool(msg.get("tool_result"))
     await _handle_user_turn(
         user_id=user_id, session=session, text=text, images=images,
-        is_tool_result=is_tool_result, emit_user_transcript=False,
+        is_tool_result=is_tool_result,
+        append_user_message=not is_tool_result,
+        emit_user_transcript=False,
     )
 
 
@@ -937,8 +1053,12 @@ async def handle_screenshot(
     else:
         images_for_vision = []
 
-    emotion_result = await evaluate_vision(
+    raw_emotion_result = await evaluate_vision(
         images_for_vision, session_id=user_id,
+    )
+    emotion_result = _smooth_camera_emotion(
+        session,
+        _normalize_emotion_payload(raw_emotion_result, source="camera"),
     )
 
     emotion = str(emotion_result.get("emotion", "neutral"))
@@ -946,20 +1066,21 @@ async def handle_screenshot(
 
     session.record_emotion(emotion_result)
     await send_emotion_update(user_id, emotion_result)
-    mood_saved = await _persist_mood_entry(
-        user_id=user_id,
-        mood_data=emotion_result,
-        source="camera",
-        session_ref=session.session_ref,
-    )
-    total_reward = int((mood_saved or {}).get("total_reward", 0))
-    if total_reward > 0:
-        await send_tool_call_status(
-            user_id,
-            "reward.mood",
-            "success",
-            f"+{total_reward} points",
+
+    if _should_persist_camera_mood(session, emotion_result):
+        mood_saved = await _persist_mood_entry(
+            user_id=user_id,
+            mood_data=emotion_result,
+            source="camera",
+            session_ref=session.session_ref,
+            grant_reward=False,
         )
+        if mood_saved is not None:
+            session.last_camera_mood_persisted_at = float(
+                emotion_result.get("timestamp") or datetime.now(UTC).timestamp()
+            )
+            session.last_camera_mood_persisted_emotion = emotion
+            session.last_camera_mood_persisted_intensity = intensity
 
     # React to strong negative emotions
     if emotion in ("sad", "anxious", "stressed", "angry") and intensity >= 3:

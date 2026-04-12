@@ -1,6 +1,12 @@
 import { useMemo, useState } from "react";
 
 import { useI18n } from "@/lib/i18n";
+import { useSend } from "@/lib/sendContext";
+import {
+  buildAssessmentRecordedReflection,
+  sendCompanionWellbeingReflection,
+  syncWellbeingAfterSave,
+} from "@/lib/wellbeing";
 import { API_BASE, useAuthStore } from "@/stores/authStore";
 
 type AssessmentType = "phq2" | "gad2";
@@ -62,6 +68,7 @@ const OPTIONS = [
 
 export default function AssessmentModal({ onClose }: AssessmentModalProps) {
   const { locale, t } = useI18n();
+  const send = useSend();
   const [answers, setAnswers] = useState<[number, number, number, number]>([0, 0, 0, 0]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>("");
@@ -122,14 +129,29 @@ export default function AssessmentModal({ onClose }: AssessmentModalProps) {
             ? "moderate"
             : "low";
 
-      setResult({
+      const nextResult: CombinedAssessmentResult = {
         phq2,
         gad2,
         totalReward: phq2.reward_granted + gad2.reward_granted,
         balanceAfter: Math.max(phq2.balance_after, gad2.balance_after),
         shouldSeekSupport,
         riskLevel,
-      });
+      };
+
+      setResult(nextResult);
+      await syncWellbeingAfterSave();
+      sendCompanionWellbeingReflection(
+        send,
+        buildAssessmentRecordedReflection({
+          phq2Score: phq2.score,
+          phq2Severity: phq2.severity,
+          gad2Score: gad2.score,
+          gad2Severity: gad2.severity,
+          totalReward: nextResult.totalReward,
+          riskLevel,
+          shouldSeekSupport,
+        }),
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("common.networkRetry");
       setError(msg || t("common.networkRetry"));

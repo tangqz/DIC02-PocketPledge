@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from time import time
 from typing import Any
 
 
@@ -16,6 +17,10 @@ class SessionState:
     # ── Emotion tracking ──
     current_emotion: dict[str, Any] | None = None
     emotion_history: list[dict[str, Any]] = field(default_factory=list)
+    camera_emotion_samples: list[dict[str, Any]] = field(default_factory=list)
+    last_camera_mood_persisted_at: float | None = None
+    last_camera_mood_persisted_emotion: str | None = None
+    last_camera_mood_persisted_intensity: int | None = None
     # ── Chat ring buffer ──
     chat_history: list[dict[str, str]] = field(default_factory=list)
     profile_rollover_buffer: list[dict[str, str]] = field(default_factory=list)
@@ -69,10 +74,25 @@ class SessionState:
 
     def record_emotion(self, emotion_data: dict[str, Any]) -> None:
         """Record an emotion detection result."""
-        self.current_emotion = emotion_data
-        self.emotion_history.append(emotion_data)
+        event = dict(emotion_data)
+        timestamp = event.get("timestamp")
+        if not isinstance(timestamp, (int, float)):
+            timestamp = time()
+        event["timestamp"] = float(timestamp)
+        self.current_emotion = event
+        self.emotion_history.append(event)
         if len(self.emotion_history) > 200:
             self.emotion_history = self.emotion_history[-200:]
+
+        if str(event.get("source", "")).strip().lower() == "camera":
+            self.camera_emotion_samples.append(event)
+            cutoff = float(timestamp) - 15 * 60
+            self.camera_emotion_samples = [
+                sample
+                for sample in self.camera_emotion_samples
+                if isinstance(sample.get("timestamp"), (int, float))
+                and float(sample["timestamp"]) >= cutoff
+            ]
 
     def set_pending_capture(
         self,

@@ -16,11 +16,13 @@ interface SessionState {
   currentEmotion: EmotionEvent | null;
   emotionHistory: EmotionEvent[];
   activeToolCall: { tool: string; status: string } | null;
+  wellbeingSyncVersion: number;
 
   applyEmotionUpdate: (emotion: string, intensity: number, cues: string, suggestion: string) => void;
   setActiveToolCall: (tc: { tool: string; status: string } | null) => void;
   setIsConnected: (connected: boolean) => void;
   setDegradedMode: (degraded: boolean) => void;
+  markWellbeingUpdated: () => void;
   reset: () => void;
 }
 
@@ -30,6 +32,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   currentEmotion: null,
   emotionHistory: [],
   activeToolCall: null,
+  wellbeingSyncVersion: 0,
 
   applyEmotionUpdate: (emotion, intensity, cues, suggestion) => {
     const event: EmotionEvent = {
@@ -48,6 +51,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   setActiveToolCall: (tc) => set({ activeToolCall: tc }),
   setIsConnected: (connected) => set({ isConnected: connected }),
   setDegradedMode: (degraded) => set({ degradedMode: degraded }),
+  markWellbeingUpdated: () =>
+    set((state) => ({ wellbeingSyncVersion: state.wellbeingSyncVersion + 1 })),
 
   reset: () =>
     set({
@@ -56,5 +61,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       currentEmotion: null,
       emotionHistory: [],
       activeToolCall: null,
+      wellbeingSyncVersion: 0,
     }),
 }));

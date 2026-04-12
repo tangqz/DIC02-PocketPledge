@@ -14,10 +14,63 @@ import Live2DCanvas, { type Live2DCanvasHandle } from "@/components/Live2DCanvas
 import CameraPreviewDock from "@/components/Media/CameraPreviewDock";
 import CharacterMarket from "@/components/Dashboard/CharacterMarket";
 import AssessmentModal from "@/components/Health/AssessmentModal";
+import AssessmentInsightsPanel from "@/components/Health/AssessmentInsightsPanel";
 import MealCorrelationPanel from "@/components/Health/MealCorrelationPanel";
 import MealJournalModal from "@/components/Health/MealJournalModal";
 import MoodPicker from "@/components/Mood/MoodPicker";
 import MoodChart from "@/components/Mood/MoodChart";
+
+const EMOTION_LABELS: Record<string, { zh: string; en: string }> = {
+  happy: { zh: "开心", en: "Happy" },
+  sad: { zh: "难过", en: "Sad" },
+  anxious: { zh: "焦虑", en: "Anxious" },
+  stressed: { zh: "压力大", en: "Stressed" },
+  angry: { zh: "生气", en: "Angry" },
+  tired: { zh: "疲惫", en: "Tired" },
+  calm: { zh: "平静", en: "Calm" },
+  neutral: { zh: "平稳", en: "Neutral" },
+  loved: { zh: "被爱", en: "Loved" },
+};
+
+function emotionLabel(emotion: string, locale: "zh" | "en"): string {
+  const normalized = emotion.trim().toLowerCase();
+  const labels = EMOTION_LABELS[normalized];
+  if (!labels) {
+    return normalized;
+  }
+  return locale === "zh" ? labels.zh : labels.en;
+}
+
+function buildCareHint(emotion: string, intensity: number, locale: "zh" | "en"): string {
+  const normalized = emotion.trim().toLowerCase();
+  if (locale === "en") {
+    if (normalized === "sad" || normalized === "anxious" || normalized === "stressed" || normalized === "angry") {
+      return intensity >= 4
+        ? "This looks like a heavy moment. Start with the one thing that feels hardest right now."
+        : "You seem a bit tense. A short check-in with yourself is enough for now.";
+    }
+    if (normalized === "tired") {
+      return "Your energy looks low. Loosen your shoulders and slow down for a minute.";
+    }
+    if (normalized === "happy" || normalized === "calm" || normalized === "loved") {
+      return "This is a good moment to notice what is helping and keep a little of it with you.";
+    }
+    return "You can keep talking from this state, one small feeling at a time.";
+  }
+
+  if (normalized === "sad" || normalized === "anxious" || normalized === "stressed" || normalized === "angry") {
+    return intensity >= 4
+      ? "这会儿可能有点重，先从最卡住你的那一件事说起就够了。"
+      : "你现在有点绷着，先轻轻照看一下自己的感受就好。";
+  }
+  if (normalized === "tired") {
+    return "你像是在硬撑，先松一松肩颈，慢一点也没关系。";
+  }
+  if (normalized === "happy" || normalized === "calm" || normalized === "loved") {
+    return "现在的状态挺珍贵，可以顺手记住是什么让你稍微好一点。";
+  }
+  return "你现在的状态适合继续慢慢聊，不用一下子说很多。";
+}
 
 export default function CompanionLayout() {
   const live2dRef = useRef<Live2DCanvasHandle>(null);
@@ -36,6 +89,7 @@ export default function CompanionLayout() {
   const requestCamera = useMediaStore((s) => s.requestCamera);
   const requestMicrophone = useMediaStore((s) => s.requestMicrophone);
   const micGranted = useMediaStore((s) => s.micGranted);
+  const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const selectedCharacterId = useCharacterStore((s) => s.selectedCharacterId);
 
@@ -113,8 +167,14 @@ export default function CompanionLayout() {
     [send],
   );
 
-  const emotionLabel = currentEmotion
-    ? `${currentEmotion.emotion} (${currentEmotion.intensity}/5)`
+  const emotionStatusLabel = currentEmotion
+    ? `${emotionLabel(currentEmotion.emotion, locale)} ${currentEmotion.intensity}/5`
+    : null;
+  const careHint = currentEmotion
+    ? buildCareHint(currentEmotion.emotion, currentEmotion.intensity, locale)
+    : null;
+  const balanceLabel = user?.balance !== undefined
+    ? `${t("status.balance")}: ${user.balance}`
     : null;
 
   return (
@@ -125,9 +185,14 @@ export default function CompanionLayout() {
           {t("app.title")}
         </span>
         <div className="flex items-center gap-2">
-          {emotionLabel && (
+          {balanceLabel && (
+            <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs text-amber-700">
+              {balanceLabel}
+            </span>
+          )}
+          {emotionStatusLabel && (
             <span className="rounded-full bg-violet-100 px-2.5 py-0.5 text-xs text-violet-700">
-              {emotionLabel}
+              {emotionStatusLabel}
             </span>
           )}
           <button
@@ -171,6 +236,14 @@ export default function CompanionLayout() {
           </button>
         </div>
       </div>
+
+      {careHint && (
+        <div className="z-20 px-4 pb-2">
+          <div className="mx-auto w-full max-w-xl rounded-2xl border border-amber-100 bg-white/85 px-4 py-2 text-center text-xs text-slate-600 shadow-sm backdrop-blur">
+            {careHint}
+          </div>
+        </div>
+      )}
 
       {/* Live2D avatar */}
       <div className="relative min-h-0 flex-1">
@@ -315,6 +388,7 @@ export default function CompanionLayout() {
           </div>
           <MoodChart />
           <MealCorrelationPanel />
+          <AssessmentInsightsPanel />
         </div>
       )}
     </div>

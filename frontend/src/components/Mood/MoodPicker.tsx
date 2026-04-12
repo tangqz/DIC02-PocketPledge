@@ -1,4 +1,11 @@
 import { useState, useCallback } from "react";
+
+import { useSend } from "@/lib/sendContext";
+import {
+  buildMoodRecordedReflection,
+  sendCompanionWellbeingReflection,
+  syncWellbeingAfterSave,
+} from "@/lib/wellbeing";
 import { useAuthStore, API_BASE } from "@/stores/authStore";
 import { useI18n } from "@/lib/i18n";
 
@@ -22,14 +29,17 @@ export default function MoodPicker({ onClose }: MoodPickerProps) {
   const [intensity, setIntensity] = useState(3);
   const [context, setContext] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
   const { locale } = useI18n();
+  const send = useSend();
 
   const submit = useCallback(async () => {
     if (!selected) return;
     setSubmitting(true);
+    setError("");
     try {
       const token = useAuthStore.getState().token;
-      await fetch(`${API_BASE}/api/business/me/mood`, {
+      const response = await fetch(`${API_BASE}/api/business/me/mood`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -42,13 +52,43 @@ export default function MoodPicker({ onClose }: MoodPickerProps) {
           source: "manual",
         }),
       });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { detail?: string };
+        setError(payload.detail ?? (locale === "zh" ? "记录失败，请稍后再试" : "Failed to save mood"));
+        return;
+      }
+
+      const payload = (await response.json()) as {
+        total_reward?: number;
+        streak_days?: number;
+      };
+      await syncWellbeingAfterSave({
+        emotion: {
+          emotion: selected,
+          intensity,
+          cues: context.trim(),
+          suggestion: "",
+        },
+      });
+      sendCompanionWellbeingReflection(
+        send,
+        buildMoodRecordedReflection({
+          emotion: selected,
+          intensity,
+          context,
+          totalReward: Number(payload.total_reward ?? 0),
+          streakDays: Number(payload.streak_days ?? 0),
+        }),
+      );
       onClose?.();
     } catch (err) {
       console.error("Failed to submit mood:", err);
+      setError(locale === "zh" ? "网络异常，请稍后再试" : "Network error, please retry");
     } finally {
       setSubmitting(false);
     }
-  }, [selected, intensity, context, onClose]);
+  }, [context, intensity, locale, onClose, selected, send]);
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-xl backdrop-blur-sm">
@@ -127,6 +167,8 @@ export default function MoodPicker({ onClose }: MoodPickerProps) {
           </div>
         </>
       )}
+
+      {error && <p className="mt-2 text-xs text-rose-600">{error}</p>}
     </div>
   );
 }
